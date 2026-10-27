@@ -5,7 +5,6 @@ import {
   MARKDOWN_MIME,
   ROBOTS_PATH,
   SITEMAP_PATH,
-  markdownPathFor,
 } from "../shared/conventions.js"
 import { getLinks, getMeta, type HtmlFacts } from "./html.js"
 import { looksLikeHtml, type FetchResult } from "./fetch.js"
@@ -91,6 +90,9 @@ function isMissing(r: FetchResult): boolean {
     r.body.trim() === ""
   )
 }
+
+/** " (<error>)" when the fetch itself failed (timeout, network), else "". */
+const why = (r: FetchResult): string => (r.error !== undefined ? ` (${r.error})` : "")
 
 function pathAndQuery(url: string): string {
   try {
@@ -202,10 +204,12 @@ function checkJsonLd({ html }: AuditInputs): Outcome {
 
 function checkRobots({ page, robots }: AuditInputs): Outcome {
   const missingFix = "Add robots.txt; webForAgents() generates one from robots.ai.training / robots.ai.search."
-  if (robots.error === undefined && robots.status >= 500) {
-    return fail(`${ROBOTS_PATH} returned HTTP ${robots.status}`, "Fix the server error on /robots.txt; crawlers may treat the whole site as disallowed.")
+  const serverFix = "Fix the server error on /robots.txt; crawlers may treat the whole site as disallowed."
+  if (robots.status >= 500) return fail(`${ROBOTS_PATH} returned HTTP ${robots.status}`, serverFix)
+  if (robots.status === 0 && robots.error !== undefined) {
+    return fail(`${ROBOTS_PATH} unreachable (${robots.error})`, serverFix)
   }
-  if (isMissing(robots)) return warn(`${ROBOTS_PATH} not found`, missingFix)
+  if (isMissing(robots)) return warn(`${ROBOTS_PATH} not found${why(robots)}`, missingFix)
   const parsed = parseRobots(robots.body)
   const path = pathAndQuery(page.finalUrl)
   if (!isAllowed(parsed, "*", path)) {
@@ -232,7 +236,7 @@ const stripSlash = (u: string): string => u.replace(/\/+$/, "")
 
 function checkSitemap({ page, sitemap }: AuditInputs): Outcome {
   const missingFix = "Serve /sitemap.xml (webForAgents() generates it) and reference it from robots.txt."
-  if (isMissing(sitemap)) return fail(`${SITEMAP_PATH} not found`, missingFix)
+  if (isMissing(sitemap)) return fail(`${SITEMAP_PATH} not found${why(sitemap)}`, missingFix)
   const body = sitemap.body
   if (/<sitemapindex[\s>]/i.test(body)) return pass("Sitemap index found")
   if (!/<urlset[\s>]/i.test(body)) return fail(`${SITEMAP_PATH} is not sitemap XML`, missingFix)
@@ -248,7 +252,7 @@ function checkSitemap({ page, sitemap }: AuditInputs): Outcome {
 
 function checkLlmsTxt({ llmsTxt }: AuditInputs): Outcome {
   const fix = "Serve /llms.txt; webForAgents() generates it from your routes."
-  if (isMissing(llmsTxt)) return fail(`${LLMS_TXT_PATH} not found`, fix)
+  if (isMissing(llmsTxt)) return fail(`${LLMS_TXT_PATH} not found${why(llmsTxt)}`, fix)
   const first = llmsTxt.body.replace(/^﻿/, "").split(/\r\n|\r|\n/).find((l) => l.trim() !== "") ?? ""
   if (!first.startsWith("# ")) {
     return warn(`${LLMS_TXT_PATH} has no H1 title on its first line`, fix)
@@ -256,19 +260,19 @@ function checkLlmsTxt({ llmsTxt }: AuditInputs): Outcome {
   return pass(`${LLMS_TXT_PATH} found`)
 }
 
-function checkMarkdown({ page, markdown }: AuditInputs): Outcome {
+function checkMarkdown({ markdown }: AuditInputs): Outcome {
   if (isMissing(markdown)) {
-    return fail(`No ${MARKDOWN_MIME} copy found`, `Serve a markdown copy of this page at ${markdown.url}; webForAgents() generates one per route.`)
+    return fail(`No ${MARKDOWN_MIME} copy found${why(markdown)}`, `Serve a markdown copy of this page at ${markdown.url}; webForAgents() generates one per route.`)
   }
   return pass(`Markdown copy found at ${markdown.url}`)
 }
 
 function checkAgentMap({ agentMap }: AuditInputs): Outcome {
   const fix = `Serve ${AGENT_MAP_PATH}; webForAgents() generates it from your marked agent actions.`
-  if (isMissing(agentMap)) return fail(`${AGENT_MAP_PATH} not found`, fix)
+  if (isMissing(agentMap)) return fail(`${AGENT_MAP_PATH} not found${why(agentMap)}`, fix)
   let json: unknown
   try {
-    json = JSON.parse(agentMap.body)
+    json = JSON.parse(agentMap.body.replace(/^\uFEFF/, ""))
   } catch {
     return fail(`${AGENT_MAP_PATH} is not valid JSON`, fix)
   }

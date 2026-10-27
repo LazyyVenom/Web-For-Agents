@@ -72,6 +72,33 @@ describe("checks", () => {
     expect(byId(inputs({ robots: ok("User-agent: PerplexityBot\nDisallow: /\n") }), "robots").status).toBe("warn")
   })
 
+  it("robots unreachable and missing", () => {
+    const e503 = byId(inputs({ robots: { ...ok("x"), status: 503, error: "boom" } }), "robots")
+    expect(e503.status).toBe("fail")
+    const net = byId(inputs({ robots: { ...ok(""), status: 0, error: "network error: x" } }), "robots")
+    expect(net.status).toBe("fail")
+    expect(net.message).toBe("robots.txt unreachable (network error: x)")
+    const nf = byId(inputs({ robots: { ...ok("nope"), status: 404 } }), "robots")
+    expect(nf.status).toBe("warn")
+    expect(nf.message).toContain("not found")
+  })
+
+  it("canonical other origin and multiple links warn", () => {
+    const other = pageHtml({ head: '<title>t</title><link rel="canonical" href="http://other/x">' })
+    expect(byId(inputs({ src: other }), "canonical").status).toBe("warn")
+    const two = pageHtml({ head: '<link rel="canonical" href="http://h/x"><link rel="canonical" href="http://h/y">' })
+    expect(byId(inputs({ src: two }), "canonical").status).toBe("warn")
+  })
+
+  it("agent-map without pages warns; BOM tolerated", () => {
+    expect(byId(inputs({ agentMap: ok("{}", "application/json") }), "agent-map").status).toBe("warn")
+    expect(byId(inputs({ agentMap: ok("\uFEFF{\"pages\":[]}", "application/json") }), "agent-map").status).toBe("pass")
+  })
+
+  it("llms-txt without H1 warns", () => {
+    expect(byId(inputs({ llmsTxt: ok("Site\n> x") }), "llms-txt").status).toBe("warn")
+  })
+
   it("relative canonical warns and shows resolved URL", () => {
     const html = pageHtml({ head: '<title>t</title><link rel="canonical" href="/x">' })
     const c = byId(inputs({ src: html }), "canonical")
