@@ -43,6 +43,8 @@ if (p === "/") {
   root.innerHTML = "<main><h1>New</h1></main>";
 } else if (p === "/new") {
   root.innerHTML = "<main><h1>New</h1></main>";
+} else if (p === "/caf%C3%A9") {
+  root.innerHTML = "<main><h1>Cafe</h1></main>";
 }
 `;
 
@@ -196,7 +198,44 @@ describe("createBuildPlugin", () => {
     for (const f of ["llms.txt", "fetch/index.html", "index.md"]) {
       expect(w.filter((m) => m === `[web-for-agents] public/${f} exists; skipping generation`)).toHaveLength(1);
     }
-    expect(t.read("sitemap.xml")).not.toContain("/fetch");
+    // Listed in `routes` and served from publicDir: stays in the sitemap (stage 1 behaviour), not in llms.
+    expect(t.read("sitemap.xml")).toContain("<loc>https://a.com/fetch</loc>");
+    expect(t.read("sitemap.xml")).toContain("<loc>https://a.com/</loc>");
+  }, 30_000);
+
+  it("keeps publicDir routes out of llms but in the sitemap", async () => {
+    const t = make({ routes: ["/fetch"], prerender: { crawl: false } });
+    putPublic(t, "fetch/index.html", "<p>mine</p>");
+    await t.run();
+    expect(t.read("sitemap.xml")).toContain("<loc>https://a.com/fetch</loc>");
+    expect(t.read("llms.txt")).not.toContain("https://a.com/fetch");
+    expect(t.read("llms-full.txt")).not.toContain("Source: https://a.com/fetch");
+  }, 30_000);
+
+  it("writes the raw SPA shell to 200.html", async () => {
+    const t = make({ prerender: { crawl: false } });
+    await t.run();
+    expect(t.read("200.html")).toBe(SHELL);
+    expect(t.read("index.html")).toContain("data-wfa-prerendered");
+  }, 30_000);
+
+  it("respects public/200.html and writes none without prerender", async () => {
+    const t = make({ prerender: { crawl: false } });
+    putPublic(t, "200.html", "mine");
+    await t.run();
+    expect(t.read("200.html")).toBe("mine");
+    expect(t.warnings()).toContain("[web-for-agents] public/200.html exists; skipping generation");
+    const off = make({ prerender: false });
+    await off.run();
+    expect(off.has("200.html")).toBe(false);
+  }, 30_000);
+
+  it("keeps .md URLs URL-encoded", async () => {
+    const t = make({ routes: ["/caf%C3%A9"], prerender: { crawl: false } });
+    await t.run();
+    expect(t.read("llms.txt")).toContain("(https://a.com/caf%C3%A9.md)");
+    expect(t.read("café/index.html")).toContain('href="https://a.com/caf%C3%A9.md"');
+    expect(t.read("café.md")).toContain("Cafe");
   }, 30_000);
 
   it("runs extensions", async () => {
@@ -276,6 +315,68 @@ describe("createBuildPlugin", () => {
     await expect(t.run()).rejects.toThrow('[web-for-agents] extension "probe" finalize failed: nope');
     expect(readdirSync(t.outDir, { recursive: true }).map(String).sort()).toEqual(before);
     expect(t.read("index.html")).toBe(SHELL);
+  }, 30_000);
+
+  it("warns when an extension overwrites a staged file and rejects traversal", async () => {
+    const t = make({ prerender: { crawl: false } }, [
+      {
+        name: "probe",
+        finalize(ctx) {
+          ctx.emitFile("llms.txt", "# replaced");
+          ctx.emitFile("own.json", "1");
+          ctx.emitFile("own.json", "2");
+        },
+      },
+    ]);
+    await t.run();
+    expect(t.read("llms.txt")).toBe("# replaced");
+    expect(t.read("own.json")).toBe("2");
+    expect(t.warnings()).toContain('[web-for-agents] extension "probe" overwrote llms.txt');
+    expect(t.warnings()).toContain('[web-for-agents] extension "probe" overwrote own.json');
+
+    const bad = make({ prerender: { crawl: false } }, [{ name: "probe", finalize: (ctx) => ctx.emitFile("../x", "") }]);
+    const before = readdirSync(bad.outDir, { recursive: true }).map(String).sort();
+    await expect(bad.run()).rejects.toThrow('[web-for-agents] invalid output file name "../x"');
+    expect(readdirSync(bad.outDir, { recursive: true }).map(String).sort()).toEqual(before);
+    expect(existsSync(path.join(bad.tmp, "x"))).toBe(false);
+  }, 30_000);
+
+  for (const [hook, ext] of [
+    [
+      "onRoute",
+      {
+        name: "probe",
+        onRoute() {
+          throw new Error("nope");
+        },
+      },
+    ],
+    [
+      "llmsSections",
+      {
+        name: "probe",
+        llmsSections() {
+          throw new Error("nope");
+        },
+      },
+    ],
+  ] as const) {
+    it(`extension ${hook} failure leaves outDir unchanged`, async () => {
+      const t = make({ prerender: { crawl: false } }, [ext as PrerenderExtension]);
+      const before = readdirSync(t.outDir, { recursive: true }).map(String).sort();
+      await expect(t.run()).rejects.toThrow(new RegExp(`^\\[web-for-agents\\] extension "probe" ${hook}.* failed: nope$`));
+      expect(readdirSync(t.outDir, { recursive: true }).map(String).sort()).toEqual(before);
+      expect(t.read("index.html")).toBe(SHELL);
+    }, 30_000);
+  }
+
+  it("prefixes file system errors while writing", async () => {
+    const t = make({ prerender: false }, []);
+    // robots.txt cannot be written: a directory is in the way.
+    mkdirSync(path.join(t.outDir, "robots.txt"));
+    await expect(t.run()).rejects.toThrow(/^\[web-for-agents\] .*robots\.txt/);
+    const p = make({ prerender: { crawl: false } }, [{ name: "probe", finalize: (ctx) => ctx.emitFile("data.json/x", "") }]);
+    await expect(p.run()).rejects.toThrow(/^\[web-for-agents\] /);
   }, 30_000);
 
   it("prefixes errors thrown outside route rendering", async () => {
