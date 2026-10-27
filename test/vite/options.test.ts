@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeRoute as sharedNormalizeRoute } from "../../src/shared/conventions";
-import { agentOutputs, isExcluded, normalizeRoute, resolveOptions } from "../../src/vite/options";
+import { agentOutputs, isExcluded, normalizeRoute, resolveOptions, type WebForAgentsOptions } from "../../src/vite/options";
 
 const robots = { ai: { training: "block", search: "allow" } } as const;
 
@@ -140,7 +140,22 @@ describe("stage 2 options", () => {
     expect(r.llms).toBe(false);
     expect(r.warnings).toEqual([]);
     const w = resolveOptions({ ...base, prerender: false, markdown: {}, llms: {} });
-    expect(w.warnings.filter((m) => m.includes("require prerender"))).toHaveLength(1);
+    expect(w.warnings.filter((m) => /requires? prerender/.test(m))).toHaveLength(1);
+  });
+
+  it("the prerender: false warning names only the options that were set", () => {
+    const warn = (o: Partial<WebForAgentsOptions>) =>
+      resolveOptions({ ...base, prerender: false, ...o }).warnings.filter((m) => /requires? prerender/.test(m));
+    expect(warn({ agentMap: true })).toEqual([
+      "[web-for-agents] agentMap requires prerender; it is disabled because prerender is false",
+    ]);
+    expect(warn({ markdown: {}, llms: {} })).toEqual([
+      "[web-for-agents] markdown and llms require prerender; they are disabled because prerender is false",
+    ]);
+    expect(warn({ markdown: {}, llms: {}, agentMap: {} })).toEqual([
+      "[web-for-agents] markdown, llms and agentMap require prerender; they are disabled because prerender is false",
+    ]);
+    expect(warn({ markdown: false, llms: false, agentMap: false })).toEqual([]);
   });
 
   it("rejects bad prerender values", () => {
@@ -186,6 +201,14 @@ describe("stage 2 options", () => {
     expect(resolveOptions({ ...base, agentMap: false }).agentMap).toBe(false);
   });
 
+  it("rejects a non-object agentMap from plain JS with a prefixed error", () => {
+    for (const agentMap of [null, "agents.json", 1]) {
+      expect(() => resolveOptions({ ...base, agentMap } as unknown as WebForAgentsOptions)).toThrow(
+        "[web-for-agents] agentMap must be a boolean or { fileName }",
+      );
+    }
+  });
+
   it("rejects agentMap file names that are not plain .json names", () => {
     for (const fileName of ["../x.json", "a/b.json", "x.txt", ".json/x", "", "x json.json"]) {
       expect(() => resolveOptions({ ...base, agentMap: { fileName } })).toThrow(
@@ -201,11 +224,11 @@ describe("stage 2 options", () => {
     expect(resolveOptions({ ...base, prerender: false, agentMap: false }).warnings).toEqual([]);
     const r = resolveOptions({ ...base, prerender: false, agentMap: true });
     expect(r.agentMap).toBe(false);
-    const w = r.warnings.filter((m) => m.includes("require prerender"));
+    const w = r.warnings.filter((m) => /requires? prerender/.test(m));
     expect(w).toHaveLength(1);
     expect(w[0]).toContain("agentMap");
     const all = resolveOptions({ ...base, prerender: false, markdown: {}, llms: {}, agentMap: {} });
-    expect(all.warnings.filter((m) => m.includes("require prerender"))).toHaveLength(1);
+    expect(all.warnings.filter((m) => /requires? prerender/.test(m))).toHaveLength(1);
   });
 
   it("the blocked-AI warning names the agent map file only when it is on", () => {

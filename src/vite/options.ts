@@ -1,6 +1,6 @@
 import { DEFAULT_CONTENT_SELECTOR } from "../shared/content";
 import { AGENT_MAP_PATH, normalizeRoute } from "../shared/conventions";
-import { LOG_PREFIX } from "../shared/errors";
+import { LOG_PREFIX, withPrefix } from "../shared/errors";
 import { trimTrailingSlash } from "./prerender/paths";
 
 export { normalizeRoute };
@@ -157,6 +157,9 @@ const AGENT_MAP_FILE = /^[A-Za-z0-9_.-]+\.json$/;
 
 function resolveAgentMap(input: WebForAgentsOptions["agentMap"]): { fileName: string } | false {
   if (input === false) return false;
+  if (input !== true && input !== undefined && (typeof input !== "object" || input === null)) {
+    throw new Error(withPrefix("agentMap must be a boolean or { fileName }"));
+  }
   const fileName = (input === true || input === undefined ? undefined : input.fileName) ?? AGENT_MAP_PATH.slice(1);
   if (typeof fileName !== "string" || !AGENT_MAP_FILE.test(fileName)) {
     throw new Error(`${LOG_PREFIX} agentMap.fileName must be a plain .json file name`);
@@ -217,10 +220,11 @@ export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
   const requestedAgentMap = resolveAgentMap(input.agentMap);
   let agentMap: ResolvedOptions["agentMap"] = false;
   if (prerender === false) {
-    if (input.markdown || input.llms || input.agentMap) {
-      warnings.push(
-        `${LOG_PREFIX} markdown, llms and agentMap require prerender; they are disabled because prerender is false`,
-      );
+    const set = (["markdown", "llms", "agentMap"] as const).filter((k) => input[k]);
+    if (set.length > 0) {
+      const names = set.length === 1 ? set[0] : `${set.slice(0, -1).join(", ")} and ${set[set.length - 1]}`;
+      const verb = set.length === 1 ? "requires prerender; it is" : "require prerender; they are";
+      warnings.push(withPrefix(`${names} ${verb} disabled because prerender is false`));
     }
   } else {
     if (input.markdown !== false) {
