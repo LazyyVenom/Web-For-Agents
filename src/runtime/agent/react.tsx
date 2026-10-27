@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type ComponentPropsWithoutRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, type ComponentPropsWithoutRef } from "react";
 import {
   ACTION_ATTR,
   ACTION_DESCRIPTION_ATTR,
@@ -15,18 +15,25 @@ export type AgentHintProps = {
   "data-agent-destructive"?: "true";
 };
 
+const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+
 export function useAgentAction<I = Record<string, unknown>, R = unknown>(
   spec: AgentActionSpec<I, R>,
 ): { ref: (el: Element | null) => void; hintProps: AgentHintProps } {
   assertValidActionName(spec.name);
   const specRef = useRef(spec);
-  specRef.current = spec;
+  useIsoLayoutEffect(() => {
+    specRef.current = spec;
+  });
   const elRef = useRef<Element | null>(null);
   const ref = useCallback((el: Element | null) => {
     elRef.current = el;
+    // A target attaching or swapping after registration must be (re)evaluated.
+    refreshAgentActions();
   }, []);
 
   const { name, title, description, destructive, readOnly } = spec;
+  const hasHandler = Boolean(spec.handler);
   const schemaKey = JSON.stringify(spec.inputSchema ?? null);
   useEffect(() => {
     const unregister = registerAgentAction(
@@ -36,7 +43,7 @@ export function useAgentAction<I = Record<string, unknown>, R = unknown>(
     // The ref has attached by now; make sure element-backed actions are exposed.
     refreshAgentActions();
     return unregister;
-  }, [name, title, description, destructive, readOnly, schemaKey]);
+  }, [name, title, description, destructive, readOnly, schemaKey, hasHandler]);
 
   const hintProps: AgentHintProps = {
     [ACTION_ATTR]: name,

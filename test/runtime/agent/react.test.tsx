@@ -3,7 +3,7 @@ import React, { StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AgentForm, agentParam, executeAgentAction, listAgentActions } from "../../../src/index";
+import { useAgentAction, AgentForm, agentParam, executeAgentAction, listAgentActions } from "../../../src/index";
 import { __resetForTests } from "../../../src/runtime/agent/registry";
 import type { WebMcpTool } from "../../../src/runtime/agent/webmcp";
 
@@ -109,5 +109,35 @@ describe("React API", () => {
     const [d] = listAgentActions();
     expect(d.kind).toBe("form");
     expect(d.inputSchema.required).toContain("email");
+  });
+
+  it("target attaching after the first commit gets exposed", async () => {
+    function Late({ show }: { show: boolean }) {
+      const { ref, hintProps } = useAgentAction({ name: "late1", description: "d" });
+      return show ? <button ref={ref} {...hintProps}>go</button> : <div />;
+    }
+    await render(<Late show={false} />);
+    expect(listAgentActions()).toEqual([]);
+    expect(registerTool).not.toHaveBeenCalled();
+    await render(<Late show={true} />);
+    expect(listAgentActions().map((a) => a.name)).toEqual(["late1"]);
+    expect(registerTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("handler toggling re-registers", async () => {
+    const ui = (handler?: () => number) => (
+      <AgentForm agent={{ name: "t1", description: "d", handler }}>
+        <input name="x" />
+      </AgentForm>
+    );
+    await render(ui(() => 1));
+    expect(listAgentActions()[0].kind).toBe("handler");
+    await render(ui(undefined));
+    expect(listAgentActions()[0].kind).toBe("form");
+    expect(registerTool).toHaveBeenCalledTimes(2);
+    expect(calls[0].signal.aborted).toBe(true);
+    await render(ui(() => 2));
+    expect(listAgentActions()[0].kind).toBe("handler");
+    expect(registerTool).toHaveBeenCalledTimes(3);
   });
 });
