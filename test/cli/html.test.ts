@@ -96,6 +96,13 @@ describe("extractHtmlFacts", () => {
     expect(extractHtmlFacts("<p>a&nbsp;b</p>").text).toBe("a b");
   });
 
+  it("prerendered reflects the data-wfa-prerendered marker on <html>", () => {
+    expect(extractHtmlFacts("<html data-wfa-prerendered><body>x</body></html>").prerendered).toBe(true);
+    expect(extractHtmlFacts('<html lang="en" data-wfa-prerendered=""><body>x</body></html>').prerendered).toBe(true);
+    expect(extractHtmlFacts("<html><body>x</body></html>").prerendered).toBe(false);
+    expect(extractHtmlFacts("<html><body><div data-wfa-prerendered>x</div></body></html>").prerendered).toBe(false);
+  });
+
   it("hasMain ignores main inside template, noscript or svg", () => {
     expect(extractHtmlFacts("<template><main>x</main></template>").hasMain).toBe(false);
     expect(extractHtmlFacts("<noscript><main>x</main></noscript>").hasMain).toBe(false);

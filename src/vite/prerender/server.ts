@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { readFile, stat } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
+import { parseAst } from "vite";
 import { isRelativeBase, trimTrailingSlash } from "./paths";
 
 export { isRelativeBase };
@@ -44,6 +45,58 @@ export function fixImportMeta(code: string): string {
   return code.replace(/\breturn[ \t]+import\.meta\./g, "return 0,import.meta.");
 }
 
+/**
+ * Wraps every regex literal in parentheses: `/re/i` -> `(/re/i)`. happy-dom 21's module compiler
+ * decides whether a "/" starts a regex from the character before it, and only a narrow list of
+ * punctuation counts. Anything else, such as `return`, `!`, `typeof`, `-`, whitespace or `)`, makes
+ * it misread the regex (minified `return/^[a-z]+:/i.test(e)`, for example), and the module fails to
+ * load. "(" is on the list, and the parentheses do not change the value. Literals are found with
+ * Vite's parser; code it cannot parse is returned unchanged.
+ */
+export function parenthesizeRegExps(code: string): string {
+  if (!code.includes("/")) return code;
+  let ast: unknown;
+  try {
+    // sourceType is read by Vite 8's parser (rolldown) and ignored by Rollup's, which always parses modules.
+    ast = parseAst(code, { sourceType: "module" });
+  } catch {
+    return code;
+  }
+  const ranges: Array<[start: number, end: number]> = [];
+  const stack: unknown[] = [ast];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (Array.isArray(node)) {
+      stack.push(...node);
+      continue;
+    }
+    if (node === null || typeof node !== "object") continue;
+    const n = node as { type?: unknown; regex?: unknown; start?: unknown; end?: unknown };
+    if (n.type === "Literal" && n.regex && typeof n.start === "number" && typeof n.end === "number") {
+      ranges.push([n.start, n.end]);
+      continue;
+    }
+    for (const value of Object.values(node)) if (value !== null && typeof value === "object") stack.push(value);
+  }
+  if (ranges.length === 0) return code;
+  // From the end to the start, so the parser's UTF-16 offsets stay valid for the edits still to come.
+  ranges.sort((a, b) => b[0] - a[0]);
+  const parts: string[] = [];
+  let tail = code.length;
+  for (const [start, end] of ranges) {
+    if (code[start] !== "/" || end > tail) return code;
+    parts.push(code.slice(end, tail), ")", code.slice(start, end), "(");
+    tail = start;
+  }
+  parts.push(code.slice(0, tail));
+  return parts.reverse().join("");
+}
+
+/** Everything the served JS needs to load in happy-dom. Harmless for Chrome, which may get it too when renderers are mixed. */
+export function happyDomCompat(code: string): string {
+  return fixImportMeta(parenthesizeRegExps(code));
+}
+
 export interface StaticServerOptions {
   dir: string;
   base: string;
@@ -51,8 +104,8 @@ export interface StaticServerOptions {
   shell: string;
   /** Mount at "/" and resolve nested asset requests against the root. Default: isRelativeBase(base). */
   relativeBase?: boolean;
-  /** Apply fixImportMeta to served JS. Needed only by the happy-dom renderer. Default false. */
-  rewriteImportMeta?: boolean;
+  /** Rewrite served JS with happyDomCompat. Needed when any route may render under happy-dom. Default false. */
+  happyDomCompat?: boolean;
   /**
    * Full-URL Vite base ("https://cdn…/app/"). In the shell, JS and CSS it serves, the base is replaced by
    * this server's origin so the renderer never contacts the real host; finalizeHtml maps the origin back.
@@ -71,11 +124,14 @@ async function isFile(p: string): Promise<boolean> {
 export function startStaticServer(opts: StaticServerOptions): Promise<StaticServer> {
   const root = resolve(opts.dir);
   const relative = opts.relativeBase ?? isRelativeBase(opts.base);
-  const rewrite = opts.rewriteImportMeta === true;
+  const compat = opts.happyDomCompat === true;
   let origin = "";
   const baseUrl = opts.fullBase === undefined ? undefined : trimTrailingSlash(opts.fullBase) + "/";
   const local = (code: string) => (baseUrl === undefined ? code : code.split(baseUrl).join(origin + "/"));
   const mount = relative ? "" : trimTrailingSlash(opts.base);
+  // Built assets do not change while the server runs. Caching the promise parses each file once,
+  // even when several pages request it before the first parse finishes.
+  const compatJs = new Map<string, Promise<string>>();
 
   const server = createServer(async (req, res) => {
     const send = (status: number, type: string, body: string | Buffer) => {
@@ -102,8 +158,14 @@ export function startStaticServer(opts: StaticServerOptions): Promise<StaticServ
       const serve = async (file: string) => {
         const ext = extname(file).toLowerCase();
         const type = TYPES[ext] ?? "application/octet-stream";
-        if (rewrite && (ext === ".js" || ext === ".mjs")) {
-          return send(200, type, local(fixImportMeta(await readFile(file, "utf8"))));
+        if (compat && (ext === ".js" || ext === ".mjs")) {
+          let code = compatJs.get(file);
+          if (code === undefined) {
+            code = readFile(file, "utf8").then(happyDomCompat);
+            compatJs.set(file, code);
+            code.catch(() => compatJs.delete(file));
+          }
+          return send(200, type, local(await code));
         }
         if (baseUrl !== undefined && (ext === ".js" || ext === ".mjs" || ext === ".css")) {
           return send(200, type, local(await readFile(file, "utf8")));

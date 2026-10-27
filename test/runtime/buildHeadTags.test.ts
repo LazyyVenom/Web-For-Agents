@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildHeadTags } from "../../src/runtime/buildHeadTags";
+import { buildEntryTags, buildHeadTags, defaultCanonicalTags } from "../../src/runtime/buildHeadTags";
 import type { HeadTag } from "../../src/runtime/types";
 
 const find = (tags: HeadTag[], key: string) => tags.find((t) => t.key === key);
@@ -69,5 +69,50 @@ describe("buildHeadTags", () => {
   it("does not treat $ in title as a replacement pattern", () => {
     const t = buildHeadTags({ title: "Save $$ $&" }, { titleTemplate: "%s | Acme" });
     expect(find(t, "title")).toMatchObject({ text: "Save $$ $& | Acme" });
+  });
+});
+
+describe("buildHeadTags canonical", () => {
+  const href = (tags: HeadTag[]) => {
+    const t = find(tags, "rel:canonical");
+    return t && t.kind === "link" ? t.attrs.href : undefined;
+  };
+  const dflt = (siteUrl: string | undefined, path: string | undefined) => href(defaultCanonicalTags(siteUrl, path));
+
+  it("buildHeadTags emits no canonical unless one is given", () => {
+    expect(href(buildHeadTags({}, { siteUrl: "https://a.com" }))).toBeUndefined();
+    expect(href(buildHeadTags({ canonical: false }, { siteUrl: "https://a.com" }))).toBeUndefined();
+  });
+
+  it("the default needs both a siteUrl and a pathname, and sets og:url too", () => {
+    expect(dflt("https://a.com", undefined)).toBeUndefined();
+    expect(dflt(undefined, "/x")).toBeUndefined();
+    expect(dflt("https://a.com/", "/x")).toBe("https://a.com/x");
+    expect(content(defaultCanonicalTags("https://a.com", "/x"), "property:og:url")).toBe("https://a.com/x");
+  });
+
+  it("false emits tombstones for canonical and og:url", () => {
+    const tags = buildEntryTags({ canonical: false }, { siteUrl: "https://a.com" });
+    expect(tags.filter((t) => t.kind === "remove").map((t) => t.key)).toEqual(["rel:canonical", "property:og:url"]);
+  });
+
+  it("follows siteUrl's path and the sitemap shape", () => {
+    expect(dflt("https://x.com/sub", "/sub/about")).toBe("https://x.com/sub/about");
+    expect(dflt("https://x.com/sub", "/sub/")).toBe("https://x.com/sub/");
+    expect(dflt("https://x.com", "/about/")).toBe("https://x.com/about");
+    expect(dflt("https://x.com", "/")).toBe("https://x.com/");
+  });
+
+  it("resolves an explicit path, rooted or relative, under siteUrl's path", () => {
+    const d = { siteUrl: "https://x.com/sub" };
+    expect(href(buildHeadTags({ canonical: "/about" }, d))).toBe("https://x.com/sub/about");
+    expect(href(buildHeadTags({ canonical: "about" }, d))).toBe("https://x.com/sub/about");
+    expect(href(buildHeadTags({ canonical: "about/team/" }, d))).toBe("https://x.com/sub/about/team");
+    expect(href(buildHeadTags({ canonical: "/list?page=2" }, d))).toBe("https://x.com/sub/list?page=2");
+    expect(href(buildHeadTags({ canonical: "https://o.com/z" }, d))).toBe("https://o.com/z");
+  });
+
+  it("treats a value with a scheme as a URL even when it does not parse", () => {
+    expect(href(buildHeadTags({ canonical: "https://a b.com" }, { siteUrl: "https://x.com/sub" }))).toBe("https://a b.com");
   });
 });

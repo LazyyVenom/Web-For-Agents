@@ -138,8 +138,14 @@ function pathAndQuery(url: string): string {
 function checkContent({ page, html }: AuditInputs): Outcome {
   const n = html.text.length;
   const note = page.truncated ? ` (page truncated at ${MAX_BODY_LABEL})` : "";
-  const fix =
+  let fix =
     "Crawlers that don't run JavaScript see almost no text. Add webForAgents() to vite.config.ts so every route is prerendered to static HTML.";
+  // Short but not an empty shell: the page is marked as prerendered or has real text.
+  if (html.prerendered || n >= CONTENT_WARN_CHARS) {
+    if (!html.hasMain) fix = "Wrap the page content in <main> and add more text.";
+    else if (html.prerendered) fix = "The page is prerendered but has little text. Add more content to <main>.";
+    else fix = "The page has little text without JavaScript. Add more content to <main>.";
+  }
   if (n >= CONTENT_MIN_CHARS) return pass(`${n} characters of text without JavaScript${note}`);
   if (n >= CONTENT_WARN_CHARS) return warn(`Only ${n} characters of text without JavaScript${note}`, fix);
   return fail(`Only ${n} characters of text without JavaScript${note}`, fix);

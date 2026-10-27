@@ -2,13 +2,14 @@ import { DEFAULT_CONTENT_SELECTOR, selectContentRegion, type ContentSource } fro
 import { buildPageMarkdown } from "../shared/markdown";
 import { readPageMeta } from "../shared/pageMeta";
 import { jsonLdTypes } from "../shared/jsonLd";
-import { mountPath, trimTrailingSlash } from "../shared/url";
+import { routeOf, trimTrailingSlash } from "../shared/url";
+
+export { routeOf };
 import {
   ACTION_ATTR,
   ACTION_DESCRIPTION_ATTR,
   ACTION_DESTRUCTIVE_ATTR,
   AGENT_GLOBAL,
-  normalizeRoute,
   WEBMCP_TOOLDESCRIPTION_ATTR,
   WEBMCP_TOOLNAME_ATTR,
 } from "../shared/conventions";
@@ -52,13 +53,6 @@ export interface CollectOptions {
 
 function noMainWarning(selector: string): string {
   return `No [data-wfa-content] or element matching contentSelector "${selector}" found; markdown falls back to <body> without nav/header/footer/aside.`;
-}
-
-/** The build's route for `pathname`: an absolute-path `base` ("/sub/") is stripped; other bases mount at "/". */
-function routeOf(pathname: string, base = "/"): string {
-  const b = mountPath(base);
-  if (b !== "" && (pathname === b || pathname.startsWith(b + "/"))) pathname = pathname.slice(b.length);
-  return normalizeRoute(pathname);
 }
 
 function prefixed(doc: Document, attrs: Array<"property" | "name">, prefix: string): Record<string, string> {

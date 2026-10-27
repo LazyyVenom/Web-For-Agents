@@ -1,9 +1,57 @@
-import { resolveUrl } from "../shared/url";
+import { hasScheme, publicUrl, resolveUrl, routeOf } from "../shared/url";
 import type { HeadTag, SeoDefaults, SeoProps } from "./types";
 
 const absolute = (value: string | undefined, siteUrl: string | undefined): string | undefined =>
   value === undefined ? undefined : resolveUrl(value, siteUrl);
 
+/** The public URL of the current page under siteUrl; undefined without a siteUrl or a usable path. */
+function defaultCanonical(siteUrl: string | undefined, pathname: string | undefined): string | undefined {
+  if (!siteUrl || !pathname?.startsWith("/")) return undefined;
+  let mount: string;
+  try {
+    mount = new URL(siteUrl).pathname;
+  } catch {
+    return undefined;
+  }
+  return publicUrl(siteUrl, routeOf(pathname.split(/[?#]/)[0]!, mount));
+}
+
+/** The default canonical link and og:url for the current page; the lowest-priority layer, applied by flush. */
+export function defaultCanonicalTags(siteUrl: string | undefined, pathname: string | undefined): HeadTag[] {
+  const href = defaultCanonical(siteUrl, pathname);
+  return href === undefined ? [] : canonicalTags(href);
+}
+
+function canonicalTags(href: string): HeadTag[] {
+  return [
+    { kind: "link", key: "rel:canonical", attrs: { rel: "canonical", href } },
+    { kind: "meta", key: "property:og:url", attrs: { property: "og:url", content: href } },
+  ];
+}
+
+/** A path ("/about" or "about") resolves under siteUrl's path like a route; anything else resolves as a URL. */
+function explicitCanonical(value: string, siteUrl: string | undefined): string {
+  if (siteUrl && !hasScheme(value) && !value.startsWith("//") && !/^[.?#]/.test(value)) {
+    // publicUrl roots the path ("about" -> "/about") and drops a trailing slash.
+    const cut = value.search(/[?#]/);
+    return publicUrl(siteUrl, cut === -1 ? value : value.slice(0, cut)) + (cut === -1 ? "" : value.slice(cut));
+  }
+  return resolveUrl(value, siteUrl);
+}
+
+/** A tag, or a tombstone that removes `key` from the merge so a deeper entry can opt out of an ancestor's tag. */
+export type HeadTagOrRemoval = HeadTag | { kind: "remove"; key: string };
+
+/** Tags for one entry's own props, plus tombstones for `canonical: false`. Used by the head merge. */
+export function buildEntryTags(props: SeoProps, defaults: SeoDefaults = {}): HeadTagOrRemoval[] {
+  const tags: HeadTagOrRemoval[] = buildHeadTags(props, defaults);
+  if (props.canonical === false) {
+    tags.push({ kind: "remove", key: "rel:canonical" }, { kind: "remove", key: "property:og:url" });
+  }
+  return tags;
+}
+
+/** Explicit canonical only; the default for the current path is added by flush (see defaultCanonicalTags). */
 export function buildHeadTags(props: SeoProps, defaults: SeoDefaults = {}): HeadTag[] {
   const byKey = new Map<string, HeadTag>();
 
@@ -23,7 +71,8 @@ export function buildHeadTags(props: SeoProps, defaults: SeoDefaults = {}): Head
 
   const description = props.description ?? defaults.description;
   const image = absolute(props.image ?? defaults.image, defaults.siteUrl);
-  const canonical = absolute(props.canonical, defaults.siteUrl);
+  const canonical =
+    typeof props.canonical === "string" ? explicitCanonical(props.canonical, defaults.siteUrl) : undefined;
 
   meta("name", "description", description);
   if (canonical !== undefined) {

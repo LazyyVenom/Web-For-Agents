@@ -110,10 +110,15 @@ describe("import boundaries", () => {
   });
 
   it("leaf shared modules import nothing", () => {
-    for (const name of ["errors", "url", "bots", "conventions", "sort", "text", "pageMeta", "shortcut", "jsonLd"]) {
+    for (const name of ["errors", "url", "bots", "sort", "text", "pageMeta", "shortcut", "jsonLd"]) {
       const file = join(SRC, "shared", `${name}.ts`);
       expect(specifiers(readFileSync(file, "utf8")), relative(SRC, file)).toEqual([]);
     }
+  });
+
+  it("shared/conventions imports only shared/url", () => {
+    const file = join(SRC, "shared", "conventions.ts");
+    expect(specifiers(readFileSync(file, "utf8")).map((s) => resolved(file, s))).toEqual([join(SRC, "shared", "url")]);
   });
 
   it("shared/agent imports only shared/conventions, as types or values", () => {

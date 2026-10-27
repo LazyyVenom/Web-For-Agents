@@ -30,14 +30,17 @@ interface Built {
 
 /** Copies the fixture next to itself (so relative imports of ../src resolve) and runs a real vite build. */
 async function buildFixture(
-  opts: { base?: string; siteUrl?: string; routes?: string[]; extra?: Partial<WebForAgentsOptions> },
+  opts: { base?: string; siteUrl?: string; routes?: string[]; extra?: Partial<WebForAgentsOptions>; root?: string; outDir?: string },
 ): Promise<Built> {
-  const root = copyFixture("spa");
+  const root = opts.root ?? copyFixture("spa");
+  const outDir = opts.outDir ?? "dist";
   await build({
     root,
     configFile: false,
     logLevel: "silent",
     base: opts.base ?? "/",
+    build: { outDir },
+    define: { "import.meta.env.VITE_SITE_URL": JSON.stringify(opts.siteUrl ?? "https://example.com") },
     plugins: [
       react(),
       webForAgents({
@@ -49,7 +52,7 @@ async function buildFixture(
       }),
     ],
   });
-  return { dist: path.join(root, "dist") };
+  return { dist: path.join(root, outDir) };
 }
 
 const read = (dist: string, file: string) => readFileSync(path.join(dist, file), "utf8");
@@ -114,6 +117,23 @@ describe("default build", () => {
     expect(existsSync(path.join(dist, "draft/index.html"))).toBe(true);
   });
 
+  it("runs a regex literal right after return under happy-dom", () => {
+    expect(jsBundle(dist)).toMatch(/return\/\^\[a-z\]\+:\/i\.test\(/);
+    expect(read(dist, "about/index.html")).toContain("Runtime regex ran");
+  });
+
+  it("emits Vite's JS byte for byte (the regex rewrite is only served to happy-dom)", async () => {
+    // Same root, so the paths the dev JSX transform bakes into the bundle match.
+    const root = path.dirname(dist);
+    const plain = (await buildFixture({ root, outDir: "dist-plain", extra: { prerender: false } })).dist;
+    const js = (d: string) =>
+      distFiles(d)
+        .filter((f) => f.endsWith(".js"))
+        .map((f) => [path.relative(d, f), readFileSync(f, "utf8")] as const)
+        .sort(([a], [b]) => a.localeCompare(b));
+    expect(js(dist)).toEqual(js(plain));
+  }, 120_000);
+
   it("keeps build-only code out of the client bundle", () => {
     const js = jsBundle(dist);
     for (const bad of ["turndown", "happy-dom", "__WFA_PROBE__"]) expect(js).not.toContain(bad);
@@ -132,7 +152,7 @@ describe("default build", () => {
       dir: copy,
       base: "/",
       shell: read(copy, "index.html"),
-      rewriteImportMeta: true,
+      happyDomCompat: true,
     });
     const browser = new Browser({
       settings: {
@@ -191,6 +211,9 @@ describe("other bases", () => {
     expect(read(dist, "about/index.html")).toContain("About us");
     expect(read(dist, "about/index.html")).toContain('src="/sub/assets/');
     expect(read(dist, "sitemap.xml")).toContain("https://example.com/sub/about");
+    const canonical = /<link[^>]*rel="canonical"[^>]*href="([^"]+)"/.exec(read(dist, "about/index.html"))?.[1];
+    expect(canonical).toBe("https://example.com/sub/about");
+    expect(read(dist, "sitemap.xml")).toContain(`<loc>${canonical}</loc>`);
     expect(read(dist, "blog/hello/index.html")).toMatch(/href="\/sub\/assets\/Post-[^"]+\.css"/);
     expect(filesContaining(dist, "127.0.0.1")).toEqual([]);
   }, 120_000);

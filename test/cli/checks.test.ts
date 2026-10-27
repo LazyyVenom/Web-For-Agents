@@ -122,6 +122,27 @@ describe("checks", () => {
     expect(byId(i, "content").message.endsWith(` (page truncated at ${MAX_BODY_BYTES / 1024 / 1024} MiB)`)).toBe(true);
   });
 
+  it("content advice distinguishes an empty shell from a short page", () => {
+    const shell = byId(inputs({ src: "<!doctype html><html><body><div id=root></div></body></html>" }), "content");
+    expect(shell.status).toBe("fail");
+    expect(shell.fix).toBe(
+      "Crawlers that don't run JavaScript see almost no text. Add webForAgents() to vite.config.ts so every route is prerendered to static HTML.",
+    );
+    const marked = byId(
+      inputs({ src: "<!doctype html><html data-wfa-prerendered><body><main>Hi</main></body></html>" }),
+      "content",
+    );
+    expect(marked.status).toBe("fail");
+    expect(marked.fix).toBe("The page is prerendered but has little text. Add more content to <main>.");
+    const texty = byId(inputs({ src: pageHtml({ text: "a".repeat(100) }) }), "content");
+    expect(texty.status).toBe("warn");
+    expect(texty.fix).toBe("The page has little text without JavaScript. Add more content to <main>.");
+    const noMain = byId(inputs({ src: `<!doctype html><html><body><p>${"a".repeat(100)}</p></body></html>` }), "content");
+    expect(noMain.fix).toBe("Wrap the page content in <main> and add more text.");
+    const markedNoMain = byId(inputs({ src: "<!doctype html><html data-wfa-prerendered><body>Hi</body></html>" }), "content");
+    expect(markedNoMain.fix).toBe("Wrap the page content in <main> and add more text.");
+  });
+
   it("sitemap variants", () => {
     const other = ok("<urlset><url><loc>http://h/other</loc></url></urlset>", "application/xml");
     expect(byId(inputs({ sitemap: other }), "sitemap").status).toBe("warn");

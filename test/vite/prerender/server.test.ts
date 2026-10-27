@@ -1,11 +1,30 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { get } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Browser } from "happy-dom";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fixImportMeta, isRelativeBase, startStaticServer, type StaticServer } from "../../../src/vite/prerender/server";
+import { Browser, Window } from "happy-dom";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+const parseCalls = vi.hoisted(() => ({ count: 0 }));
+vi.mock("vite", async (importOriginal) => {
+  const vite = await importOriginal<typeof import("vite")>();
+  return {
+    ...vite,
+    parseAst: (...args: Parameters<typeof vite.parseAst>) => {
+      parseCalls.count++;
+      return vite.parseAst(...args);
+    },
+  };
+});
+import {
+  fixImportMeta,
+  happyDomCompat,
+  isRelativeBase,
+  parenthesizeRegExps,
+  startStaticServer,
+  type StaticServer,
+} from "../../../src/vite/prerender/server";
 
 let dir: string;
 beforeAll(() => {
@@ -157,7 +176,93 @@ describe("fixImportMeta", () => {
   });
 });
 
-describe("server import.meta rewrite option", () => {
+/** Runs `code` as an inline module in happy-dom; returns `window.ok` and any reported errors. */
+async function runInHappyDom(code: string): Promise<{ ok: unknown; errors: string[] }> {
+  const window = new Window({
+    url: "http://localhost/",
+    settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true },
+  });
+  const errors: string[] = [];
+  window.addEventListener("error", (e) => errors.push(String((e as unknown as { error?: unknown }).error ?? e)));
+  try {
+    const script = window.document.createElement("script");
+    script.type = "module";
+    script.textContent = code;
+    window.document.body.appendChild(script);
+    await window.happyDOM.waitUntilComplete();
+    return { ok: (window as unknown as { ok?: unknown }).ok, errors };
+  } finally {
+    await window.happyDOM.close();
+  }
+}
+
+describe("parenthesizeRegExps", () => {
+  const SCHEME = "function f(e){return/^[a-z][a-z0-9+.-]*:/i.test(e)}\nwindow.ok=import.meta.url;";
+
+  it("happy-dom still fails on a regex after return (upstream bug; drop the workaround once this fails)", async () => {
+    const r = await runInHappyDom(SCHEME);
+    expect(r.ok).toBeUndefined();
+    expect(r.errors.join("\n")).toContain("Failed to parse module");
+  });
+
+  const cases: Array<[name: string, input: string, output: string]> = [
+    ["after return", SCHEME, "function f(e){return(/^[a-z][a-z0-9+.-]*:/i).test(e)}\nwindow.ok=import.meta.url;"],
+    ["after return, \\s+", "function f(e){return/\\s+/.test(e)}\nwindow.ok=import.meta.url;", "function f(e){return(/\\s+/).test(e)}\nwindow.ok=import.meta.url;"],
+    ["after !", "const a=!/a:/;window.ok=import.meta.url;", "const a=!(/a:/);window.ok=import.meta.url;"],
+    ["after typeof", "const a=typeof/a:/;window.ok=import.meta.url;", "const a=typeof(/a:/);window.ok=import.meta.url;"],
+    ["after ||", "const a=0||/a:/;window.ok=import.meta.url;", "const a=0||(/a:/);window.ok=import.meta.url;"],
+    ["after whitespace", "function f(e){return /a:/.test(e)}window.ok=import.meta.url;", "function f(e){return (/a:/).test(e)}window.ok=import.meta.url;"],
+    ["after -", "const a=1-/a:/.source.length;window.ok=import.meta.url;", "const a=1-(/a:/).source.length;window.ok=import.meta.url;"],
+  ];
+  for (const [name, input, output] of cases) {
+    it(`fixes a regex ${name}`, async () => {
+      const before = await runInHappyDom(input);
+      expect(before.ok).toBeUndefined();
+      expect(before.errors.join("\n")).toContain("Failed to parse module");
+      expect(parenthesizeRegExps(input)).toBe(output);
+      const after = await runInHappyDom(output);
+      expect(after.errors).toEqual([]);
+      expect(after.ok).toBe("http://localhost/");
+    });
+  }
+
+  const asi: Array<[name: string, input: string, output: string]> = [
+    ["after if(a) and a newline", 'let a=1,r;if(a)\n/a:/.test("a:")&&(r="if");window.ok=r;', 'let a=1,r;if(a)\n(/a:/).test("a:")&&(r="if");window.ok=r;'],
+    ["after a function declaration and a newline", 'let r;function f(){}\n/a:/.test("a:")&&(r="fn");window.ok=r;', 'let r;function f(){}\n(/a:/).test("a:")&&(r="fn");window.ok=r;'],
+  ];
+  for (const [name, input, output] of asi) {
+    it(`keeps statement boundaries for a regex ${name}`, async () => {
+      expect(parenthesizeRegExps(input)).toBe(output);
+      const r = await runInHappyDom(output);
+      expect(r.errors).toEqual([]);
+      expect(r.ok).toBe(name.startsWith("after if") ? "if" : "fn");
+    });
+  }
+
+  it("leaves strings, comments and division alone", async () => {
+    const code = 'const s="/not a regex/";// a /x/ comment\n/* and /x/ */const a=8,b=4,c=2;window.ok=s+(a/b/c);';
+    expect(parenthesizeRegExps(code)).toBe(code);
+    expect((await runInHappyDom(code)).ok).toBe("/not a regex/1");
+  });
+
+  it("uses UTF-16 offsets around non-ASCII text", async () => {
+    const code = 'const s="héllo 😀 日本";function f(e){return/^[a-z]+:/i.test(e)}window.ok=s+f("a:");';
+    const out = parenthesizeRegExps(code);
+    expect(out).toBe('const s="héllo 😀 日本";function f(e){return(/^[a-z]+:/i).test(e)}window.ok=s+f("a:");');
+    expect((await runInHappyDom(out)).ok).toBe("héllo 😀 日本true");
+  });
+
+  it("wraps several literals, including one inside a template", () => {
+    expect(parenthesizeRegExps("x=`${/a/.source}`;y=[/b/g,/c/]")).toBe("x=`${(/a/).source}`;y=[(/b/g),(/c/)]");
+  });
+
+  it("returns code it cannot parse unchanged", () => {
+    expect(parenthesizeRegExps("return/a:/.test(x")).toBe("return/a:/.test(x");
+    expect(parenthesizeRegExps("")).toBe("");
+  });
+});
+
+describe("server happyDomCompat option", () => {
   it("makes Vite's helper loadable as a module in happy-dom", async () => {
     const app = mkdtempSync(join(tmpdir(), "wfa-meta-"));
     mkdirSync(join(app, "assets"));
@@ -166,7 +271,7 @@ describe("server import.meta rewrite option", () => {
       "function g(){return import.meta.env ?? 'none'}\n" +
       "document.body.setAttribute('data-ok', f('./x.js').pathname + '|' + g());\n");
     const shell = '<html><head><script type="module" src="/assets/m.js"></script></head><body></body></html>';
-    const s = await startStaticServer({ dir: app, base: "/", shell, rewriteImportMeta: true });
+    const s = await startStaticServer({ dir: app, base: "/", shell, happyDomCompat: true });
     const browser = new Browser({
       settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true },
     });
@@ -182,16 +287,60 @@ describe("server import.meta rewrite option", () => {
     }
   });
 
-  it("rewrites served JS only when rewriteImportMeta is set", async () => {
+  it("rewrites served JS only when happyDomCompat is set", async () => {
     writeFileSync(join(dir, "assets/meta.js"), "function f(){return import.meta.url}");
+    writeFileSync(join(dir, "assets/re.js"), "function f(e){return/^[a-z]+:/i.test(e)}");
     const off = await startStaticServer({ dir, base: "/", shell: "<shell>" });
-    const on = await startStaticServer({ dir, base: "/", shell: "<shell>", rewriteImportMeta: true });
+    const on = await startStaticServer({ dir, base: "/", shell: "<shell>", happyDomCompat: true });
     try {
       expect((await raw(off.origin, "/assets/meta.js")).body).toBe("function f(){return import.meta.url}");
       expect((await raw(on.origin, "/assets/meta.js")).body).toBe("function f(){return 0,import.meta.url}");
+      expect((await raw(off.origin, "/assets/re.js")).body).toBe("function f(e){return/^[a-z]+:/i.test(e)}");
+      expect((await raw(on.origin, "/assets/re.js")).body).toBe("function f(e){return(/^[a-z]+:/i).test(e)}");
     } finally {
       await off.close();
       await on.close();
+    }
+  });
+});
+
+describe("happyDomCompat", () => {
+  it("applies the regex and import.meta rewrites together", () => {
+    expect(happyDomCompat("function f(e){return/a:/.test(e)?import.meta.url:0}function g(){return import.meta.url}")).toBe(
+      "function f(e){return(/a:/).test(e)?import.meta.url:0}function g(){return 0,import.meta.url}",
+    );
+  });
+
+  it("parses a file once for concurrent first requests", async () => {
+    writeFileSync(join(dir, "assets/shared.js"), "function f(e){return/a:/.test(e)}");
+    const s = await startStaticServer({ dir, base: "/", shell: "<shell>", happyDomCompat: true });
+    try {
+      parseCalls.count = 0;
+      const bodies = await Promise.all(Array.from({ length: 8 }, () => raw(s.origin, "/assets/shared.js")));
+      expect(bodies.map((b) => b.body)).toEqual(Array(8).fill("function f(e){return(/a:/).test(e)}"));
+      expect(parseCalls.count).toBe(1);
+    } finally {
+      await s.close();
+    }
+  });
+});
+
+describe("happyDomCompat read failures", () => {
+  // Root can read a mode-000 file, so the first read would not fail.
+  it.skipIf(process.getuid?.() === 0)("does not cache a failed read", async () => {
+    const file = join(dir, "assets/locked.js");
+    writeFileSync(file, "function f(e){return/a:/.test(e)}");
+    chmodSync(file, 0o000);
+    const s = await startStaticServer({ dir, base: "/", shell: "<shell>", happyDomCompat: true });
+    try {
+      expect((await raw(s.origin, "/assets/locked.js")).status).toBe(500);
+      chmodSync(file, 0o644);
+      const ok = await raw(s.origin, "/assets/locked.js");
+      expect(ok.status).toBe(200);
+      expect(ok.body).toBe("function f(e){return(/a:/).test(e)}");
+    } finally {
+      chmodSync(file, 0o644);
+      await s.close();
     }
   });
 });
