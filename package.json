@@ -1,8 +1,9 @@
 {
   "name": "@anubhav-choubey/web-for-agents",
   "version": "0.1.0",
-  "description": "SEO and LLM-readiness helpers for React + Vite",
+  "description": "SEO and AI-agent readiness for React + Vite: head tags, JSON-LD, prerendering, markdown pages, llms.txt, agents.json and WebMCP",
   "license": "MIT",
+  "author": "Anubhav Choubey",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/LazyyVenom/Web-For-Agents.git"
@@ -20,7 +21,12 @@
     "react",
     "vite",
     "json-ld",
-    "sitemap"
+    "sitemap",
+    "robots.txt",
+    "prerender",
+    "markdown",
+    "webmcp",
+    "agents.json"
   ],
   "publishConfig": {
     "access": "public"
