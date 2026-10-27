@@ -1,5 +1,13 @@
 import { READY_CHECK } from "./probe";
-import { RenderError, errorMessage, runInPage, waitForReady, type Renderer } from "./renderers";
+import {
+  RenderError,
+  createDeadline,
+  errorMessage,
+  readyTimeoutMessage,
+  runInPage,
+  waitForReady,
+  type Renderer,
+} from "./renderCore";
 
 type PlaywrightCore = typeof import("playwright-core");
 
@@ -37,22 +45,39 @@ export async function createChromeRenderer(
   return {
     name: channel,
     async render(url, timeoutMs, inPage) {
+      const deadline = createDeadline(timeoutMs);
+      const timeoutText = readyTimeoutMessage(timeoutMs);
       const page = await browser.newPage();
       try {
         const pageErrors: string[] = [];
         page.on("pageerror", (e) => pageErrors.push(e.message));
+        let html: string;
+        let finalPath: string;
         try {
-          await page.goto(url, { waitUntil: "load", timeout: timeoutMs });
-          await waitForReady(async () => {
-            const r = (await page.evaluate(READY_CHECK)) as { ready: boolean; errors: string[] };
-            return { ready: r.ready, errors: [...pageErrors, ...r.errors] };
-          }, timeoutMs);
+          // Playwright's own timeout is a backstop; the deadline fires first with our message.
+          await deadline.race(
+            page.goto(url, { waitUntil: "load", timeout: deadline.remaining() + 1000 }),
+            timeoutText,
+          );
+          await deadline.race(
+            waitForReady(async () => {
+              const r = (await page.evaluate(READY_CHECK)) as { ready: boolean; errors: string[] };
+              return { ready: r.ready, errors: [...pageErrors, ...r.errors] };
+            }, timeoutMs),
+            timeoutText,
+          );
+          html = (await deadline.race(page.evaluate(SERIALIZE), timeoutText)) as string;
+          finalPath = new URL(page.url()).pathname;
         } catch (e) {
           throw new RenderError(channel, errorMessage(e));
         }
-        const html = (await page.evaluate(SERIALIZE)) as string;
-        const finalPath = new URL(page.url()).pathname;
-        const results = await runInPage(channel, inPage, (expr) => page.evaluate(expr));
+        const results = await runInPage(
+          channel,
+          inPage,
+          (expr) => page.evaluate(expr),
+          deadline,
+          timeoutMs,
+        );
         return { html, finalPath, inPage: results };
       } finally {
         await page.close().catch(() => {});

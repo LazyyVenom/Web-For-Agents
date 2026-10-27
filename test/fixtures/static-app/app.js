@@ -30,6 +30,17 @@ function start() {
     case "/boom":
       boom();
       break;
+    case "/reject":
+      fetch("/data.json").then(() => {
+        throw new Error("async boom");
+      });
+      break;
+    case "/console":
+      console.timeStamp("t");
+      console.profile("p");
+      console.profileEnd("p");
+      show("<h1>Console</h1>");
+      break;
     case "/interval":
       setInterval(() => {}, 1000);
       show("<h1>Interval</h1>");

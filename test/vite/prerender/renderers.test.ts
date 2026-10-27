@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { inPageExpression } from "../../../src/vite/prerender/extensions";
@@ -11,6 +13,7 @@ import {
   waitForReady,
   type Renderer,
 } from "../../../src/vite/prerender/renderers";
+import { formatFailures } from "../../../src/vite/prerender/crawl";
 import { startStaticServer, type StaticServer } from "../../../src/vite/prerender/server";
 import type { RendererName } from "../../../src/vite/options";
 
@@ -29,11 +32,19 @@ async function probeChrome(): Promise<boolean> {
 const chromeAvailable = await probeChrome();
 
 let server: StaticServer;
+let hanging: Server;
+let hangingOrigin: string;
 beforeAll(async () => {
   server = await startStaticServer({ dir, base: "/", shell });
+  // accepts connections and never answers
+  hanging = createServer(() => {});
+  await new Promise<void>((res) => hanging.listen(0, "127.0.0.1", res));
+  hangingOrigin = `http://127.0.0.1:${(hanging.address() as AddressInfo).port}`;
 });
 afterAll(async () => {
   await server?.close();
+  hanging?.closeAllConnections();
+  await new Promise((res) => hanging?.close(res));
 });
 
 const suite = (name: RendererName, make: () => Promise<Renderer>) => {
@@ -68,6 +79,11 @@ const suite = (name: RendererName, make: () => Promise<Renderer>) => {
     expect(Date.now() - t).toBeLessThan(3000);
   });
 
+  it("tolerates console.timeStamp/profile (React dev builds call them)", async () => {
+    const res = await r.render(url("/console"), 5000);
+    expect(res.html).toContain("Console");
+  });
+
   it("renders dynamic imports", async () => {
     const res = await r.render(url("/dynamic"), 5000);
     expect(res.html).toContain("Chunk");
@@ -83,6 +99,46 @@ const suite = (name: RendererName, make: () => Promise<Renderer>) => {
     expect(err).toBeInstanceOf(RenderError);
     expect((err as RenderError).renderer).toBe(name);
     expect((err as Error).message).toContain("boom");
+  });
+
+  it("captures unhandled promise rejections as render errors", async () => {
+    const err = await r.render(url("/reject"), 5000).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RenderError);
+    expect((err as RenderError).renderer).toBe(name);
+    expect((err as Error).message).toContain("async boom");
+    const report = formatFailures(
+      [{ route: "/reject", renderer: (err as RenderError).renderer, message: (err as Error).message }],
+      false,
+    );
+    expect(report).toContain(`/reject [${name}]:`);
+    expect(report).toContain("async boom");
+    // the process survived and the renderer still works
+    const ok = await r.render(url("/fetch"), 5000);
+    expect(ok.html).toContain("Fetched data text");
+  });
+
+  it("attributes concurrent rejections to the right render", async () => {
+    const [bad, good] = await Promise.allSettled([
+      r.render(url("/reject"), 5000),
+      r.render(url("/held"), 5000),
+    ]);
+    expect(bad.status).toBe("rejected");
+    expect(((bad as PromiseRejectedResult).reason as Error).message).toContain("async boom");
+    expect(good.status).toBe("fulfilled");
+  });
+
+  it("bounds a hanging navigation by the render deadline", async () => {
+    const t = Date.now();
+    const err = await r.render(hangingOrigin + "/", 800).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RenderError);
+    expect((err as Error).message).toContain("did not become ready within 800ms");
+    expect(Date.now() - t).toBeLessThan(2000);
+  });
+
+  it("restores process unhandledRejection listeners", async () => {
+    const before = process.listeners("unhandledRejection");
+    await r.render(url("/reject"), 5000).catch(() => {});
+    expect(process.listeners("unhandledRejection")).toEqual(before);
   });
 
   it("rejects on readiness timeout", async () => {
@@ -113,6 +169,12 @@ const suite = (name: RendererName, make: () => Promise<Renderer>) => {
       expect(err).toBeInstanceOf(RenderError);
       expect((err as Error).message).toContain('extension "t" failed');
       expect((err as Error).message).toContain("nope");
+    });
+
+    it("fails the render when a result is not JSON", async () => {
+      const err = await r.render(url("/fetch"), 5000, { j: `"not json"` }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(RenderError);
+      expect((err as Error).message).toContain('extension "j" failed');
     });
 
     it("serializes html before running scripts", async () => {
