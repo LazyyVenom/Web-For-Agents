@@ -43,14 +43,20 @@ afterAll(async () => {
   await new Promise((res) => hanging?.close(res));
 });
 
+// Most renders below get a 5s budget, which equals Vitest's default test timeout. A render can
+// also spend time outside that budget (opening and closing the page), so on a slow CI runner the
+// test timeout fired first and hid the render's own error. Give every test, and the browser
+// launch, room well above the render budget.
+const SUITE_TIMEOUT_MS = 30_000;
+
 const suite = (name: RendererName, make: () => Promise<Renderer>) => {
   let r: Renderer;
   beforeAll(async () => {
     r = await make();
-  });
+  }, SUITE_TIMEOUT_MS);
   afterAll(async () => {
     await r?.close();
-  });
+  }, SUITE_TIMEOUT_MS);
   const url = (p: string) => server.origin + p;
 
   it("renders fetched data", async () => {
@@ -203,11 +209,11 @@ const suite = (name: RendererName, make: () => Promise<Renderer>) => {
   });
 };
 
-describe("happy-dom renderer", () => {
+describe("happy-dom renderer", { timeout: SUITE_TIMEOUT_MS }, () => {
   suite("happy-dom", async () => createHappyDomRenderer());
 });
 
-describe.skipIf(!chromeAvailable)("chrome renderer", () => {
+describe.skipIf(!chromeAvailable)("chrome renderer", { timeout: SUITE_TIMEOUT_MS }, () => {
   suite("chrome", () => createChromeRenderer("chrome"));
 });
 
