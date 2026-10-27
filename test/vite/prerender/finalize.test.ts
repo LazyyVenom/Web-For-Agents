@@ -72,6 +72,14 @@ describe("finalizeHtml", () => {
     expect(out).toContain('<source src="../../v.mp4"');
   });
 
+  it("restores scripts prepareShell pointed at the root", () => {
+    const head = `<script type="module" src="/assets/index.js" data-wfa-rel-src></script>`;
+    const deep = finalizeHtml(base(head), { route: "/blog/hello", relativeBase: true });
+    expect(deep).toContain('<script type="module" src="../../assets/index.js"></script>');
+    const root = finalizeHtml(base(head), { route: "/", relativeBase: true });
+    expect(root).toContain('<script type="module" src="./assets/index.js"></script>');
+  });
+
   describe("prerender server origin", () => {
     const origin = "http://127.0.0.1:4321";
     // What Vite's preload helper and an app leave behind: absolute URLs on the prerender server.

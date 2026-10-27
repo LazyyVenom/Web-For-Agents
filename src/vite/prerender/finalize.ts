@@ -1,7 +1,7 @@
 import { PRERENDERED_ATTR, MARKDOWN_MIME } from "../../shared/conventions";
 import { parseHtml } from "./dom";
 import { routeDepth } from "./paths";
-import { PROBE_ATTR, TEMP_BASE_ATTR } from "./probe";
+import { PROBE_ATTR, REL_SRC_ATTR, TEMP_BASE_ATTR } from "./probe";
 
 export interface FinalizeOptions {
   route: string;
@@ -45,6 +45,11 @@ export function finalizeHtml(html: string, opts: FinalizeOptions): string {
   try {
     document.querySelectorAll(`[${PROBE_ATTR}], [${TEMP_BASE_ATTR}]`).forEach((el) => el.remove());
     document.documentElement.setAttribute(PRERENDERED_ATTR, "");
+    document.querySelectorAll(`script[${REL_SRC_ATTR}]`).forEach((el) => {
+      const src = el.getAttribute("src");
+      if (src?.startsWith("/")) el.setAttribute("src", "." + src);
+      el.removeAttribute(REL_SRC_ATTR);
+    });
 
     if (opts.origin) {
       // The server mounts an absolute base at its path, so the URL path already carries the base;

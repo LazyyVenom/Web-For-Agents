@@ -6,6 +6,7 @@ import {
   PROBE_GLOBAL,
   PROBE_SCRIPT,
   READY_CHECK,
+  REL_SRC_ATTR,
   prepareShell,
   type ReadyState,
 } from "../../../src/vite/prerender/probe";
@@ -33,6 +34,18 @@ describe("prepareShell", () => {
     expect(second.tagName).toBe("BASE");
     expect(second.getAttribute("href")).toBe("/");
     expect(second.hasAttribute("data-wfa-temp-base")).toBe(true);
+  });
+
+  it("points relative module scripts at the root for a relative base, marked for finalize", () => {
+    const html =
+      '<html><head><script type="module" crossorigin src="./assets/index.js"></script>' +
+      '<script src="https://e.com/x.js"></script></head></html>';
+    const out = prepareShell(html, { relativeBase: true });
+    expect(out).toContain(`<script type="module" crossorigin src="/assets/index.js" ${REL_SRC_ATTR}>`);
+    expect(out).toContain('<script src="https://e.com/x.js">');
+    const abs = prepareShell(html, { relativeBase: false });
+    expect(abs).toContain('src="./assets/index.js"');
+    expect(abs).not.toContain(REL_SRC_ATTR);
   });
 
   it("throws without a head", () => {

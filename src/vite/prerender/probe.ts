@@ -3,6 +3,8 @@ import { LOG_PREFIX } from "../../shared/errors";
 
 export const PROBE_ATTR = "data-wfa-probe";
 export const TEMP_BASE_ATTR = "data-wfa-temp-base";
+/** Marks a script whose "./x" src prepareShell changed to "/x"; finalizeHtml restores it. */
+export const REL_SRC_ATTR = "data-wfa-rel-src";
 export const IDLE_MS = 200;
 /** Window property the probe stores its state in. */
 export const PROBE_GLOBAL = "__WFA_PROBE__";
@@ -76,5 +78,15 @@ export function prepareShell(html: string, opts: { relativeBase: boolean }): str
     `<script ${PROBE_ATTR}>${PROBE_SCRIPT}</script>` +
     (opts.relativeBase ? `<base href="/" ${TEMP_BASE_ATTR}>` : "");
   const at = m.index + m[0].length;
-  return html.slice(0, at) + insert + html.slice(at);
+  let out = html.slice(0, at) + insert + html.slice(at);
+  if (opts.relativeBase) {
+    // happy-dom resolves script src against the page URL, ignoring <base>, so "./assets/x.js" on
+    // /blog/hello would run as /blog/assets/x.js. Vite resolves lazy chunk and CSS URLs against the
+    // module's import.meta.url, which would then be wrong too; load scripts from the root instead.
+    const relSrc = /(\ssrc\s*=\s*["'])\.\//i;
+    out = out.replace(/<script\b[^>]*>/gi, (tag) =>
+      relSrc.test(tag) ? tag.replace(relSrc, "$1/").replace(/>$/, ` ${REL_SRC_ATTR}>`) : tag,
+    );
+  }
+  return out;
 }
