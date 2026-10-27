@@ -55,6 +55,12 @@ describe("schema builders", () => {
     expect(n.potentialAction.target).toBe("https://a.com/search?q={search_term_string}");
   });
 
+  it("webSite with empty searchUrlTemplate has no potentialAction", () => {
+    const n: any = schema.webSite({ name: "w", url: "https://a.com", searchUrlTemplate: "" });
+    expect(n).not.toHaveProperty("potentialAction");
+    expect(serializeJsonLd(n)).not.toContain("potentialAction");
+  });
+
   it("builders drop undefined fields", () => {
     const out = serializeJsonLd(schema.article({ headline: "h", description: undefined }));
     expect(out).not.toContain("undefined");

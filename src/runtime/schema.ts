@@ -97,11 +97,13 @@ export const schema = {
     const { searchUrlTemplate, ...rest } = i;
     return node("WebSite", {
       ...rest,
-      potentialAction: searchUrlTemplate && {
+      potentialAction: searchUrlTemplate
+        ? {
         "@type": "SearchAction",
         target: searchUrlTemplate,
         "query-input": "required name=search_term_string",
-      },
+      }
+        : undefined,
     });
   },
 };
