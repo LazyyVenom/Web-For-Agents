@@ -22,7 +22,7 @@ describe("schemaFromForm", () => {
       <input name="c" type="checkbox">`),
     );
     const p = s.properties!;
-    expect(p.t).toMatchObject({ type: "string", minLength: 2, maxLength: 9, pattern: "[a-z]+" });
+    expect(p.t).toMatchObject({ type: "string", minLength: 2, maxLength: 9, pattern: "^(?:[a-z]+)$" });
     expect(p.e).toMatchObject({ type: "string", format: "email" });
     expect(p.u).toMatchObject({ type: "string", format: "uri" });
     expect(p.d).toMatchObject({ type: "string", format: "date" });
@@ -156,8 +156,11 @@ describe("hardening", () => {
   });
   it("anchors patterns and fails closed on invalid ones", () => {
     const s = schemaFromForm(form(`<input name="p" pattern="[a-z]+">`));
+    expect(s.properties!.p!.pattern).toBe("^(?:[a-z]+)$");
     expect(validateInput(s, { p: "abc" }).ok).toBe(true);
     expect(validateInput(s, { p: "abc123" }).ok).toBe(false);
+    const hand = { type: "object" as const, properties: { p: { type: "string" as const, pattern: "[a-z]+" } } };
+    expect(validateInput(hand, { p: "abc123" }).ok).toBe(true);
     const bad = { type: "object" as const, properties: { p: { type: "string" as const, pattern: "([" } } };
     expect(validateInput(bad, { p: "x" }).ok).toBe(false);
   });

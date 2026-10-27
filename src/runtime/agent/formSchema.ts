@@ -83,7 +83,7 @@ function inputSchema(el: HTMLInputElement | HTMLTextAreaElement): JsonSchema {
   if (minLength !== undefined) s.minLength = minLength;
   if (maxLength !== undefined) s.maxLength = maxLength;
   const pattern = el.getAttribute("pattern");
-  if (pattern) s.pattern = pattern;
+  if (pattern) s.pattern = `^(?:${pattern})$`;
   return s;
 }
 
@@ -181,7 +181,7 @@ function checkValue(s: JsonSchema, v: unknown, field: string, errors: Errors): v
     if (s.pattern !== undefined) {
       let ok = false;
       try {
-        ok = new RegExp(`^(?:${s.pattern})$`).test(v);
+        ok = new RegExp(s.pattern).test(v);
       } catch {
         ok = false;
       }
