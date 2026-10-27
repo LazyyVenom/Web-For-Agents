@@ -10,7 +10,13 @@
     "skipLibCheck": true,
     "noEmit": true,
     "esModuleInterop": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "paths": {
+      "@anubhav-choubey/web-for-agents": ["./src/index.ts"],
+      "@anubhav-choubey/web-for-agents/vite": ["./src/vite/index.ts"],
+      "@anubhav-choubey/web-for-agents/overlay": ["./src/overlay/index.ts"],
+      "@anubhav-choubey/web-for-agents/cli": ["./src/cli/index.ts"]
+    }
   },
   "include": ["src", "test", "examples/**/*", "*.ts"],
   "exclude": ["node_modules", "dist", "test/fixtures"]
