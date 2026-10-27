@@ -1,17 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { fetchText, looksLikeHtml } from "../../src/cli/fetch";
+import { describe, expect, it } from "vitest";
+import { fetchText, looksLikeHtml, MAX_BODY_BYTES } from "../../src/cli/fetch";
 import type { FetchResult } from "../../src/cli/fetch";
-import { startServer } from "../helpers/server";
+import { useTestServers } from "../helpers/server";
 
-const closers: Array<() => Promise<void>> = [];
-async function serve(...args: Parameters<typeof startServer>) {
-  const s = await startServer(...args);
-  closers.push(s.close);
-  return s;
-}
-afterEach(async () => {
-  await Promise.all(closers.splice(0).map((c) => c()));
-});
+const serve = useTestServers();
 
 const html = { "content-type": "text/html" };
 
@@ -94,7 +86,7 @@ describe("fetchText", () => {
     });
     const r = await fetchText(s.url + "/", { timeoutMs: 5000 });
     expect(r.truncated).toBe(true);
-    expect(r.body.length).toBeLessThanOrEqual(5 * 1024 * 1024);
+    expect(r.body.length).toBeLessThanOrEqual(MAX_BODY_BYTES);
     await sawClose;
   });
 
