@@ -79,4 +79,14 @@ describe("normalizeRoute", () => {
     expect(normalizeRoute("/")).toBe("/");
     expect(normalizeRoute("#h")).toBe("/");
   });
+
+  it("rejects CR/LF in override bot names and disallow paths", () => {
+    const ai = { training: "block", search: "allow" } as const;
+    expect(() =>
+      resolveOptions({ siteUrl: "https://a.com", robots: { ai: { ...ai, overrides: { "Bot\nDisallow: /": "allow" } } } }),
+    ).toThrow(/\[web-for-agents\]/);
+    expect(() =>
+      resolveOptions({ siteUrl: "https://a.com", robots: { ai, disallow: ["/a\r\nAllow: /"] } }),
+    ).toThrow(/\[web-for-agents\]/);
+  });
 });

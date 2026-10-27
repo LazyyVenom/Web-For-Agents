@@ -80,4 +80,12 @@ describe("buildRobots", () => {
       expect(txt.endsWith("\n\n")).toBe(false);
     }
   });
+
+  it("matches override names case-insensitively", () => {
+    const txt = build({ training: "block", search: "allow", overrides: { gptbot: "allow" } });
+    expect(txt).not.toContain("GPTBot");
+    expect(txt).toContain("User-agent: ClaudeBot");
+    const txt2 = build({ training: "block", search: "allow", overrides: { gptbot: "block" } });
+    expect(txt2.match(/GPTBot/gi)).toHaveLength(1);
+  });
 });

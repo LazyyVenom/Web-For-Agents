@@ -74,8 +74,17 @@ export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
     throw new Error(`${PREFIX} robots.ai.training and robots.ai.search must be "allow" or "block"`);
   }
   for (const [bot, rule] of Object.entries(ai.overrides ?? {})) {
+    if (/[\r\n]/.test(bot)) {
+      throw new Error(`${PREFIX} robots.ai.overrides bot names must not contain line breaks`);
+    }
     if (!isRule(rule)) {
       throw new Error(`${PREFIX} robots.ai.overrides.${bot} must be "allow" or "block"`);
+    }
+  }
+
+  for (const path of input.robots.disallow ?? []) {
+    if (/[\r\n]/.test(path)) {
+      throw new Error(`${PREFIX} robots.disallow paths must not contain line breaks`);
     }
   }
 

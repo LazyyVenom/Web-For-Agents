@@ -33,9 +33,10 @@ export function buildRobots(opts: ResolvedOptions): string {
   if (ai.search === "block") AI_BOTS.search.forEach(add);
 
   for (const [bot, rule] of Object.entries(overrides)) {
-    const i = blocked.indexOf(bot);
-    if (rule === "block") add(bot);
-    else if (i !== -1) blocked.splice(i, 1);
+    const i = blocked.findIndex((b) => b.toLowerCase() === bot.toLowerCase());
+    if (rule === "block") {
+      if (i === -1) blocked.push(bot);
+    } else if (i !== -1) blocked.splice(i, 1);
   }
 
   const blocks: string[] = [
