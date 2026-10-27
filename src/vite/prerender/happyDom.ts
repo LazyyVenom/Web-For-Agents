@@ -1,7 +1,8 @@
 import { Browser, type BrowserPage } from "happy-dom";
-import { READY_CHECK } from "./probe";
+import { READY_CHECK, type ReadyState } from "./probe";
 import {
   RenderError,
+  SERIALIZE_EXPR,
   createDeadline,
   errorMessage,
   readyTimeoutMessage,
@@ -11,8 +12,6 @@ import {
 } from "./renderCore";
 
 const NOOP_CONSOLE = ["timeStamp", "profile", "profileEnd"] as const;
-
-const SERIALIZE = `"<!DOCTYPE html>\\n" + document.documentElement.outerHTML`;
 
 /*
  * Unhandled promise rejections in a happy-dom page never reach the page's own listeners or the
@@ -145,14 +144,14 @@ export function createHappyDomRenderer(): Renderer {
           );
           await step(
             waitForReady(async () => {
-              const r = page.evaluate(READY_CHECK) as { ready: boolean; errors: string[] };
+              const r = page.evaluate(READY_CHECK) as ReadyState;
               return { ready: r.ready, errors: [...r.errors] };
             }, timeoutMs),
           );
         } catch (e) {
           throw new RenderError("happy-dom", errorMessage(e));
         }
-        const html = page.evaluate(SERIALIZE) as string;
+        const html = page.evaluate(SERIALIZE_EXPR) as string;
         const finalPath = new URL(page.url).pathname;
         const results = await runInPage(
           "happy-dom",

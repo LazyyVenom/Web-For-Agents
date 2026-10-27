@@ -1,6 +1,7 @@
-import { READY_CHECK } from "./probe";
+import { READY_CHECK, type ReadyState } from "./probe";
 import {
   RenderError,
+  SERIALIZE_EXPR,
   createDeadline,
   errorMessage,
   readyTimeoutMessage,
@@ -10,8 +11,6 @@ import {
 } from "./renderCore";
 
 type PlaywrightCore = typeof import("playwright-core");
-
-const SERIALIZE = `"<!DOCTYPE html>\\n" + document.documentElement.outerHTML`;
 
 export async function createChromeRenderer(
   channel: "chrome" | "msedge",
@@ -61,12 +60,12 @@ export async function createChromeRenderer(
           );
           await deadline.race(
             waitForReady(async () => {
-              const r = (await page.evaluate(READY_CHECK)) as { ready: boolean; errors: string[] };
+              const r = (await page.evaluate(READY_CHECK)) as ReadyState;
               return { ready: r.ready, errors: [...pageErrors, ...r.errors] };
             }, timeoutMs),
             timeoutText,
           );
-          html = (await deadline.race(page.evaluate(SERIALIZE), timeoutText)) as string;
+          html = (await deadline.race(page.evaluate(SERIALIZE_EXPR), timeoutText)) as string;
           finalPath = new URL(page.url()).pathname;
         } catch (e) {
           throw new RenderError(channel, errorMessage(e));

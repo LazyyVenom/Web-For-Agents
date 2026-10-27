@@ -13,6 +13,10 @@ import {
   waitForReady,
   type Renderer,
 } from "../../../src/vite/prerender/renderers";
+import { errorMessage as sharedErrorMessage } from "../../../src/shared/errors";
+import { SERIALIZE_EXPR } from "../../../src/vite/prerender/renderCore";
+import { errorMessage } from "../../../src/vite/prerender/renderers";
+import { Window } from "happy-dom";
 import { formatFailures } from "../../../src/vite/prerender/crawl";
 import { startStaticServer, type StaticServer } from "../../../src/vite/prerender/server";
 import type { RendererName } from "../../../src/vite/options";
@@ -203,6 +207,20 @@ describe("happy-dom renderer", () => {
 
 describe.skipIf(!chromeAvailable)("chrome renderer", () => {
   suite("chrome", () => createChromeRenderer("chrome"));
+});
+
+describe("shared render helpers", () => {
+  it("SERIALIZE_EXPR yields the doctype and the document element", () => {
+    const window = new Window();
+    window.document.write("<html lang=en><head><title>t</title></head><body><p>x</p></body></html>");
+    const html = window.eval(SERIALIZE_EXPR) as string;
+    expect(html).toBe("<!DOCTYPE html>\n" + window.document.documentElement.outerHTML);
+    expect(html).toContain("<p>x</p>");
+  });
+
+  it("errorMessage is the shared helper", () => {
+    expect(errorMessage).toBe(sharedErrorMessage);
+  });
 });
 
 describe("waitForReady", () => {

@@ -1,13 +1,16 @@
 import { READY_GLOBAL } from "../../shared/conventions";
+import { LOG_PREFIX } from "../../shared/errors";
 
 export const PROBE_ATTR = "data-wfa-probe";
 export const TEMP_BASE_ATTR = "data-wfa-temp-base";
 export const IDLE_MS = 200;
+/** Window property the probe stores its state in. */
+export const PROBE_GLOBAL = "__WFA_PROBE__";
 
 /** Classic inline script: tracks in-flight requests, DOM activity and errors. */
 export const PROBE_SCRIPT = `(function () {
   var w = window;
-  var p = (w.__WFA_PROBE__ = { inflight: 0, last: Date.now(), errors: [] });
+  var p = (w.${PROBE_GLOBAL} = { inflight: 0, last: Date.now(), errors: [] });
   var touch = function () { p.last = Date.now(); };
   var done = function () { if (p.inflight > 0) p.inflight--; touch(); };
   if (typeof w.fetch === "function") {
@@ -51,9 +54,16 @@ export const PROBE_SCRIPT = `(function () {
   });
 })();`;
 
-/** JS expression evaluating to { ready, errors, path }. */
+/** Result of evaluating READY_CHECK in the page. */
+export interface ReadyState {
+  ready: boolean;
+  errors: string[];
+  path: string;
+}
+
+/** JS expression evaluating to a ReadyState. */
 export const READY_CHECK = `(function () {
-  var p = window.__WFA_PROBE__;
+  var p = window.${PROBE_GLOBAL};
   if (!p) return { ready: false, errors: [], path: location.pathname };
   var ready = document.readyState === "complete" && p.inflight === 0 && Date.now() - p.last >= ${IDLE_MS} && window.${READY_GLOBAL} !== false;
   return { ready: ready, errors: p.errors.slice(), path: location.pathname };
@@ -61,7 +71,7 @@ export const READY_CHECK = `(function () {
 
 export function prepareShell(html: string, opts: { relativeBase: boolean }): string {
   const m = /<head(?=[\s>])[^>]*>/i.exec(html);
-  if (!m) throw new Error("[web-for-agents] index.html has no <head>");
+  if (!m) throw new Error(`${LOG_PREFIX} index.html has no <head>`);
   const insert =
     `<script ${PROBE_ATTR}>${PROBE_SCRIPT}</script>` +
     (opts.relativeBase ? `<base href="/" ${TEMP_BASE_ATTR}>` : "");

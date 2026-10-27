@@ -1,4 +1,10 @@
+import { errorMessage } from "../../shared/errors";
 import type { RendererName } from "../options";
+
+export { errorMessage };
+
+/** Page expression serializing the rendered document (RenderResult.html). */
+export const SERIALIZE_EXPR = `"<!DOCTYPE html>\\n" + document.documentElement.outerHTML`;
 
 /** Extension name -> `inPageExpression` string. */
 export type InPageScripts = Record<string, string>;
@@ -24,10 +30,6 @@ export class RenderError extends Error {
     this.name = "RenderError";
     this.renderer = renderer;
   }
-}
-
-export function errorMessage(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
 }
 
 export function readyTimeoutMessage(timeoutMs: number): string {

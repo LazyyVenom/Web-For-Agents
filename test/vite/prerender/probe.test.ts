@@ -1,6 +1,14 @@
 import { Window } from "happy-dom";
 import { describe, expect, it } from "vitest";
-import { IDLE_MS, PROBE_SCRIPT, READY_CHECK, prepareShell } from "../../../src/vite/prerender/probe";
+import { LOG_PREFIX } from "../../../src/shared/errors";
+import {
+  IDLE_MS,
+  PROBE_GLOBAL,
+  PROBE_SCRIPT,
+  READY_CHECK,
+  prepareShell,
+  type ReadyState,
+} from "../../../src/vite/prerender/probe";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -31,6 +39,18 @@ describe("prepareShell", () => {
     expect(() => prepareShell("<html><body></body></html>", { relativeBase: false })).toThrow(
       "[web-for-agents] index.html has no <head>",
     );
+    expect(() => prepareShell("<html></html>", { relativeBase: false })).toThrow(LOG_PREFIX);
+  });
+});
+
+describe("probe constants", () => {
+  it("PROBE_SCRIPT and READY_CHECK share PROBE_GLOBAL", () => {
+    expect(PROBE_GLOBAL).toBe("__WFA_PROBE__");
+    expect(PROBE_SCRIPT).toContain(`w.${PROBE_GLOBAL} =`);
+    expect(READY_CHECK).toContain(`window.${PROBE_GLOBAL};`);
+    const window = new Window();
+    window.eval(PROBE_SCRIPT);
+    expect((window as unknown as Record<string, unknown>)[PROBE_GLOBAL]).toBeTypeOf("object");
   });
 });
 
@@ -38,8 +58,7 @@ describe("probe readiness", () => {
   const setup = () => {
     const window = new Window({ url: "http://localhost/some/path" });
     window.eval(PROBE_SCRIPT);
-    const check = () =>
-      window.eval(READY_CHECK) as { ready: boolean; errors: string[]; path: string };
+    const check = () => window.eval(READY_CHECK) as ReadyState;
     return { window, check };
   };
 
