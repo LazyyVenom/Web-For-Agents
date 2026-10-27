@@ -1,0 +1,218 @@
+import { describe, expect, it } from "vitest";
+import { crawlRoutes, formatFailures, type CrawlOptions, type RenderFn } from "../../../src/vite/prerender/crawl";
+import { RenderError } from "../../../src/vite/prerender/renderers";
+
+const ORIGIN = "http://127.0.0.1:1234";
+
+function page(body: string, head = ""): string {
+  return `<!DOCTYPE html><html><head><title>T</title>${head}</head><body><main>${body}</main></body></html>`;
+}
+const a = (href: string) => `<a href="${href}">x</a>`;
+
+function fakeRender(map: Record<string, string>, calls: string[] = []): RenderFn {
+  return async (url) => {
+    const path = new URL(url).pathname;
+    calls.push(path);
+    const html = map[path];
+    if (html === undefined) throw new RenderError("happy-dom", `no such page ${path}`);
+    return { html, finalPath: path, inPage: {} };
+  };
+}
+
+function opts(over: Partial<CrawlOptions> = {}): CrawlOptions {
+  return {
+    seeds: ["/"],
+    crawl: true,
+    exclude: [],
+    maxRoutes: 500,
+    concurrency: 2,
+    timeoutMs: 1000,
+    rendererFor: () => "happy-dom",
+    fallback: false,
+    origin: ORIGIN,
+    base: "/",
+    relativeBase: false,
+    contentSelector: "main",
+    inPage: {},
+    ...over,
+  };
+}
+
+describe("crawlRoutes", () => {
+  it("follows same-origin links and skips unsafe/excluded ones", async () => {
+    const calls: string[] = [];
+    const render = fakeRender(
+      {
+        "/": page(a("/a") + a("https://other.com/x") + a("mailto:a@b.c") + a("/logo.png") + a("/secret/x")),
+        "/a": page("A" + a("/b")),
+        "/b": page("B"),
+        "/seed": page("S"),
+      },
+      calls,
+    );
+    const r = await crawlRoutes(opts({ seeds: ["/", "/seed"], exclude: ["/secret/*"] }), render);
+    expect(r.pages.map((p) => p.route)).toEqual(["/", "/a", "/b", "/seed"]);
+    expect(calls).not.toContain("/secret/x");
+    expect(r.failures).toEqual([]);
+  });
+
+  it("query and hash variants dedupe", async () => {
+    const calls: string[] = [];
+    const render = fakeRender(
+      { "/": page(a("/s?q=1") + a("/s?q=2") + a("/s#x")), "/s": page("S") },
+      calls,
+    );
+    await crawlRoutes(opts(), render);
+    expect(calls.filter((c) => c === "/s")).toHaveLength(1);
+  });
+
+  it("infinite pagination stops at maxRoutes", async () => {
+    const render: RenderFn = async (url) => {
+      const path = new URL(url).pathname;
+      const n = path === "/" ? 0 : Number(path.split("/")[2]);
+      return { html: page("p" + n + a(`/page/${n + 1}`)), finalPath: path, inPage: {} };
+    };
+    const r = await crawlRoutes(opts({ maxRoutes: 20 }), render);
+    expect(r.pages).toHaveLength(20);
+    expect(r.truncated).toBe(true);
+  });
+
+  it("crawl: false renders only seeds", async () => {
+    const calls: string[] = [];
+    const render = fakeRender({ "/": page(a("/a")), "/a": page("A") }, calls);
+    const r = await crawlRoutes(opts({ crawl: false }), render);
+    expect(r.pages.map((p) => p.route)).toEqual(["/"]);
+    expect(calls).toEqual(["/"]);
+  });
+
+  it("respects concurrency", async () => {
+    let active = 0;
+    let max = 0;
+    const links = Array.from({ length: 10 }, (_, i) => a(`/p${i}`)).join("");
+    const render: RenderFn = async (url) => {
+      active++;
+      max = Math.max(max, active);
+      await new Promise((r) => setTimeout(r, 5));
+      active--;
+      const path = new URL(url).pathname;
+      return { html: page(path === "/" ? links : "x"), finalPath: path, inPage: {} };
+    };
+    const r = await crawlRoutes(opts({ concurrency: 3 }), render);
+    expect(r.pages).toHaveLength(11);
+    expect(max).toBeLessThanOrEqual(3);
+    expect(max).toBeGreaterThan(1);
+  });
+
+  it("aggregates failures and still renders other routes", async () => {
+    const render: RenderFn = async (url) => {
+      const path = new URL(url).pathname;
+      if (path === "/boom") throw new RenderError("happy-dom", "boom");
+      return { html: page(path === "/" ? a("/boom") + a("/ok") : "ok"), finalPath: path, inPage: {} };
+    };
+    const r = await crawlRoutes(opts(), render);
+    expect(r.pages.map((p) => p.route)).toEqual(["/", "/ok"]);
+    expect(r.failures).toEqual([{ route: "/boom", renderer: "happy-dom", message: "boom" }]);
+    const text = formatFailures(r.failures, false);
+    expect(text.startsWith("[web-for-agents] prerender failed for 1 route(s):")).toBe(true);
+    expect(text).toContain("  /boom [happy-dom]: boom");
+    expect(text).toContain("prerender.fallback");
+  });
+
+  it("fails a page with no text", async () => {
+    const r = await crawlRoutes(opts(), fakeRender({ "/": "<!DOCTYPE html><html><head></head><body><div></div></body></html>" }));
+    expect(r.pages).toEqual([]);
+    expect(r.failures[0]!.message).toContain("rendered no content");
+  });
+
+  it("retries with the fallback renderer", async () => {
+    const used: string[] = [];
+    const render: RenderFn = async (url, renderer) => {
+      used.push(renderer);
+      if (renderer === "happy-dom") throw new RenderError("happy-dom", "hd failed");
+      return { html: page("ok"), finalPath: new URL(url).pathname, inPage: {} };
+    };
+    const r = await crawlRoutes(opts({ fallback: "chrome" }), render);
+    expect(used).toEqual(["happy-dom", "chrome"]);
+    expect(r.failures).toEqual([]);
+    expect(r.pages[0]!.renderer).toBe("chrome");
+
+    const both: RenderFn = async (_u, renderer) => {
+      throw new RenderError(renderer, renderer === "chrome" ? "chrome failed" : "hd failed");
+    };
+    const r2 = await crawlRoutes(opts({ fallback: "chrome" }), both);
+    expect(r2.failures).toHaveLength(1);
+    expect(r2.failures[0]!.message).toContain("hd failed");
+    expect(r2.failures[0]!.message).toContain("chrome failed");
+  });
+
+  it("uses rendererFor per route", async () => {
+    const asked: string[] = [];
+    const seen: Array<[string, string]> = [];
+    const render: RenderFn = async (url, renderer) => {
+      const path = new URL(url).pathname;
+      seen.push([path, renderer]);
+      return { html: page(path === "/" ? a("/c") : "x"), finalPath: path, inPage: {} };
+    };
+    await crawlRoutes(
+      opts({ rendererFor: (r) => (asked.push(r), r === "/c" ? "chrome" : "happy-dom") }),
+      render,
+    );
+    expect(seen).toContainEqual(["/c", "chrome"]);
+    expect(seen).toContainEqual(["/", "happy-dom"]);
+    expect(asked).toContain("/c");
+  });
+
+  it("marks noindex and redirected pages unlisted", async () => {
+    const render: RenderFn = async (url) => {
+      const path = new URL(url).pathname;
+      if (path === "/")
+        return { html: page(a("/hidden")), finalPath: "/home", inPage: {} };
+      if (path === "/hidden")
+        return { html: page("h", '<meta name="robots" content="noindex">'), finalPath: path, inPage: {} };
+      return { html: page("home"), finalPath: path, inPage: {} };
+    };
+    const r = await crawlRoutes(opts(), render);
+    const by = Object.fromEntries(r.pages.map((p) => [p.route, p]));
+    expect(by["/"]!.listed).toBe(false);
+    expect(by["/hidden"]!.listed).toBe(false);
+    expect(by["/home"]!.listed).toBe(true);
+  });
+
+  it("skipRoute routes are neither rendered nor listed", async () => {
+    const calls: string[] = [];
+    const render = fakeRender({ "/": page(a("/skip") + a("/a")), "/a": page("A"), "/skip": page("S") }, calls);
+    const r = await crawlRoutes(opts({ skipRoute: (x: string) => x === "/skip" }), render);
+    expect(calls).not.toContain("/skip");
+    expect(r.pages.map((p) => p.route)).toEqual(["/", "/a"]);
+  });
+
+  it("flows in-page data and passes scripts to the fallback", async () => {
+    const inPage = { ext: "EXPR" };
+    const got: unknown[] = [];
+    const render: RenderFn = async (url, renderer, _t, scripts) => {
+      got.push(scripts);
+      if (renderer === "happy-dom") throw new RenderError("happy-dom", "x");
+      const path = new URL(url).pathname;
+      return { html: page("ok"), finalPath: path, inPage: { ext: "v:" + path } };
+    };
+    const r = await crawlRoutes(opts({ inPage, fallback: "chrome" }), render);
+    expect(got).toEqual([inPage, inPage]);
+    expect(r.pages[0]!.inPage).toEqual({ ext: "v:/" });
+  });
+
+  it("adds the markdown link only when markdownUrl is set", async () => {
+    const render = fakeRender({ "/": page("x") });
+    const on = await crawlRoutes(opts({ markdownUrl: (r) => `https://x.dev/${r}.md` }), render);
+    expect(on.pages[0]!.html).toContain('type="text/markdown"');
+    const off = await crawlRoutes(opts(), render);
+    expect(off.pages[0]!.html).not.toContain('type="text/markdown"');
+  });
+
+  it("reports body-fallback routes", async () => {
+    const r = await crawlRoutes(
+      opts(),
+      fakeRender({ "/": "<!DOCTYPE html><html><head></head><body><p>hi</p></body></html>" }),
+    );
+    expect(r.bodyFallbackRoutes).toEqual(["/"]);
+  });
+});

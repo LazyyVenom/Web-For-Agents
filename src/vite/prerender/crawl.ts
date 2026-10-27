@@ -1,0 +1,185 @@
+import { isExcluded, normalizeRoute, type RendererName } from "../options";
+import { analyzePage, type PageInfo } from "./analyze";
+import { finalizeHtml } from "./finalize";
+import { isSafeRoute, linkToRoute } from "./paths";
+import { errorMessage, type InPageScripts, type RenderResult } from "./renderers";
+
+export interface PrerenderedPage {
+  route: string;
+  /** Finalized HTML. */
+  html: string;
+  info: PageInfo;
+  renderer: RendererName;
+  /** False if noindex or redirected. */
+  listed: boolean;
+  /** By extension name. */
+  inPage: Record<string, unknown>;
+}
+
+export interface CrawlFailure {
+  route: string;
+  renderer: RendererName;
+  message: string;
+}
+
+export interface CrawlResult {
+  /** Sorted by route. */
+  pages: PrerenderedPage[];
+  failures: CrawlFailure[];
+  truncated: boolean;
+  bodyFallbackRoutes: string[];
+}
+
+export interface CrawlOptions {
+  seeds: string[];
+  crawl: boolean;
+  exclude: Array<string | RegExp>;
+  maxRoutes: number;
+  concurrency: number;
+  timeoutMs: number;
+  rendererFor(route: string): RendererName;
+  fallback: RendererName | false;
+  origin: string;
+  /** Absolute mount, e.g. "/" or "/sub/". */
+  base: string;
+  relativeBase: boolean;
+  contentSelector: string;
+  /** Set when markdown is on; passed to finalizeHtml. */
+  markdownUrl?(route: string): string;
+  inPage: InPageScripts;
+  /** Routes that are neither rendered nor listed. */
+  skipRoute?(route: string): boolean;
+}
+
+export type RenderFn = (
+  url: string,
+  renderer: RendererName,
+  timeoutMs: number,
+  inPage: InPageScripts,
+) => Promise<RenderResult>;
+
+export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise<CrawlResult> {
+  const mount = opts.base.replace(/\/+$/, "");
+  const skip = (route: string) => opts.skipRoute?.(route) === true;
+  const seen = new Set<string>();
+  const queue: string[] = [];
+  let truncated = false;
+
+  const enqueue = (route: string) => {
+    if (seen.has(route)) return;
+    if (seen.size >= opts.maxRoutes) {
+      truncated = true;
+      return;
+    }
+    seen.add(route);
+    queue.push(route);
+  };
+  for (const s of opts.seeds) {
+    const route = normalizeRoute(s);
+    if (isSafeRoute(route) && !skip(route)) enqueue(route);
+  }
+
+  const enqueueLink = (href: string) => {
+    const route = linkToRoute(href, opts.origin, opts.base);
+    if (route === null || isExcluded(route, opts.exclude) || skip(route)) return;
+    enqueue(route);
+  };
+
+  const pages: PrerenderedPage[] = [];
+  const failures: CrawlFailure[] = [];
+  const bodyFallbackRoutes: string[] = [];
+
+  const attempt = async (route: string, renderer: RendererName) => {
+    const url = opts.origin + mount + (route === "/" && mount !== "" ? "" : route);
+    const result = await render(url, renderer, opts.timeoutMs, opts.inPage);
+    const markdownUrl = opts.markdownUrl?.(route);
+    const html = finalizeHtml(result.html, {
+      route,
+      relativeBase: opts.relativeBase,
+      ...(markdownUrl !== undefined ? { markdownUrl } : {}),
+    });
+    const info = analyzePage(html, { pageUrl: url, contentSelector: opts.contentSelector, route });
+    if (!info.hasText) throw new Error("rendered no content");
+    return { result, html, info, url };
+  };
+
+  const processRoute = async (route: string) => {
+    const primary = opts.rendererFor(route);
+    let used = primary;
+    let out: Awaited<ReturnType<typeof attempt>>;
+    try {
+      out = await attempt(route, primary);
+    } catch (e) {
+      const fb = opts.fallback;
+      if (fb === false || fb === primary) {
+        failures.push({ route, renderer: primary, message: errorMessage(e) });
+        return;
+      }
+      try {
+        out = await attempt(route, fb);
+        used = fb;
+      } catch (e2) {
+        failures.push({
+          route,
+          renderer: primary,
+          message: `${errorMessage(e)}; fallback ${fb} also failed: ${errorMessage(e2)}`,
+        });
+        return;
+      }
+    }
+
+    const { result, html, info, url } = out;
+    let redirected = false;
+    if (result.finalPath) {
+      const finalRoute = linkToRoute(new URL(result.finalPath, url).href, opts.origin, opts.base);
+      if (finalRoute !== route) {
+        redirected = true;
+        if (finalRoute !== null && !isExcluded(finalRoute, opts.exclude) && !skip(finalRoute)) {
+          enqueue(finalRoute);
+        }
+      }
+    }
+    pages.push({
+      route,
+      html,
+      info,
+      renderer: used,
+      listed: !info.noindex && !redirected,
+      inPage: result.inPage,
+    });
+    if (info.contentSource === "body") bodyFallbackRoutes.push(route);
+    if (opts.crawl) for (const link of info.links) enqueueLink(link);
+  };
+
+  let active = 0;
+  await new Promise<void>((resolve) => {
+    const pump = () => {
+      while (active < opts.concurrency && queue.length > 0) {
+        const route = queue.shift()!;
+        active++;
+        processRoute(route)
+          .catch((e) => failures.push({ route, renderer: opts.rendererFor(route), message: errorMessage(e) }))
+          .finally(() => {
+            active--;
+            pump();
+          });
+      }
+      if (active === 0 && queue.length === 0) resolve();
+    };
+    pump();
+  });
+
+  pages.sort((a, b) => (a.route < b.route ? -1 : a.route > b.route ? 1 : 0));
+  failures.sort((a, b) => (a.route < b.route ? -1 : a.route > b.route ? 1 : 0));
+  bodyFallbackRoutes.sort();
+  return { pages, failures, truncated, bodyFallbackRoutes };
+}
+
+export function formatFailures(failures: CrawlFailure[], fallback: RendererName | false): string {
+  const lines = failures.map((f) => `  ${f.route} [${f.renderer}]: ${f.message}`);
+  const hint =
+    fallback === false
+      ? 'Set prerender.fallback to "chrome" or "msedge" to retry failed routes in a real browser, or use prerender.routeRenderers, exclude, or prerender: false.'
+      : "Check that these routes render in your browser, or exclude them with `exclude`.";
+  return `[web-for-agents] prerender failed for ${failures.length} route(s):\n${lines.join("\n")}\n${hint}`;
+}
