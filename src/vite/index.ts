@@ -24,7 +24,7 @@ export function webForAgents(options: WebForAgentsOptions): Plugin[] {
     ? [agentMapExtension({ siteUrl: resolved.siteUrl, fileName: resolved.agentMap.fileName })]
     : [];
   const plugins = [createBuildPlugin(resolved, extensions)];
-  if (resolved.overlay.enabled) plugins.push(overlayPlugin(resolved.overlay));
+  if (resolved.overlay.enabled) plugins.push(overlayPlugin(resolved.overlay, resolved.siteUrl));
   return plugins;
 }
 
