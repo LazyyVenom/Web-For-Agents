@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { get } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Browser } from "happy-dom";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fixImportMeta, isRelativeBase, startStaticServer, type StaticServer } from "../../../src/vite/prerender/server";
 
@@ -111,19 +112,19 @@ describe("fixImportMeta", () => {
     [
       "current Vite preload helper",
       VITE_HELPER,
-      "function f(e){return(0,import.meta).resolve?new URL(import.meta.resolve(e)):new URL(e,import.meta.url)}",
+      "function f(e){return 0,import.meta.resolve?new URL(import.meta.resolve(e)):new URL(e,import.meta.url)}",
     ],
     [
       "nullish coalescing",
       "function f(){return import.meta.env ?? {}}",
-      "function f(){return(0,import.meta).env ?? {}}",
+      "function f(){return 0,import.meta.env ?? {}}",
     ],
     [
       "assignment",
       "function f(){return import.meta.hot = 1}",
-      "function f(){return(0,import.meta).hot = 1}",
+      "function f(){return 0,import.meta.hot = 1}",
     ],
-    ["tab separator", "function f(){return\timport.meta.url}", "function f(){return(0,import.meta).url}"],
+    ["tab separator", "function f(){return\timport.meta.url}", "function f(){return 0,import.meta.url}"],
   ];
   for (const [name, input, output] of cases) {
     it(`rewrites ${name} to valid code`, () => {
@@ -133,7 +134,7 @@ describe("fixImportMeta", () => {
     });
   }
 
-  it("keeps the value: (0,import.meta) is import.meta", () => {
+  it("keeps the value of the returned expression", () => {
     const err = moduleSyntaxError(
       `const a=(()=>{${fixImportMeta("return import.meta.url ?? 1")}})();` +
         `if(a!==import.meta.url)throw new Error("changed");`,
@@ -157,13 +158,37 @@ describe("fixImportMeta", () => {
 });
 
 describe("server import.meta rewrite option", () => {
+  it("makes Vite's helper loadable as a module in happy-dom", async () => {
+    const app = mkdtempSync(join(tmpdir(), "wfa-meta-"));
+    mkdirSync(join(app, "assets"));
+    writeFileSync(join(app, "assets/m.js"),
+      "function f(e){return import.meta.resolve?new URL(import.meta.resolve(e)):new URL(e,import.meta.url)}\n" +
+      "function g(){return import.meta.env ?? 'none'}\n" +
+      "document.body.setAttribute('data-ok', f('./x.js').pathname + '|' + g());\n");
+    const shell = '<html><head><script type="module" src="/assets/m.js"></script></head><body></body></html>';
+    const s = await startStaticServer({ dir: app, base: "/", shell, rewriteImportMeta: true });
+    const browser = new Browser({
+      settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true },
+    });
+    try {
+      const page = browser.newPage();
+      await page.goto(s.origin + "/");
+      await page.waitUntilComplete();
+      expect(page.mainFrame.document.body.getAttribute("data-ok")).toBe("/assets/x.js|none");
+    } finally {
+      await browser.close();
+      await s.close();
+      rmSync(app, { recursive: true, force: true });
+    }
+  });
+
   it("rewrites served JS only when rewriteImportMeta is set", async () => {
     writeFileSync(join(dir, "assets/meta.js"), "function f(){return import.meta.url}");
     const off = await startStaticServer({ dir, base: "/", shell: "<shell>" });
     const on = await startStaticServer({ dir, base: "/", shell: "<shell>", rewriteImportMeta: true });
     try {
       expect((await raw(off.origin, "/assets/meta.js")).body).toBe("function f(){return import.meta.url}");
-      expect((await raw(on.origin, "/assets/meta.js")).body).toBe("function f(){return(0,import.meta).url}");
+      expect((await raw(on.origin, "/assets/meta.js")).body).toBe("function f(){return 0,import.meta.url}");
     } finally {
       await off.close();
       await on.close();

@@ -32,14 +32,16 @@ const TYPES: Record<string, string> = {
 };
 
 /**
- * happy-dom rewrites `import.meta` only when the previous non-space character is punctuation, so
- * the `return import.meta.resolve ...` that Vite's preload helper emits is left as-is and fails to
- * parse. `return(0,import.meta).` gives it a valid predecessor without changing precedence (a
- * parenthesized primary expression, so `??`, `=` and `?:` after it still parse). Only spaces and
- * tabs are matched: a newline after `return` ends the statement (ASI) and must not be joined.
+ * happy-dom compiles `import.meta.<name>` only when the previous non-space character is
+ * punctuation, so the `return import.meta.resolve ...` that Vite's preload helper emits is left
+ * as-is and fails to parse. `return 0,import.meta.` gives it a "," predecessor and keeps the value:
+ * the comma operator binds loosest, so `0, (rest of the expression)` evaluates to the original,
+ * whatever follows (`??`, `=`, `?:`). The `import.meta.<name>` shape must stay intact, which rules
+ * out `(0,import.meta).`. Only spaces and tabs are matched: a newline after `return` ends the
+ * statement (ASI) and must not be joined.
  */
 export function fixImportMeta(code: string): string {
-  return code.replace(/\breturn[ \t]+import\.meta\./g, "return(0,import.meta).");
+  return code.replace(/\breturn[ \t]+import\.meta\./g, "return 0,import.meta.");
 }
 
 export interface StaticServerOptions {
