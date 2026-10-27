@@ -453,10 +453,10 @@ webForAgents({
 
 A shortcut is any of `alt`, `shift`, `ctrl`, `meta` plus one letter, digit or `/`; an invalid one throws when the config loads. Set `overlay: false` to turn it off.
 
-Prefer the Vite plugin: it never injects the overlay into `vite build`, whatever the environment. If you mount it yourself, don't guard on `import.meta.env.DEV` alone. `DEV` is true whenever `NODE_ENV` is not `production`, so a `vite build` run with `NODE_ENV=test` or `NODE_ENV=development` (common in CI and test runners) ships the overlay. Guard on the mode instead:
+Prefer the Vite plugin: it never injects the overlay into `vite build`, whatever the environment or `--mode`. If you mount it yourself, don't guard on `import.meta.env.DEV`, `PROD` or `MODE`: `DEV` is true whenever `NODE_ENV` is not `production`, and `vite build --mode development` still passes a `MODE === "development"` check, so both can ship the overlay. Guard on `import.meta.hot` instead. Only the dev server defines it, and Vite replaces it with a statically false value in builds, so the whole block (including the dynamic import) is removed:
 
 ```ts
-if (import.meta.env.PROD === false && import.meta.env.MODE === "development") {
+if (import.meta.hot) {
   import("@anubhav-choubey/web-for-agents/overlay").then((m) =>
     m.mountOverlay({ shortcut: "alt+shift+a", siteUrl: "https://example.com", base: import.meta.env.BASE_URL }),
   );
