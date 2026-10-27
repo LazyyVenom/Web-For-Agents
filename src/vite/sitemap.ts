@@ -9,7 +9,7 @@ function escapeXml(s: string): string {
 
 export function buildSitemap(siteUrl: string, routes: string[]): string {
   const urls = routes
-    .map((r) => `  <url><loc>${escapeXml(new URL(r, siteUrl + "/").href)}</loc></url>`)
+    .map((r) => `  <url><loc>${escapeXml(new URL(siteUrl + r).href)}</loc></url>`)
     .join("\n");
   return (
     '<?xml version="1.0" encoding="UTF-8"?>\n' +
