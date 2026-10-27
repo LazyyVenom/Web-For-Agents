@@ -1,3 +1,5 @@
+import { normalizeRoute } from "./url";
+
 export const ROBOTS_PATH = "/robots.txt";
 export const SITEMAP_PATH = "/sitemap.xml";
 export const LLMS_TXT_PATH = "/llms.txt";
@@ -12,13 +14,7 @@ export const READY_GLOBAL = "__WFA_READY__";
 /** Marks head tags managed by <Seo>; the value is the tag key. */
 export const HEAD_OWNED_ATTR = "data-wfa";
 
-/** "" -> "/", "about/" -> "/about", "/a?x=1#h" -> "/a". Query/hash stripped; stays URL-encoded. */
-export function normalizeRoute(path: string): string {
-  let p = path.split("#")[0]!.split("?")[0]!;
-  if (!p.startsWith("/")) p = "/" + p;
-  if (p.length > 1) p = p.replace(/\/+$/, "");
-  return p === "" ? "/" : p;
-}
+export { normalizeRoute };
 
 /** "/" -> "/index.md", "/about/" -> "/about.md". Query/hash stripped; stays URL-encoded. */
 export function markdownPathFor(pathname: string): string {

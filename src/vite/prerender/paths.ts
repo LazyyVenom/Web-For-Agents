@@ -1,8 +1,8 @@
 import { markdownPathFor, normalizeRoute } from "../../shared/conventions";
 import { compareStrings } from "../../shared/sort";
-import { hasScheme, trimTrailingSlash } from "../../shared/url";
+import { hasScheme, publicUrl, trimTrailingSlash } from "../../shared/url";
 
-export { trimTrailingSlash };
+export { publicUrl, trimTrailingSlash };
 
 /** Orders anything with a `route` by route ("/" first, then code-unit order). */
 export function byRoute(a: { route: string }, b: { route: string }): number {
@@ -45,10 +45,6 @@ export function routeMdFile(route: string): string {
 
 export function routeDepth(route: string): number {
   return segments(normalizeRoute(route)).length;
-}
-
-export function publicUrl(siteUrl: string, route: string): string {
-  return trimTrailingSlash(siteUrl) + normalizeRoute(route);
 }
 
 /** Public .md URL; stays URL-encoded (routeMdFile decodes, for file paths only). */
