@@ -38,6 +38,7 @@ async function buildFixture(
     configFile: false,
     logLevel: "silent",
     base: opts.base ?? "/",
+    define: { "import.meta.env.VITE_SITE_URL": JSON.stringify(opts.siteUrl ?? "https://example.com") },
     plugins: [
       react(),
       webForAgents({
@@ -191,6 +192,9 @@ describe("other bases", () => {
     expect(read(dist, "about/index.html")).toContain("About us");
     expect(read(dist, "about/index.html")).toContain('src="/sub/assets/');
     expect(read(dist, "sitemap.xml")).toContain("https://example.com/sub/about");
+    const canonical = /<link[^>]*rel="canonical"[^>]*href="([^"]+)"/.exec(read(dist, "about/index.html"))?.[1];
+    expect(canonical).toBe("https://example.com/sub/about");
+    expect(read(dist, "sitemap.xml")).toContain(`<loc>${canonical}</loc>`);
     expect(read(dist, "blog/hello/index.html")).toMatch(/href="\/sub\/assets\/Post-[^"]+\.css"/);
     expect(filesContaining(dist, "127.0.0.1")).toEqual([]);
   }, 120_000);

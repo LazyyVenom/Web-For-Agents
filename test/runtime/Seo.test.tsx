@@ -198,6 +198,45 @@ describe("default canonical", () => {
     expect(ogUrl()).toBeUndefined();
   });
 
+  it("a layout Seo with unchanged props follows history.pushState", () => {
+    setPath("/a");
+    render(
+      <SeoProvider defaults={defaults}>
+        <Seo title="Layout" />
+      </SeoProvider>,
+    );
+    expect(canonical()).toBe("https://site.test/a");
+    history.pushState({}, "", "/b");
+    expect(canonical()).toBe("https://site.test/b");
+    history.replaceState({}, "", "/c?q=1");
+    expect(canonical()).toBe("https://site.test/c");
+  });
+
+  it("unpatches history and stops listening when the last Seo unmounts", () => {
+    setPath("/a");
+    const orig = history.pushState;
+    const { unmount } = render(
+      <SeoProvider defaults={defaults}>
+        <Seo title="Layout" />
+      </SeoProvider>,
+    );
+    expect(history.pushState).not.toBe(orig);
+    unmount();
+    expect(history.pushState).toBe(orig);
+  });
+
+  it("a nested canonical={false} beats a layout default", () => {
+    setPath("/a");
+    render(
+      <SeoProvider defaults={defaults}>
+        <Seo title="Layout" />
+        <Seo title="Page" canonical={false} />
+      </SeoProvider>,
+    );
+    expect(canonical()).toBeUndefined();
+    expect(ogUrl()).toBeUndefined();
+  });
+
   it("updates after navigation on a remount or prop change", () => {
     setPath("/a");
     const { rerender } = render(

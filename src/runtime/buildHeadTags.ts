@@ -1,15 +1,29 @@
-import { resolveUrl, trimTrailingSlash } from "../shared/url";
+import { publicUrl, resolveUrl, routeOf } from "../shared/url";
 import type { HeadTag, SeoDefaults, SeoProps } from "./types";
 
 const absolute = (value: string | undefined, siteUrl: string | undefined): string | undefined =>
   value === undefined ? undefined : resolveUrl(value, siteUrl);
 
-/** siteUrl plus the path, without query or hash; undefined without a siteUrl or a usable path. */
+/** The public URL of the current page under siteUrl; undefined without a siteUrl or a usable path. */
 function defaultCanonical(siteUrl: string | undefined, pathname: string | undefined): string | undefined {
-  if (!siteUrl || !pathname) return undefined;
-  const path = pathname.split(/[?#]/)[0] ?? "";
-  if (!path.startsWith("/")) return undefined;
-  return trimTrailingSlash(siteUrl) + path;
+  if (!siteUrl || !pathname?.startsWith("/")) return undefined;
+  let mount: string;
+  try {
+    mount = new URL(siteUrl).pathname;
+  } catch {
+    return undefined;
+  }
+  return publicUrl(siteUrl, routeOf(pathname.split(/[?#]/)[0]!, mount));
+}
+
+/** A path ("/about") resolves under siteUrl's path like a route; anything else resolves as a URL. */
+function explicitCanonical(value: string, siteUrl: string | undefined): string {
+  if (siteUrl && value.startsWith("/") && !value.startsWith("//")) {
+    const cut = value.search(/[?#]/);
+    const path = cut === -1 ? value : value.slice(0, cut);
+    return publicUrl(siteUrl, path) + (cut === -1 ? "" : value.slice(cut));
+  }
+  return resolveUrl(value, siteUrl);
 }
 
 /** `pathname` is the current page path, read by the caller at flush time; it feeds the default canonical. */
@@ -37,7 +51,7 @@ export function buildHeadTags(props: SeoProps, defaults: SeoDefaults = {}, pathn
       ? undefined
       : props.canonical === undefined
         ? defaultCanonical(defaults.siteUrl, pathname)
-        : absolute(props.canonical, defaults.siteUrl);
+        : explicitCanonical(props.canonical, defaults.siteUrl);
 
   meta("name", "description", description);
   if (canonical !== undefined) {
@@ -49,6 +63,10 @@ export function buildHeadTags(props: SeoProps, defaults: SeoDefaults = {}, pathn
   meta("property", "og:description", description);
   meta("property", "og:image", image);
   meta("property", "og:url", canonical);
+  if (props.canonical === false) {
+    byKey.set("rel:canonical", { kind: "remove", key: "rel:canonical" });
+    byKey.set("property:og:url", { kind: "remove", key: "property:og:url" });
+  }
   meta("property", "og:type", props.type ?? (title !== undefined ? "website" : undefined));
   meta("property", "og:site_name", defaults.siteName);
   meta("property", "og:locale", defaults.locale);
