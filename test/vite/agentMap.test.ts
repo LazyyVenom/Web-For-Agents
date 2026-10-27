@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import { Window } from "happy-dom";
 import { AGENT_GLOBAL } from "../../src/shared/conventions";
 import { inPageExpression } from "../../src/vite/prerender/extensions";
-import { buildAgentMap, agentMapLlmsSection, collectAgentPageInPage } from "../../src/vite/agentMap";
+import { buildAgentMap, agentMapExtension, agentMapLlmsSection, collectAgentPageInPage } from "../../src/vite/agentMap";
+import { resolveOptions } from "../../src/vite/options";
+import type { ExtensionContext } from "../../src/vite/prerender/extensions";
 import type { AgentActionDescriptor } from "../../src/runtime/agent/types";
 
 const desc: AgentActionDescriptor = {
@@ -92,5 +94,45 @@ describe("agentMapLlmsSection", () => {
       heading: "Agents",
       lines: ["- [Agent map](https://a.com/agents.json): pages and the actions available on each, also exposed as WebMCP tools"],
     });
+  });
+});
+
+describe("agentMapExtension", () => {
+  const robots = { ai: { training: "allow", search: "allow" } } as const;
+
+  it("collects actions per route and emits the map from the analyzed pages", async () => {
+    const ext = agentMapExtension(resolveOptions({ siteUrl: "https://a.com", robots, agentMap: { fileName: "ai.json" } }));
+    expect(ext.name).toBe("agent-map");
+    expect(ext.inPage).toBe(collectAgentPageInPage);
+    expect(ext.llmsSections!()).toEqual([agentMapLlmsSection("https://a.com", "ai.json")]);
+    await ext.onRoute!("/contact", { title: "In-page contact", description: "in page", actions: [desc] });
+    await ext.onRoute!("/", { title: "In-page home", description: "home in page", actions: [] });
+
+    const emitted: Array<[string, string]> = [];
+    const ctx: ExtensionContext = {
+      site: { url: "https://a.com", title: "Site" },
+      llmsUrl: "https://a.com/llms.txt",
+      pages: [
+        { route: "/", title: "", url: "https://a.com/", mdUrl: "https://a.com/index.md" },
+        { route: "/about", title: "About", url: "https://a.com/about" },
+        { route: "/contact", title: "Contact", description: "Write to us", url: "https://a.com/contact", mdUrl: "https://a.com/contact.md" },
+      ],
+      emitFile: (f, s) => void emitted.push([f, s]),
+      warn: () => {},
+    };
+    await ext.finalize!(ctx);
+    expect(emitted.map(([f]) => f)).toEqual(["ai.json"]);
+    expect(emitted[0]![1]).toBe(
+      buildAgentMap({
+        siteUrl: "https://a.com",
+        siteName: "Site",
+        llmsUrl: "https://a.com/llms.txt",
+        pages: [
+          { path: "/", title: "In-page home", description: "home in page", markdown: "https://a.com/index.md", actions: [] },
+          { path: "/about", title: "About", actions: [] },
+          { path: "/contact", title: "Contact", description: "Write to us", markdown: "https://a.com/contact.md", actions: [desc] },
+        ],
+      }),
+    );
   });
 });

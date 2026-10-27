@@ -161,7 +161,7 @@ describe("stage 2 options", () => {
     const t = warn({ training: "block", search: "allow" });
     expect(t).toHaveLength(1);
     expect(t[0]).toBe(
-      "[web-for-agents] robots.ai blocks AI training crawlers, but llms.txt, llms-full.txt, .md files are still generated and publicly fetchable",
+      "[web-for-agents] robots.ai blocks AI training crawlers, but llms.txt, llms-full.txt, .md files, agents.json are still generated and publicly fetchable",
     );
     for (const s of ["blocks AI training crawlers", "llms.txt", "llms-full.txt", ".md files"]) {
       expect(t[0]).toContain(s);
@@ -177,12 +177,54 @@ describe("stage 2 options", () => {
     expect(nm).not.toContain("llms-full.txt");
     expect(warn({ training: "block", search: "allow" }, { prerender: false })).toEqual([]);
   });
+
+  it("agentMap defaults to agents.json and can be disabled", () => {
+    expect(resolveOptions(base).agentMap).toEqual({ fileName: "agents.json" });
+    expect(resolveOptions({ ...base, agentMap: true }).agentMap).toEqual({ fileName: "agents.json" });
+    expect(resolveOptions({ ...base, agentMap: {} }).agentMap).toEqual({ fileName: "agents.json" });
+    expect(resolveOptions({ ...base, agentMap: { fileName: "ai.json" } }).agentMap).toEqual({ fileName: "ai.json" });
+    expect(resolveOptions({ ...base, agentMap: false }).agentMap).toBe(false);
+  });
+
+  it("rejects agentMap file names that are not plain .json names", () => {
+    for (const fileName of ["../x.json", "a/b.json", "x.txt", ".json/x", "", "x json.json"]) {
+      expect(() => resolveOptions({ ...base, agentMap: { fileName } })).toThrow(
+        "[web-for-agents] agentMap.fileName must be a plain .json file name",
+      );
+    }
+  });
+
+  it("prerender: false disables agentMap, warning only when it was requested", () => {
+    const quiet = resolveOptions({ ...base, prerender: false });
+    expect(quiet.agentMap).toBe(false);
+    expect(quiet.warnings).toEqual([]);
+    expect(resolveOptions({ ...base, prerender: false, agentMap: false }).warnings).toEqual([]);
+    const r = resolveOptions({ ...base, prerender: false, agentMap: true });
+    expect(r.agentMap).toBe(false);
+    const w = r.warnings.filter((m) => m.includes("require prerender"));
+    expect(w).toHaveLength(1);
+    expect(w[0]).toContain("agentMap");
+    const all = resolveOptions({ ...base, prerender: false, markdown: {}, llms: {}, agentMap: {} });
+    expect(all.warnings.filter((m) => m.includes("require prerender"))).toHaveLength(1);
+  });
+
+  it("the blocked-AI warning names the agent map file only when it is on", () => {
+    const on = resolveOptions(base).warnings;
+    expect(on).toHaveLength(1);
+    expect(on[0]).toContain("agents.json");
+    expect(resolveOptions({ ...base, agentMap: { fileName: "ai.json" } }).warnings[0]).toContain("ai.json");
+    const off = resolveOptions({ ...base, agentMap: false }).warnings;
+    expect(off).toHaveLength(1);
+    expect(off[0]).not.toContain("agents.json");
+    expect(agentOutputs(resolveOptions({ ...base, markdown: false, llms: false }))).toEqual(["agents.json"]);
+  });
 });
 
 describe("agentOutputs and isExcluded", () => {
   it("lists enabled agent files", () => {
     const o = { siteUrl: "https://a.com", robots } as const;
-    expect(agentOutputs(resolveOptions(o))).toEqual(["llms.txt", "llms-full.txt", ".md files"]);
+    expect(agentOutputs(resolveOptions(o))).toEqual(["llms.txt", "llms-full.txt", ".md files", "agents.json"]);
+    expect(agentOutputs(resolveOptions({ ...o, agentMap: false }))).toEqual(["llms.txt", "llms-full.txt", ".md files"]);
     expect(agentOutputs(resolveOptions({ ...o, prerender: false }))).toEqual([]);
   });
   it("isExcluded is exported", () => {

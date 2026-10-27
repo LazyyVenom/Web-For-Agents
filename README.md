@@ -1,6 +1,6 @@
 # @anubhav-choubey/web-for-agents
 
-SEO and LLM-readiness helpers for React + Vite. At runtime it manages `<head>` metadata (title, description, canonical, Open Graph, Twitter) and emits typed JSON-LD structured data. At build time a Vite plugin prerenders every route to static HTML, writes a markdown version of each page, generates `llms.txt` and `llms-full.txt`, a `sitemap.xml` built from the discovered routes, and a `robots.txt` with an explicit policy for AI crawlers, so you decide which bots may train on your content and which may use it for search.
+SEO and LLM-readiness helpers for React + Vite. At runtime it manages `<head>` metadata (title, description, canonical, Open Graph, Twitter) and emits typed JSON-LD structured data. At build time a Vite plugin prerenders every route to static HTML, writes a markdown version of each page, generates `llms.txt` and `llms-full.txt`, an `agents.json` map of the actions agents can take on each page, a `sitemap.xml` built from the discovered routes, and a `robots.txt` with an explicit policy for AI crawlers, so you decide which bots may train on your content and which may use it for search.
 
 ## Install
 
@@ -62,7 +62,7 @@ After `vite build`, the plugin serves your `dist` locally, starts at `/` plus an
 - `dist/<route>/index.html`: the rendered page with its `<head>` (title, Open Graph, JSON-LD) and a `data-wfa-prerendered` attribute on `<html>`. Your client bundle is kept, so the app still boots.
 - `dist/<route>.md`: the markdown version (`dist/index.md` for `/`).
 - `dist/200.html`: your original SPA shell (the built `index.html` before `/` is prerendered over it), for host fallbacks. See [SPA fallback](#spa-fallback).
-- `llms.txt`, `llms-full.txt`, `sitemap.xml`, `robots.txt`.
+- `llms.txt`, `llms-full.txt`, `agents.json`, `sitemap.xml`, `robots.txt`.
 
 Non-page links (other origins, `mailto:`, files with an extension, `exclude`d routes) are not followed. A path whose last segment contains a dot (`/v1.2`, `/files/report.final`) is treated as a file and not crawled; list such pages in `routes` to prerender them. Routes marked `<Seo noindex>` are written but left out of the sitemap and `llms.txt`. Nothing is written until every route has rendered: if any route fails, the build rejects with one error listing each failing route and renderer.
 
@@ -87,7 +87,7 @@ webForAgents({
 
 Known limit: a synchronous infinite loop in a page cannot be interrupted under happy-dom, so it hangs the build instead of timing out. Render such pages with the Chrome renderer (`routeRenderers` or `renderer: "chrome"`), which enforces the timeout.
 
-Set `prerender: false` to skip all of this; `markdown` and `llms` then turn off too, with a warning.
+Set `prerender: false` to skip all of this; `markdown`, `llms` and `agentMap` then turn off too, with a warning if you set them.
 
 ### Readiness
 
@@ -175,7 +175,117 @@ Every prerendered page gets a markdown twin: `/about` is served as `/about.md` a
 
 ## Blocked AI crawlers
 
-If `robots.ai.training` or `robots.ai.search` is `"block"` while `.md` files, `llms.txt` or `llms-full.txt` are enabled, the build logs a warning: those files are still generated and publicly fetchable, so blocking bots in `robots.txt` does not hide them. Set `markdown: false` and/or `llms: false` if you do not want them published.
+If `robots.ai.training` or `robots.ai.search` is `"block"` while `.md` files, `llms.txt`, `llms-full.txt` or `agents.json` are enabled, the build logs a warning: those files are still generated and publicly fetchable, so blocking bots in `robots.txt` does not hide them. Set `markdown: false`, `llms: false` and/or `agentMap: false` if you do not want them published.
+
+## Agent actions
+
+Mark the things an agent can do on a page. Each marked action is described in `agents.json` at build time and, in browsers that support it, registered as a [WebMCP](https://webmachinelearning.github.io/webmcp/) tool at runtime.
+
+### `AgentForm`
+
+A `<form>` that is also an action. Without a `handler`, the input schema is derived from the form's fields and the agent's input is filled in and submitted through the form itself (the form fallback), so your existing `onSubmit` and validation run as for a user:
+
+```tsx
+import { AgentForm, agentParam } from "@anubhav-choubey/web-for-agents";
+
+<AgentForm agent={{ name: "contact", description: "Send us a message" }} onSubmit={send}>
+  <input type="email" name="email" required {...agentParam("Your email address")} />
+  <select name="topic">
+    <option value="sales">Sales</option>
+    <option value="support">Support</option>
+  </select>
+  <button type="submit">Send</button>
+</AgentForm>
+```
+
+The derived schema uses each field's `name`, type (`email`, `url`, `number`, `checkbox`, ...), `required`, `min`/`max`, `minlength`/`maxlength` and `pattern`; `<select>` options and radio groups become an `enum`. Disabled fields are skipped. Hidden, password and file inputs (and buttons) are never exposed: they do not appear in the schema or in `agents.json`, and an agent cannot fill them.
+
+A form action reports `{ status: "submitted", url, messages }`, where `messages` is the text of any `role="alert"`, `role="status"` or `aria-live` element in the form shortly after submit, or `{ status: "invalid", errors }` when the input or the browser's form validation fails.
+
+### `useAgentAction`
+
+For actions that are not a form, or when you want to run code instead of submitting one. Spread `hintProps` on the element and attach `ref`:
+
+```tsx
+import { useAgentAction } from "@anubhav-choubey/web-for-agents";
+
+function DeleteAccount() {
+  const { ref, hintProps } = useAgentAction({
+    name: "delete_account",
+    description: "Delete the account",
+    destructive: true,
+    handler: async () => deleteAccount(),
+  });
+  return (
+    <button ref={ref} {...hintProps} onClick={() => deleteAccount()}>
+      Delete account
+    </button>
+  );
+}
+```
+
+With a `handler`, the agent's input is validated against `inputSchema` (an object JSON Schema, empty when omitted) and passed to it, and its return value is reported as `{ status: "ok", result }`. Without a `handler`, `ref` decides: a `<form>` uses the form fallback above, any other element is clicked (`{ status: "clicked" }`). An action with neither a handler nor an attached element is not exposed. If a handler throws, the error is caught and reported to the agent as `{ status: "error", message }`.
+
+`hintProps` puts `data-agent-action`, `data-agent-description`, `aria-description` and, for destructive actions, `data-agent-destructive="true"` on the element, so the hints are also in the prerendered HTML. `agentParam(description)` adds `data-agent-param` to a form field; it is used as that field's description in the schema (otherwise its `<label>`, `aria-label` or `placeholder`).
+
+`listAgentActions()` and `executeAgentAction(name, input)` give you the same registry directly.
+
+### Names and duplicates
+
+Names must be 1 to 128 characters of `A-Z a-z 0-9 _ - .`; an invalid name throws. Names are per page: if two mounted components use the same name, only the first mounted one is exposed (in WebMCP and in `agents.json`) and a warning is logged. Give each a unique name, or use one action with an id input.
+
+### Destructive actions
+
+`destructive: true` asks the user before the action runs, with `window.confirm` by default (pass `confirm` for your own dialog, `confirmMessage` for the text). If the user declines, the agent gets `{ status: "cancelled", reason: "user-declined" }` and nothing runs. It also sets the WebMCP `consequentialHint`; `readOnly: true` sets `readOnlyHint`.
+
+### WebMCP
+
+WebMCP is feature-detected: when `document.modelContext` (or the older `navigator.modelContext`) exists, each exposed action is registered with `registerTool`; otherwise nothing is registered and nothing breaks. Nothing branches on the user agent. Tools are unregistered when their component unmounts (and re-registered when the action changes), so the tool list follows what is on screen. A failed registration is logged as a warning and does not affect the page.
+
+### agents.json
+
+After prerendering, the plugin writes `agents.json` with every listed page and the actions found on it, and links it from `llms.txt` in an `## Agents` section. Pages are sorted by path and actions by name; pages without actions are listed with `"actions": []`. Titles and descriptions are the same as in `llms.txt`:
+
+```json
+{
+  "version": 1,
+  "generator": "@anubhav-choubey/web-for-agents",
+  "site": { "url": "https://example.com", "name": "My Site" },
+  "llms": "https://example.com/llms.txt",
+  "webmcp": { "api": "document.modelContext", "spec": "https://webmachinelearning.github.io/webmcp/" },
+  "pages": [
+    {
+      "path": "/contact",
+      "url": "https://example.com/contact",
+      "title": "Contact",
+      "description": "Get in touch",
+      "markdown": "https://example.com/contact.md",
+      "actions": [
+        {
+          "name": "contact",
+          "description": "Send us a message",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "email": { "type": "string", "format": "email", "description": "Your email address" },
+              "topic": { "type": "string", "enum": ["sales", "support"], "description": "Options: sales (Sales), support (Support)" }
+            },
+            "additionalProperties": false,
+            "required": ["email"]
+          },
+          "destructive": false,
+          "readOnly": false,
+          "kind": "form"
+        }
+      ]
+    }
+  ]
+}
+```
+
+`kind` is `"handler"`, `"form"` or `"click"`. `llms` is omitted when `llms: false`, and `markdown` when `markdown: false`.
+
+Use `agentMap: { fileName: "ai.json" }` to change the file name (a plain `.json` name, no directories), or `agentMap: false` to turn the file and the `llms.txt` section off; WebMCP registration at runtime is unaffected. The stage 4 audit only checks the default `/agents.json`. A `public/agents.json` of your own is never overwritten. The agent map needs prerender.
 
 ## Hooks and components
 
@@ -215,7 +325,7 @@ Nested `Seo`/`useSeo` calls merge, with the deeper one winning per tag.
 | `robots.ai.overrides` | `Record<string, "allow" \| "block">` | Per-bot override, matched case-insensitively. |
 | `robots.disallow` | `string[]` | Extra `Disallow` paths for all user agents. |
 | `sitemap` | `boolean` | Generate `sitemap.xml` and the `Sitemap:` line. Default `true`. |
-| `prerender` | `object \| false` | Prerender routes after the build. `false` disables prerender, markdown and llms. |
+| `prerender` | `object \| false` | Prerender routes after the build. `false` disables prerender, markdown, llms and the agent map. |
 | `prerender.crawl` | `boolean` | Follow same-origin links from `/` and `routes`. Default `true`. |
 | `prerender.renderer` | `"happy-dom" \| "chrome" \| "msedge"` | Default renderer. Default `"happy-dom"`. |
 | `prerender.fallback` | `"chrome" \| "msedge" \| false` | Retry routes that fail in this browser. Default `false`. |
@@ -226,6 +336,7 @@ Nested `Seo`/`useSeo` calls merge, with the deeper one winning per tag.
 | `prerender.maxRoutes` | `number` | Stop discovering after this many routes (a warning is logged). Default `500`. |
 | `markdown` | `{ contentSelector?: string } \| false` | Write `.md` files. `false` disables them and `llms-full.txt`. Default `{ contentSelector: "main" }`. |
 | `llms` | `{ title?: string; description?: string } \| false` | Write `llms.txt` and `llms-full.txt`. Default on. |
+| `agentMap` | `boolean \| { fileName?: string }` | Write `agents.json` and link it from `llms.txt`. Needs prerender. Default `{ fileName: "agents.json" }`. |
 
 ## AI crawlers
 
@@ -255,7 +366,7 @@ The list is exported as `AI_BOTS` from `@anubhav-choubey/web-for-agents/vite`.
 
 - Stage 1 (done): head metadata, JSON-LD, sitemap.xml, robots.txt.
 - Stage 2 (done): prerendering, markdown versions of pages, llms.txt and llms-full.txt.
-- Stage 3: agent map and WebMCP.
+- Stage 3 (done): agent actions, WebMCP tools and agents.json.
 - Stage 4: CLI audit and dev overlay.
 
 ## License

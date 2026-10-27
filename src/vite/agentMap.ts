@@ -1,5 +1,8 @@
+import { AGENT_MAP_PATH } from "../shared/conventions";
 import { publicUrl, trimTrailingSlash, byRoute } from "./prerender/paths";
 import type { LlmsSection } from "./llms";
+import type { ResolvedOptions } from "./options";
+import type { PrerenderExtension } from "./prerender/extensions";
 import type { AgentActionDescriptor } from "../runtime/agent/types";
 
 export interface AgentPageData {
@@ -76,5 +79,36 @@ export function agentMapLlmsSection(siteUrl: string, fileName: string): LlmsSect
     lines: [
       `- [Agent map](${publicUrl(siteUrl, fileName)}): pages and the actions available on each, also exposed as WebMCP tools`,
     ],
+  };
+}
+
+/** Stage 2 prerender extension: collects each page's actions and writes the agent map. */
+export function agentMapExtension(opts: ResolvedOptions): PrerenderExtension<AgentPageData> {
+  const fileName = opts.agentMap ? opts.agentMap.fileName : AGENT_MAP_PATH.slice(1);
+  const data = new Map<string, AgentPageData>();
+  return {
+    name: "agent-map",
+    inPage: collectAgentPageInPage,
+    onRoute(route, page) {
+      data.set(route, page);
+    },
+    llmsSections: () => [agentMapLlmsSection(opts.siteUrl, fileName)],
+    finalize(ctx) {
+      const pages = ctx.pages.map((p): AgentMapPageInput => {
+        const inPage = data.get(p.route);
+        const page: AgentMapPageInput = { path: p.route, actions: inPage?.actions ?? [] };
+        // Analysis values first, so agents.json and llms.txt agree.
+        const title = p.title || inPage?.title;
+        const description = p.description ?? inPage?.description;
+        if (title) page.title = title;
+        if (description) page.description = description;
+        if (p.mdUrl) page.markdown = p.mdUrl;
+        return page;
+      });
+      ctx.emitFile(
+        fileName,
+        buildAgentMap({ siteUrl: ctx.site.url, siteName: ctx.site.title, llmsUrl: ctx.llmsUrl, pages }),
+      );
+    },
   };
 }
