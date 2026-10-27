@@ -51,6 +51,8 @@ export default defineConfig({
 });
 ```
 
+`webForAgents()` returns an array of plugins (the build plugin and the dev-only overlay); put it in `plugins` as shown, and Vite flattens it.
+
 `robots.ai` is required: the plugin throws if you do not state a policy for both `training` and `search`. Files you place in `public/` (for example your own `robots.txt`) are never overwritten; the plugin logs a warning and skips generation.
 
 Use one `SeoProvider` per document. It owns the shared defaults and the base head tags; nested or multiple providers will overwrite each other.
@@ -339,6 +341,7 @@ Nested `Seo`/`useSeo` calls merge, with the deeper one winning per tag.
 | `markdown` | `{ contentSelector?: string } \| false` | Write `.md` files. `false` disables them and `llms-full.txt`. Default `{ contentSelector: "main" }`. |
 | `llms` | `{ title?: string; description?: string } \| false` | Write `llms.txt` and `llms-full.txt`. Default on. |
 | `agentMap` | `boolean \| { fileName?: string }` | Write `agents.json` and link it from `llms.txt`. Needs prerender. Default `{ fileName: "agents.json" }`. |
+| `overlay` | `boolean \| { shortcut?: string; contentSelector?: string }` | Dev overlay, injected by `vite` (serve) only. `false` disables it. Default on, shortcut `"alt+shift+a"`, `contentSelector` from `markdown.contentSelector` (else `"main"`). |
 
 ## AI crawlers
 
@@ -402,12 +405,43 @@ Exit codes: `0` ok, `1` score below `--min-score`, `2` usage error or fatal erro
 
 The programmatic API is available from `@anubhav-choubey/web-for-agents/cli` (`audit`, `runCli`, `formatText`).
 
+## Dev overlay
+
+While `vite` (the dev server) runs, the plugin adds a small "WFA" button to every page. Click it or press `Alt+Shift+A` to open a panel showing what an agent sees on the current page:
+
+- title (and whether it came from `<title>` or the first `<h1>`), description, canonical, robots, Open Graph and Twitter tags
+- each JSON-LD block, with its `@type`s and any parse error
+- the markdown generated from the content region (the same code that writes the `.md` files), with a warning when there is no `<main>`
+- agent actions: registered handlers, `data-agent-action` markup and WebMCP declarative tools
+
+The panel lives in a shadow root, so it does not pick up or leak styles, and it refreshes as the page changes.
+
+The overlay is dev-only. The plugin injects it only in serve mode, so `vite build` never includes it and no overlay code ships in production.
+
+```ts
+webForAgents({
+  siteUrl: "https://example.com",
+  robots: { ai: { training: "block", search: "allow" } },
+  overlay: { shortcut: "ctrl+shift+k", contentSelector: "#content" },
+});
+```
+
+A shortcut is any of `alt`, `shift`, `ctrl`, `meta` plus one letter, digit or `/`; an invalid one throws when the config loads. Set `overlay: false` to turn it off.
+
+Without the Vite plugin, mount it yourself behind a dev check so bundlers drop it from production builds:
+
+```ts
+if (import.meta.env.DEV) {
+  import("@anubhav-choubey/web-for-agents/overlay").then((m) => m.mountOverlay({ shortcut: "alt+shift+a" }));
+}
+```
+
 ## Roadmap
 
 - Stage 1 (done): head metadata, JSON-LD, sitemap.xml, robots.txt.
 - Stage 2 (done): prerendering, markdown versions of pages, llms.txt and llms-full.txt.
 - Stage 3 (done): agent actions, WebMCP tools and agents.json.
-- Stage 4: CLI audit and dev overlay.
+- Stage 4 (done): CLI audit and dev overlay.
 
 ## License
 
