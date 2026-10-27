@@ -5,8 +5,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/LazyyVenom/web-for-agents.git"
+    "url": "git+https://github.com/LazyyVenom/Web-For-Agents.git"
   },
+  "bugs": {
+    "url": "https://github.com/LazyyVenom/Web-For-Agents/issues"
+  },
+  "homepage": "https://github.com/LazyyVenom/Web-For-Agents#readme",
   "keywords": [
     "seo",
     "llm",
