@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { ExcludeFromContent, holdPrerender, JsonLd, schema, Seo } from "../../../../../src/index";
 
+/** Minifies to `return/^[a-z]+:/i.test(...)`, which happy-dom 21 cannot load unless the prerender server wraps the regex. */
+function hasScheme(href: string): boolean {
+  return /^[a-z]+:/i.test(href);
+}
+
 export function About() {
   const [text, setText] = useState("");
   useEffect(() => {
@@ -17,6 +22,7 @@ export function About() {
       <main>
         <h1>About us</h1>
         <p>{text}</p>
+        <p>{hasScheme(location.href) ? "Runtime regex ran" : "Runtime regex missing"}</p>
         <p>
           See the <a href="/blog/hello">hello post</a>.
         </p>

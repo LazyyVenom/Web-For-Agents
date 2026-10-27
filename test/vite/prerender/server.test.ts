@@ -3,9 +3,15 @@ import { spawnSync } from "node:child_process";
 import { get } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Browser } from "happy-dom";
+import { Browser, Window } from "happy-dom";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fixImportMeta, isRelativeBase, startStaticServer, type StaticServer } from "../../../src/vite/prerender/server";
+import {
+  fixImportMeta,
+  isRelativeBase,
+  parenthesizeRegExps,
+  startStaticServer,
+  type StaticServer,
+} from "../../../src/vite/prerender/server";
 
 let dir: string;
 beforeAll(() => {
@@ -157,6 +163,74 @@ describe("fixImportMeta", () => {
   });
 });
 
+/** Runs `code` as an inline module in happy-dom; returns `window.ok` and any reported errors. */
+async function runInHappyDom(code: string): Promise<{ ok: unknown; errors: string[] }> {
+  const window = new Window({
+    url: "http://localhost/",
+    settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true },
+  });
+  const errors: string[] = [];
+  window.addEventListener("error", (e) => errors.push(String((e as unknown as { error?: unknown }).error ?? e)));
+  try {
+    const script = window.document.createElement("script");
+    script.type = "module";
+    script.textContent = code;
+    window.document.body.appendChild(script);
+    await window.happyDOM.waitUntilComplete();
+    return { ok: (window as unknown as { ok?: unknown }).ok, errors };
+  } finally {
+    await window.happyDOM.close();
+  }
+}
+
+describe("parenthesizeRegExps", () => {
+  const SCHEME = "function f(e){return/^[a-z][a-z0-9+.-]*:/i.test(e)}\nwindow.ok=import.meta.url;";
+
+  it("happy-dom still fails on a regex after return (upstream bug; drop the workaround once this fails)", async () => {
+    const r = await runInHappyDom(SCHEME);
+    expect(r.ok).toBeUndefined();
+    expect(r.errors.join("\n")).toContain("Failed to parse module");
+  });
+
+  const cases: Array<[name: string, input: string, output: string]> = [
+    ["return with a scheme regex", SCHEME, "function f(e){return(/^[a-z][a-z0-9+.-]*:/i).test(e)}\nwindow.ok=import.meta.url;"],
+    ["return with \\s+", "function f(e){return/\\s+/.test(e)}\nwindow.ok=import.meta.url;", "function f(e){return(/\\s+/).test(e)}\nwindow.ok=import.meta.url;"],
+    ["after !", "const a=!/a:/;window.ok=import.meta.url;", "const a=!(/a:/);window.ok=import.meta.url;"],
+    ["after typeof", "const a=typeof/a:/;window.ok=import.meta.url;", "const a=typeof(/a:/);window.ok=import.meta.url;"],
+    ["after ||", "const a=0||/a:/;window.ok=import.meta.url;", "const a=0||(/a:/);window.ok=import.meta.url;"],
+  ];
+  for (const [name, input, output] of cases) {
+    it(`fixes a regex ${name}`, async () => {
+      expect(parenthesizeRegExps(input)).toBe(output);
+      const r = await runInHappyDom(parenthesizeRegExps(input));
+      expect(r.errors).toEqual([]);
+      expect(r.ok).toBe("http://localhost/");
+    });
+  }
+
+  it("leaves strings, comments and division alone", async () => {
+    const code = 'const s="/not a regex/";// a /x/ comment\n/* and /x/ */const a=8,b=4,c=2;window.ok=s+(a/b/c);';
+    expect(parenthesizeRegExps(code)).toBe(code);
+    expect((await runInHappyDom(code)).ok).toBe("/not a regex/1");
+  });
+
+  it("uses UTF-16 offsets around non-ASCII text", async () => {
+    const code = 'const s="héllo 😀 日本";function f(e){return/^[a-z]+:/i.test(e)}window.ok=s+f("a:");';
+    const out = parenthesizeRegExps(code);
+    expect(out).toBe('const s="héllo 😀 日本";function f(e){return(/^[a-z]+:/i).test(e)}window.ok=s+f("a:");');
+    expect((await runInHappyDom(out)).ok).toBe("héllo 😀 日本true");
+  });
+
+  it("wraps several literals, including one inside a template", () => {
+    expect(parenthesizeRegExps("x=`${/a/.source}`;y=[/b/g,/c/]")).toBe("x=`${(/a/).source}`;y=[(/b/g),(/c/)]");
+  });
+
+  it("returns code it cannot parse unchanged", () => {
+    expect(parenthesizeRegExps("return/a:/.test(x")).toBe("return/a:/.test(x");
+    expect(parenthesizeRegExps("")).toBe("");
+  });
+});
+
 describe("server import.meta rewrite option", () => {
   it("makes Vite's helper loadable as a module in happy-dom", async () => {
     const app = mkdtempSync(join(tmpdir(), "wfa-meta-"));
@@ -184,11 +258,14 @@ describe("server import.meta rewrite option", () => {
 
   it("rewrites served JS only when rewriteImportMeta is set", async () => {
     writeFileSync(join(dir, "assets/meta.js"), "function f(){return import.meta.url}");
+    writeFileSync(join(dir, "assets/re.js"), "function f(e){return/^[a-z]+:/i.test(e)}");
     const off = await startStaticServer({ dir, base: "/", shell: "<shell>" });
     const on = await startStaticServer({ dir, base: "/", shell: "<shell>", rewriteImportMeta: true });
     try {
       expect((await raw(off.origin, "/assets/meta.js")).body).toBe("function f(){return import.meta.url}");
       expect((await raw(on.origin, "/assets/meta.js")).body).toBe("function f(){return 0,import.meta.url}");
+      expect((await raw(off.origin, "/assets/re.js")).body).toBe("function f(e){return/^[a-z]+:/i.test(e)}");
+      expect((await raw(on.origin, "/assets/re.js")).body).toBe("function f(e){return(/^[a-z]+:/i).test(e)}");
     } finally {
       await off.close();
       await on.close();

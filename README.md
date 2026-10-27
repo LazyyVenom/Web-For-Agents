@@ -89,6 +89,8 @@ webForAgents({
 
 Known limit: a synchronous infinite loop in a page cannot be interrupted under happy-dom, so it hangs the build instead of timing out. Render such pages with the Chrome renderer (`routeRenderers` or `renderer: "chrome"`), which enforces the timeout.
 
+happy-dom 21 fails to load a module when a regex literal follows `return`, `typeof`, `!`, `?` or `|` (common in minified code, e.g. `return/^[a-z]+:/i.test(e)`). The prerender server works around this by wrapping each regex literal in parentheses in the JS it serves to happy-dom. Your `dist` files are not changed.
+
 Set `prerender: false` to skip all of this; `markdown`, `llms` and `agentMap` then turn off too, with a warning if you set them.
 
 ### Readiness
