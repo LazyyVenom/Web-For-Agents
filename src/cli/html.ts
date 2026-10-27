@@ -1,4 +1,4 @@
-import { MARKDOWN_MIME } from "../shared/conventions";
+import { MARKDOWN_MIME, PRERENDERED_ATTR } from "../shared/conventions";
 
 export interface HtmlFacts {
   title: string | null;
@@ -7,6 +7,8 @@ export interface HtmlFacts {
   jsonLd: string[];
   text: string;
   hasMain: boolean;
+  /** True when `<html>` carries the data-wfa-prerendered marker. */
+  prerendered: boolean;
 }
 
 const RAW_TEXT = new Set(["script", "style", "textarea", "title"]);
@@ -97,6 +99,7 @@ export function extractHtmlFacts(html: string): HtmlFacts {
   const chunks: string[] = [];
   let title: string | null = null;
   let hasMain = false;
+  let prerendered = false;
   const depth: Record<string, number> = {};
   let excluded = 0;
   const n = html.length;
@@ -202,6 +205,7 @@ export function extractHtmlFacts(html: string): HtmlFacts {
     }
 
     if (name === "main" && excluded === 0) hasMain = true;
+    if (name === "html" && PRERENDERED_ATTR in attrs) prerendered = true;
     if (name === "meta") {
       metas.push(attrs);
     } else if (name === "link") {
@@ -238,6 +242,7 @@ export function extractHtmlFacts(html: string): HtmlFacts {
     jsonLd,
     text: chunks.join("").replace(/\s+/g, " ").trim(),
     hasMain,
+    prerendered,
   };
 }
 

@@ -122,6 +122,24 @@ describe("checks", () => {
     expect(byId(i, "content").message.endsWith(` (page truncated at ${MAX_BODY_BYTES / 1024 / 1024} MiB)`)).toBe(true);
   });
 
+  it("content advice distinguishes an empty shell from a short prerendered page", () => {
+    const shell = byId(inputs({ src: "<!doctype html><html><body><div id=root></div></body></html>" }), "content");
+    expect(shell.status).toBe("fail");
+    expect(shell.fix).toBe(
+      "Crawlers that don't run JavaScript see almost no text. Add webForAgents() to vite.config.ts so every route is prerendered to static HTML.",
+    );
+    const short = "The page is prerendered but has little text. Add more content to <main>.";
+    const marked = byId(
+      inputs({ src: "<!doctype html><html data-wfa-prerendered><body><main>Hi</main></body></html>" }),
+      "content",
+    );
+    expect(marked.status).toBe("fail");
+    expect(marked.fix).toBe(short);
+    const texty = byId(inputs({ src: pageHtml({ text: "a".repeat(100) }) }), "content");
+    expect(texty.status).toBe("warn");
+    expect(texty.fix).toBe(short);
+  });
+
   it("sitemap variants", () => {
     const other = ok("<urlset><url><loc>http://h/other</loc></url></urlset>", "application/xml");
     expect(byId(inputs({ sitemap: other }), "sitemap").status).toBe("warn");
