@@ -4,6 +4,6 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["test/**/*.test.{ts,tsx}"],
-    exclude: ["test/fixtures/**", "node_modules/**", "dist/**"],
+    exclude: ["test/fixtures/**", "test/pack/**", "node_modules/**", "dist/**"],
   },
 });
