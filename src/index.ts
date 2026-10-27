@@ -8,3 +8,7 @@ export { ContentRegion, ExcludeFromContent } from "./runtime/content";
 export { holdPrerender } from "./runtime/prerender";
 export { hydrateApp } from "./runtime/hydrate";
 export { CONTENT_ATTR, EXCLUDE_ATTR, PRERENDERED_ATTR, READY_GLOBAL } from "./shared/conventions";
+export { useAgentAction, AgentForm, agentParam } from "./runtime/agent/react";
+export type { AgentHintProps } from "./runtime/agent/react";
+export { listAgentActions, executeAgentAction } from "./runtime/agent/registry";
+export type { AgentActionSpec, AgentActionDescriptor, AgentActionResult, JsonSchema } from "./runtime/agent/types";
