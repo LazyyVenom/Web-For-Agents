@@ -45,13 +45,9 @@ function fill(form: HTMLFormElement, values: Record<string, unknown>): void {
       const type = el instanceof HTMLInputElement ? el.type : "text";
       if (type === "checkbox") {
         const on = Array.isArray(value) ? value.map(String).includes(el.value) : value === true;
-        nativeSet(el, "checked", on);
-        notify(el);
+        if (el.checked !== on) el.click();
       } else if (type === "radio") {
-        if (String(value) === el.value) {
-          nativeSet(el, "checked", true);
-          notify(el);
-        }
+        if (String(value) === el.value && !el.checked) el.click();
       } else {
         nativeSet(el, "value", String(value));
         notify(el);

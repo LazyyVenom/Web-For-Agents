@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
+import { render, screen } from "@testing-library/react";
 import { runFormAction } from "../../../src/runtime/agent/formAutomation";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -137,5 +138,35 @@ describe("runFormAction", () => {
     const p = runFormAction(form, { q: "x" }, { signal: ac.signal });
     ac.abort();
     expect(await p).toEqual({ status: "error", message: "aborted" });
+  });
+
+  it("updates React state for controlled checkbox, radio group and text input", async () => {
+    function App() {
+      const [agree, setAgree] = useState(false);
+      const [size, setSize] = useState("s");
+      const [name, setName] = useState("");
+      return (
+        <form onSubmit={(e) => e.preventDefault()}>
+          <input name="name" value={name} onChange={(e) => setName(e.target.value)} />
+          <input type="checkbox" name="agree" checked={agree} onChange={() => setAgree((v) => !v)} />
+          {["s", "m", "l"].map((v) => (
+            <input key={v} type="radio" name="size" value={v} checked={size === v} onChange={() => setSize(v)} />
+          ))}
+          <output data-testid="out">{`${name}|${agree}|${size}`}</output>
+        </form>
+      );
+    }
+    const { container } = render(<App />);
+    const form = container.querySelector("form")!;
+    let res: Awaited<ReturnType<typeof runFormAction>> | undefined;
+    await act(async () => {
+      res = await run(form, { name: "Ada", agree: true, size: "l" });
+    });
+    expect(res?.status).toBe("submitted");
+    expect(screen.getByTestId("out").textContent).toBe("Ada|true|l");
+    await act(async () => {
+      await run(form, { agree: false, size: "l" });
+    });
+    expect(screen.getByTestId("out").textContent).toBe("Ada|false|l");
   });
 });
