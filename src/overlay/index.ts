@@ -45,17 +45,24 @@ pre { margin: 4px 0; padding: 8px; max-height: 220px; overflow: auto; background
 
 const NOOP: OverlayHandle = { toggle() {}, refresh() {}, unmount() {}, isOpen: false };
 
-let current: OverlayHandle | null = null;
+let current: { handle: OverlayHandle; host: HTMLElement } | null = null;
 
 function isEditable(target: EventTarget | null): boolean {
   const t = target as Element | null;
   if (!t || typeof t.closest !== "function") return false;
-  return t.closest("input, textarea, select, [contenteditable]") !== null;
+  if (t.closest("input, textarea, select") !== null) return true;
+  // The nearest explicit contenteditable decides; "false" switches editing off for its subtree.
+  const ce = t.closest("[contenteditable]");
+  return ce !== null && ce.getAttribute("contenteditable")!.toLowerCase() !== "false";
 }
 
 export function mountOverlay(options: OverlayOptions = {}): OverlayHandle {
   if (typeof document === "undefined") return NOOP;
-  if (current) return current;
+  if (current) {
+    if (current.host.isConnected) return current.handle;
+    // The app replaced the body (or removed the host): drop the stale instance and mount afresh.
+    current.handle.unmount();
+  }
 
   const shortcut = parseShortcut(options.shortcut ?? DEFAULT_SHORTCUT);
   const collectOpts = options.contentSelector !== undefined ? { contentSelector: options.contentSelector } : {};
@@ -118,7 +125,7 @@ export function mountOverlay(options: OverlayOptions = {}): OverlayHandle {
   };
 
   const onKey = (e: KeyboardEvent): void => {
-    if (!matchesShortcut(e, shortcut) || isEditable(e.target)) return;
+    if (e.repeat || !matchesShortcut(e, shortcut) || isEditable(e.target)) return;
     setOpen(!open);
   };
   const onClick = (e: Event): void => {
@@ -139,13 +146,13 @@ export function mountOverlay(options: OverlayOptions = {}): OverlayHandle {
       window.removeEventListener("keydown", onKey);
       root.removeEventListener("click", onClick);
       host.remove();
-      if (current === handle) current = null;
+      if (current?.handle === handle) current = null;
     },
     get isOpen() {
       return open;
     },
   };
-  current = handle;
+  current = { handle, host };
   if (options.open) setOpen(true);
   return handle;
 }

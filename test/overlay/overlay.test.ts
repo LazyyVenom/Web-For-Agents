@@ -51,6 +51,37 @@ describe("mountOverlay", () => {
     expect(handle.isOpen).toBe(false);
   });
 
+  it("contenteditable=false does not block the shortcut", () => {
+    handle = mountOverlay();
+    document.body.innerHTML = `<div contenteditable="false"><span>x</span></div><div contenteditable="true"><b contenteditable="false">y</b></div>`;
+    press(ALT_SHIFT_A, document.querySelector("span")!);
+    expect(handle.isOpen).toBe(true);
+    press(ALT_SHIFT_A, document.querySelector("b")!);
+    expect(handle.isOpen).toBe(false);
+  });
+
+  it("ignores auto-repeated keydowns", () => {
+    handle = mountOverlay();
+    press({ ...ALT_SHIFT_A, repeat: true });
+    expect(handle.isOpen).toBe(false);
+    press(ALT_SHIFT_A);
+    press({ ...ALT_SHIFT_A, repeat: true });
+    expect(handle.isOpen).toBe(true);
+  });
+
+  it("remounts when the host was removed from the document", () => {
+    const first = mountOverlay();
+    document.body.innerHTML = "<main><h1>Replaced</h1></main>";
+    expect(document.querySelector("[data-wfa-overlay]")).toBeNull();
+    handle = mountOverlay();
+    expect(handle).not.toBe(first);
+    expect(document.querySelectorAll("[data-wfa-overlay]").length).toBe(1);
+    expect(first.isOpen).toBe(false);
+    press(ALT_SHIFT_A);
+    expect(handle.isOpen).toBe(true);
+    expect(first.isOpen).toBe(false);
+  });
+
   it("honours a custom shortcut", () => {
     handle = mountOverlay({ shortcut: "ctrl+k" });
     press({ code: "KeyK", ctrlKey: true });
