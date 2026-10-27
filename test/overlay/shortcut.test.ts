@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DEFAULT_SHORTCUT, matchesShortcut, parseShortcut } from "../../src/overlay/shortcut";
+import { DEFAULT_SHORTCUT, matchesShortcut, parseShortcut } from "../../src/shared/shortcut";
 
 const ev = (o: Partial<Record<"altKey" | "shiftKey" | "ctrlKey" | "metaKey", boolean>> & { code: string }) => ({
   altKey: false,

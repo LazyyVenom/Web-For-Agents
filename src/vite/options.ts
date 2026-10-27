@@ -1,7 +1,7 @@
 import { DEFAULT_CONTENT_SELECTOR } from "../shared/content";
 import { AGENT_MAP_PATH, normalizeRoute } from "../shared/conventions";
-import { errorMessage, LOG_PREFIX, withPrefix } from "../shared/errors";
-import { DEFAULT_SHORTCUT, parseShortcut } from "../overlay/shortcut";
+import { LOG_PREFIX, withPrefix } from "../shared/errors";
+import { DEFAULT_SHORTCUT, parseShortcut } from "../shared/shortcut";
 import { trimTrailingSlash } from "./prerender/paths";
 
 export { normalizeRoute };
@@ -188,11 +188,7 @@ function resolveOverlay(
   const opts = typeof input === "object" ? input : {};
   const shortcut = opts.shortcut ?? DEFAULT_SHORTCUT;
   if (typeof shortcut !== "string") throw new Error(withPrefix("overlay.shortcut must be a string"));
-  try {
-    parseShortcut(shortcut);
-  } catch (e) {
-    throw new Error(withPrefix(errorMessage(e)));
-  }
+  parseShortcut(shortcut); // throws an already-prefixed error
   const sel = opts.contentSelector;
   if (sel !== undefined && (typeof sel !== "string" || sel === "")) {
     throw new Error(withPrefix("overlay.contentSelector must be a non-empty string"));

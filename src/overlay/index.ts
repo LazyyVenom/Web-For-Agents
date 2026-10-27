@@ -1,6 +1,6 @@
 import { collectPageReport } from "./collect";
 import { renderPanel, REFRESH_ATTR } from "./panel";
-import { DEFAULT_SHORTCUT, matchesShortcut, parseShortcut } from "./shortcut";
+import { DEFAULT_SHORTCUT, matchesShortcut, parseShortcut } from "../shared/shortcut";
 
 export const OVERLAY_HOST_ATTR = "data-wfa-overlay";
 
