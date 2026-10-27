@@ -63,15 +63,15 @@ describe("import boundaries", () => {
     }
   });
 
-  it("cli never resolves to src/vite/index", () => {
+  it("cli never reaches src/vite, src/runtime or src/overlay, and never imports vite", () => {
     const cliFiles = walk(cli);
     expect(cliFiles.length).toBeGreaterThan(0);
     for (const file of cliFiles) {
       for (const spec of specifiers(readFileSync(file, "utf8"))) {
-        if (!spec.startsWith(".")) continue;
         const where = `${relative(SRC, file)} -> ${spec}`;
-        expect(resolved(file, spec), where).not.toBe(join(vite, "index"));
-        expect(resolved(file, spec), where).not.toBe(vite);
+        expect(spec === "vite" || spec.startsWith("vite/"), where).toBe(false);
+        if (!spec.startsWith(".")) continue;
+        for (const dir of [vite, join(SRC, "runtime"), overlay]) expect(inDir(resolved(file, spec), dir), where).toBe(false);
       }
     }
   });
