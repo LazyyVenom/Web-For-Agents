@@ -1,11 +1,14 @@
-import { selectContentRegion, type ContentSource } from "../shared/content";
+import { DEFAULT_CONTENT_SELECTOR, selectContentRegion, type ContentSource } from "../shared/content";
 import { buildPageMarkdown } from "../shared/markdown";
 import { readPageMeta } from "../shared/pageMeta";
+import { jsonLdTypes } from "../shared/jsonLd";
+import { trimTrailingSlash } from "../shared/url";
 import {
   ACTION_ATTR,
   ACTION_DESCRIPTION_ATTR,
   ACTION_DESTRUCTIVE_ATTR,
   AGENT_GLOBAL,
+  normalizeRoute,
   WEBMCP_TOOLDESCRIPTION_ATTR,
   WEBMCP_TOOLNAME_ATTR,
 } from "../shared/conventions";
@@ -38,8 +41,25 @@ export interface PageReport {
   actions: OverlayAction[];
 }
 
-const NO_MAIN_WARNING =
-  "No <main> or [data-wfa-content] found; markdown falls back to <body> without nav/header/footer/aside. Wrap page content in <main>.";
+export interface CollectOptions {
+  /** Default "main". */
+  contentSelector?: string;
+  /** Public site URL; when set, markdown links resolve against siteUrl + route, as in the build. */
+  siteUrl?: string;
+  /** Vite `base`; an absolute-path base is stripped from the pathname to get the route. Default "/". */
+  base?: string;
+}
+
+function noMainWarning(selector: string): string {
+  return `No [data-wfa-content] or element matching contentSelector "${selector}" found; markdown falls back to <body> without nav/header/footer/aside.`;
+}
+
+/** The build's route for `pathname`: an absolute-path `base` ("/sub/") is stripped; other bases mount at "/". */
+function routeOf(pathname: string, base = "/"): string {
+  const b = base.startsWith("/") && !base.startsWith("//") ? trimTrailingSlash(base) : "";
+  if (b !== "" && (pathname === b || pathname.startsWith(b + "/"))) pathname = pathname.slice(b.length);
+  return normalizeRoute(pathname);
+}
 
 function prefixed(doc: Document, attrs: Array<"property" | "name">, prefix: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -51,26 +71,11 @@ function prefixed(doc: Document, attrs: Array<"property" | "name">, prefix: stri
   return out;
 }
 
-function collectTypes(node: unknown, out: string[]): void {
-  if (Array.isArray(node)) {
-    for (const n of node) collectTypes(n, out);
-    return;
-  }
-  if (typeof node !== "object" || node === null) return;
-  const rec = node as Record<string, unknown>;
-  const t = rec["@type"];
-  if (typeof t === "string") out.push(t);
-  else if (Array.isArray(t)) for (const x of t) if (typeof x === "string") out.push(x);
-  if ("@graph" in rec) collectTypes(rec["@graph"], out);
-}
-
 function collectJsonLd(doc: Document): PageReport["jsonLd"] {
   return Array.from(doc.querySelectorAll('script[type="application/ld+json"]')).map((s) => {
     const raw = s.textContent ?? "";
-    const types: string[] = [];
     try {
-      collectTypes(JSON.parse(raw), types);
-      return { raw, types: Array.from(new Set(types)) };
+      return { raw, types: Array.from(new Set(jsonLdTypes(JSON.parse(raw)))) };
     } catch (e) {
       return { raw, types: [], error: errorMessage(e) || "Invalid JSON" };
     }
@@ -136,9 +141,11 @@ function collectActions(doc: Document): OverlayAction[] {
 /** Reads the live document into a report for the dev overlay. Never throws; never mutates `doc`. */
 export function collectPageReport(
   doc: Document = document,
-  opts: { contentSelector?: string } = {},
+  opts: CollectOptions = {},
 ): PageReport {
   const url = doc.location?.href ?? "";
+  const route = routeOf(doc.location?.pathname ?? "/", opts.base);
+  const pageUrl = opts.siteUrl ? trimTrailingSlash(opts.siteUrl) + route : url || undefined;
   const page = readPageMeta(doc);
   const meta: PageReport["meta"] = {
     title: page.title,
@@ -152,11 +159,13 @@ export function collectPageReport(
 
   let content: PageReport["content"];
   try {
-    const region = selectContentRegion(doc, opts);
+    const selector = opts.contentSelector ?? DEFAULT_CONTENT_SELECTOR;
+    const region = selectContentRegion(doc, { contentSelector: selector });
     content = {
       source: region.source,
-      markdown: buildPageMarkdown(meta.title ?? "", region.element.innerHTML, url || undefined),
-      ...(region.source === "body" ? { warning: NO_MAIN_WARNING } : {}),
+      // Same title fallback and link base as the build's .md output.
+      markdown: buildPageMarkdown(meta.title ?? route, region.element.innerHTML, pageUrl),
+      ...(region.source === "body" ? { warning: noMainWarning(selector) } : {}),
     };
   } catch (e) {
     content = { source: "body", markdown: "", warning: errorMessage(e) || "Could not read page content." };

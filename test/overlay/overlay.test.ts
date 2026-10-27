@@ -102,6 +102,16 @@ describe("mountOverlay", () => {
     for (const s of ["Hello", "Article", "# Hi", "search"]) expect(text).toContain(s);
   });
 
+  it("passes siteUrl and base to the collector", () => {
+    history.replaceState(null, "", "/sub/books/one");
+    document.body.innerHTML = `<main><a href="two">Two</a></main>`;
+    handle = mountOverlay({ open: true, siteUrl: "https://shop.test/sub", base: "/sub/" });
+    const text = shadow().textContent!;
+    expect(text).toContain("# /books/one");
+    expect(text).toContain("[Two](https://shop.test/sub/books/two)");
+    history.replaceState(null, "", "/");
+  });
+
   it("never turns page text into DOM", () => {
     document.head.innerHTML = `<meta name="description" content="<img src=x onerror=alert(1)>">`;
     document.body.innerHTML = `<main><h1>Hi</h1></main>`;
@@ -113,7 +123,7 @@ describe("mountOverlay", () => {
   it("warns when there is no main", () => {
     document.body.innerHTML = `<p>Loose</p>`;
     handle = mountOverlay({ open: true });
-    expect(shadow().textContent).toContain("No <main>");
+    expect(shadow().textContent).toContain('element matching contentSelector "main"');
   });
 
   it("says when the title came from the h1", () => {

@@ -1,13 +1,16 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from "vitest";
 import { collectPageReport } from "../../src/overlay/collect";
+import { AGENT_GLOBAL } from "../../src/shared/conventions";
+import { resetAgentRuntime } from "../helpers/agent";
 
 const NO_MAIN_WARNING =
-  "No <main> or [data-wfa-content] found; markdown falls back to <body> without nav/header/footer/aside. Wrap page content in <main>.";
+  'No [data-wfa-content] or element matching contentSelector "main" found; markdown falls back to <body> without nav/header/footer/aside.';
 
 beforeEach(() => {
   document.documentElement.innerHTML = "<head></head><body></body>";
-  delete (window as unknown as Record<string, unknown>).__WEB_FOR_AGENTS__;
+  resetAgentRuntime();
+  history.replaceState(null, "", "/");
 });
 
 describe("collectPageReport", () => {
@@ -111,7 +114,7 @@ describe("collectPageReport", () => {
 
   it("actions from the stage 3 registry", () => {
     const w = window as unknown as Record<string, unknown>;
-    w.__WEB_FOR_AGENTS__ = {
+    w[AGENT_GLOBAL] = {
       version: 1,
       actions: () => [
         { name: "refund", description: "Refund an order", kind: "handler", destructive: true, readOnly: false, inputSchema: {} },
@@ -124,7 +127,7 @@ describe("collectPageReport", () => {
     const actions = collectPageReport(document).actions;
     expect(actions).toHaveLength(1);
     expect(actions[0]!.source).toBe("registry");
-    w.__WEB_FOR_AGENTS__ = {
+    w[AGENT_GLOBAL] = {
       version: 1,
       actions: () => {
         throw new Error("boom");
@@ -136,7 +139,7 @@ describe("collectPageReport", () => {
 
   it("a throwing registry still yields markup actions", () => {
     const w = window as unknown as Record<string, unknown>;
-    w.__WEB_FOR_AGENTS__ = {
+    w[AGENT_GLOBAL] = {
       version: 1,
       actions: () => {
         throw new Error("boom");
@@ -148,7 +151,7 @@ describe("collectPageReport", () => {
 
   it("drops malformed registry entries but keeps valid ones", () => {
     const w = window as unknown as Record<string, unknown>;
-    w.__WEB_FOR_AGENTS__ = {
+    w[AGENT_GLOBAL] = {
       version: 1,
       actions: () => [null, { name: 5 }, { name: "good", kind: "handler" }, undefined],
     };
@@ -170,5 +173,46 @@ describe("collectPageReport", () => {
     document.head.innerHTML = "";
     document.body.innerHTML = "";
     expect(collectPageReport(document).meta).toMatchObject({ title: null, titleSource: null });
+  });
+
+  it("names the configured contentSelector when falling back to body", () => {
+    document.body.innerHTML = "<p>Loose</p>";
+    expect(collectPageReport(document, { contentSelector: "#app" }).content.warning).toBe(
+      'No [data-wfa-content] or element matching contentSelector "#app" found; markdown falls back to <body> without nav/header/footer/aside.',
+    );
+  });
+
+  it("resolves links against siteUrl + route, like the build", () => {
+    history.replaceState(null, "", "/sub/books/one?x=1");
+    document.body.innerHTML = '<main><h1>T</h1><a href="two">Two</a> <a href="/abs">Abs</a> <img src="i.png" alt="I"></main>';
+    const md = collectPageReport(document, { siteUrl: "https://shop.test/sub", base: "/sub/" }).content.markdown;
+    expect(md).toContain("[Two](https://shop.test/sub/books/two)");
+    expect(md).toContain("[Abs](https://shop.test/abs)");
+    expect(md).toContain("![I](https://shop.test/sub/books/i.png)");
+  });
+
+  it("uses the route as-is for a root, relative or full-URL base", () => {
+    history.replaceState(null, "", "/books/one");
+    document.body.innerHTML = '<main><h1>T</h1><a href="two">Two</a></main>';
+    for (const base of [undefined, "/", "./", "", "https://cdn.test/assets/"]) {
+      const md = collectPageReport(document, { siteUrl: "https://shop.test", ...(base === undefined ? {} : { base }) }).content
+        .markdown;
+      expect(md, String(base)).toContain("[Two](https://shop.test/books/two)");
+    }
+  });
+
+  it("falls back to the live URL without siteUrl", () => {
+    history.replaceState(null, "", "/books/one");
+    document.body.innerHTML = '<main><a href="two">Two</a></main>';
+    const md = collectPageReport(document).content.markdown;
+    expect(md).toContain(`[Two](${new URL("/books/two", location.href).href})`);
+  });
+
+  it("titles untitled markdown with the route, like the build", () => {
+    history.replaceState(null, "", "/sub/faq/");
+    document.body.innerHTML = "<main><p>Body</p></main>";
+    expect(collectPageReport(document, { base: "/sub/" }).content.markdown).toBe("# /faq\n\nBody\n");
+    history.replaceState(null, "", "/");
+    expect(collectPageReport(document).content.markdown).toBe("# /\n\nBody\n");
   });
 });

@@ -1,4 +1,4 @@
-import { collectPageReport } from "./collect";
+import { collectPageReport, type CollectOptions } from "./collect";
 import { renderPanel, REFRESH_ATTR } from "./panel";
 import { DEFAULT_SHORTCUT, matchesShortcut, parseShortcut } from "../shared/shortcut";
 
@@ -10,6 +10,10 @@ export interface OverlayOptions {
   open?: boolean;
   /** Passed to collectPageReport. Default "main". */
   contentSelector?: string;
+  /** Passed to collectPageReport: markdown links resolve against siteUrl + route, as in the build. */
+  siteUrl?: string;
+  /** Passed to collectPageReport: the Vite `base`, stripped from the pathname to get the route. */
+  base?: string;
 }
 
 export interface OverlayHandle {
@@ -65,7 +69,10 @@ export function mountOverlay(options: OverlayOptions = {}): OverlayHandle {
   }
 
   const shortcut = parseShortcut(options.shortcut ?? DEFAULT_SHORTCUT);
-  const collectOpts = options.contentSelector !== undefined ? { contentSelector: options.contentSelector } : {};
+  const collectOpts: CollectOptions = {};
+  if (options.contentSelector !== undefined) collectOpts.contentSelector = options.contentSelector;
+  if (options.siteUrl !== undefined) collectOpts.siteUrl = options.siteUrl;
+  if (options.base !== undefined) collectOpts.base = options.base;
 
   const host = document.createElement("div");
   host.setAttribute(OVERLAY_HOST_ATTR, "");
