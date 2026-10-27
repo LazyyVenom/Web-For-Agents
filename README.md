@@ -1,5 +1,7 @@
 # @anubhav-choubey/web-for-agents
 
+[![CI](https://github.com/LazyyVenom/Web-For-Agents/actions/workflows/ci.yml/badge.svg)](https://github.com/LazyyVenom/Web-For-Agents/actions/workflows/ci.yml)
+
 SEO and LLM-readiness helpers for React + Vite. At runtime it manages `<head>` metadata (title, description, canonical, Open Graph, Twitter) and emits typed JSON-LD structured data. At build time a Vite plugin prerenders every route to static HTML, writes a markdown version of each page, generates `llms.txt` and `llms-full.txt`, an `agents.json` map of the actions agents can take on each page, a `sitemap.xml` built from the discovered routes, and a `robots.txt` with an explicit policy for AI crawlers, so you decide which bots may train on your content and which may use it for search.
 
 ## Install
@@ -8,7 +10,7 @@ SEO and LLM-readiness helpers for React + Vite. At runtime it manages `<head>` m
 npm i @anubhav-choubey/web-for-agents
 ```
 
-Requires `react >=18` and `react-dom >=18`. The Vite plugin needs `vite >=5` (optional peer).
+Requires `react >=18` and `react-dom >=18`. The Vite plugin needs `vite >=5` (optional peer); CI tests it against Vite 5, 6, 7 and 8.
 
 ## Quick start
 
@@ -496,6 +498,27 @@ const wfa: Plugin[] = webForAgents(options);
 - Stage 2 (done): prerendering, markdown versions of pages, llms.txt and llms-full.txt.
 - Stage 3 (done): agent actions, WebMCP tools and agents.json.
 - Stage 4 (done): CLI audit and dev overlay.
+
+## Development
+
+```sh
+npm ci
+npm run typecheck
+npm test            # unit, Vite and e2e tests
+npm run test:pack   # packs the package, installs the tarball into a fresh Vite app, builds it and audits it
+```
+
+`npm run test:pack` is kept out of `npm test`: it builds `dist`, runs `npm pack`, and installs the tarball with `vite`, `react`, `react-dom` and `react-router` from the npm registry into a temp app copied from `test/fixtures/pack-app`, so it needs the network (or a warm npm cache). Set `PACK_VITE=5|6|7|8` to pick the app's Vite major (default 8).
+
+Tests that need a real browser use your installed Chrome. They are skipped when Chrome cannot be launched; set `WFA_CHROME=skip` to always skip them, or `WFA_CHROME=require` to fail instead of skipping (CI does this).
+
+To run the Vite tests against another Vite major, swap it in without touching the lockfile, then run them:
+
+```sh
+node scripts/install-vite.mjs 5
+npx vitest run test/vite test/e2e test/cli/audit.e2e.test.ts
+npm ci   # back to the locked versions
+```
 
 ## License
 
