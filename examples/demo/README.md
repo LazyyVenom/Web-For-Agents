@@ -14,7 +14,13 @@ Dev mode includes the overlay. Click the "WFA" button or press `Alt+Shift+A` to 
 npm run demo:build          # vite build examples/demo --outDir dist-demo --emptyOutDir
 ```
 
-The build prerenders every route into `dist-demo/` (git-ignored). Use `NODE_ENV=production` if your shell sets another value. The automated check is `test/e2e/demo.test.ts` (`npx vitest run test/e2e/demo.test.ts`); it builds into a temp dir, checks every output file, serves it locally and audits `/` and a book page.
+The build prerenders every route into `dist-demo/` (git-ignored). Use `NODE_ENV=production` if your shell sets another value. The automated check is `test/e2e/demo.test.ts` (`npx vitest run test/e2e/demo.test.ts`). It builds into a temp dir and checks every output file. It then starts a local static server, builds the demo again with `DEMO_SITE_URL` set to that server's origin, and audits `/` and a book page. Both must score 100.
+
+Set `DEMO_SITE_URL` to build the demo for another origin. It defaults to `https://paperlantern.example` and feeds the plugin's `siteUrl` and every absolute URL in the pages (canonical, JSON-LD):
+
+```sh
+DEMO_SITE_URL=http://127.0.0.1:4173 npm run demo:build
+```
 
 ## What each page demonstrates
 
@@ -30,7 +36,7 @@ The build prerenders every route into `dist-demo/` (git-ignored). Use `NODE_ENV=
 | `/new-arrivals` | Data that loads from a timer, with `holdPrerender()` so the renderer waits for it. |
 | `/account` | `Seo noindex`: prerendered, but left out of `sitemap.xml`, `llms.txt` and `agents.json`. |
 
-`vite.config.ts` sets `siteUrl` to `https://paperlantern.example`, blocks AI training bots, allows AI search bots, and turns on prerender, markdown, llms, the agent map and the overlay.
+`vite.config.ts` sets `siteUrl` to `DEMO_SITE_URL` (default `https://paperlantern.example`), blocks AI training bots, allows AI search bots, and turns on prerender, markdown, llms, the agent map and the overlay.
 
 ## What to look at in the build output
 
@@ -43,4 +49,4 @@ The build prerenders every route into `dist-demo/` (git-ignored). Use `NODE_ENV=
 - `200.html`: the untouched SPA shell, for host fallbacks.
 - No overlay code and no `127.0.0.1` anywhere.
 
-To audit a running copy, build the package (`npm run build`) and run `node dist/bin.js audit <url>`. Note that an audit of a local server follows the absolute `paperlantern.example` URLs baked into the build, so the sitemap and markdown checks only pass when that host resolves to the server.
+To audit a running copy, build the package (`npm run build`) and run `node dist/bin.js audit <url>`. Note that an audit follows the absolute URLs baked into the build, so audit a build made with `DEMO_SITE_URL` set to the origin you serve it from; with the default, the canonical, sitemap and markdown checks point at `paperlantern.example` and warn.

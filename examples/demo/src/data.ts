@@ -77,4 +77,4 @@ export const FAQ = [
   { question: "Do you buy used books?", answer: "We buy used books in good condition on the first Saturday of each month." },
 ];
 
-export const SITE_URL = "https://paperlantern.example";
+export const SITE_URL = __SITE_URL__;

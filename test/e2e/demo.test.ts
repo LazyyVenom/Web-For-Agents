@@ -16,6 +16,7 @@ const BOOKS = ["the-lighthouse-keepers-atlas", "salt-and-cedar", "small-maps-of-
 const POSTS = ["why-we-shelve-by-mood", "a-year-of-small-press-picks"];
 
 let outDir: string;
+let auditDir: string;
 let server: ReturnType<typeof createServer>;
 let base = "";
 
@@ -27,35 +28,30 @@ function textOf(html: string): string {
   return html.replace(/<script[\s\S]*?<\/script>/g, " ").replace(/<style[\s\S]*?<\/style>/g, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
 }
 
-beforeAll(async () => {
-  outDir = mkdtempSync(path.join(os.tmpdir(), "wfa-demo-"));
+/** Builds the demo into `dir`; `siteUrl` overrides the demo's DEMO_SITE_URL. */
+async function buildDemo(dir: string, siteUrl?: string): Promise<void> {
   // Vitest sets NODE_ENV=test; a production build needs the real value.
   const nodeEnv = process.env.NODE_ENV;
+  const demoUrl = process.env.DEMO_SITE_URL;
   process.env.NODE_ENV = "production";
+  if (siteUrl === undefined) delete process.env.DEMO_SITE_URL;
+  else process.env.DEMO_SITE_URL = siteUrl;
   try {
-    await build({ root: demoRoot, configFile: path.join(demoRoot, "vite.config.ts"), logLevel: "silent", build: { outDir, emptyOutDir: true } });
+    await build({ root: demoRoot, configFile: path.join(demoRoot, "vite.config.ts"), logLevel: "silent", build: { outDir: dir, emptyOutDir: true } });
   } finally {
     if (nodeEnv === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = nodeEnv;
+    if (demoUrl === undefined) delete process.env.DEMO_SITE_URL;
+    else process.env.DEMO_SITE_URL = demoUrl;
   }
-  server = createServer((req, res) => {
-    const pathname = decodeURIComponent((req.url ?? "/").split("?")[0]!);
-    const candidates = [pathname, path.posix.join(pathname, "index.html")];
-    const file = candidates.map((c) => path.join(outDir, c)).find((f) => f.startsWith(outDir) && existsSync(f) && !f.endsWith(path.sep) && /\.[a-z0-9]+$/i.test(f));
-    if (!file) {
-      res.writeHead(404, { "content-type": "text/plain" });
-      res.end("not found");
-      return;
-    }
-    res.writeHead(200, { "content-type": MIME[path.extname(file)] ?? "application/octet-stream" });
-    res.end(readFileSync(file));
-  });
-  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+beforeAll(async () => {
+  outDir = mkdtempSync(path.join(os.tmpdir(), "wfa-demo-"));
+  await buildDemo(outDir);
 }, 90_000);
 
-afterAll(async () => {
-  if (server) await new Promise((r) => (server.closeAllConnections(), server.close(r)));
+afterAll(() => {
   if (outDir) rmSync(outDir, { recursive: true, force: true });
 });
 
@@ -160,27 +156,39 @@ describe("demo build", () => {
 });
 
 describe("demo audit", () => {
-  // The build bakes in https://paperlantern.example (sitemap line, markdown alternate), and the audit follows those
-  // absolute URLs. Point that host at the local server, as DNS would for the deployed site.
-  const realFetch = globalThis.fetch;
-  beforeAll(() => {
-    globalThis.fetch = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-      return realFetch(url.startsWith(SITE) ? base + url.slice(SITE.length) : input, init);
-    }) as typeof fetch;
-  });
-  afterAll(() => {
-    globalThis.fetch = realFetch;
+  // The audit follows the absolute URLs baked into the build (sitemap line, markdown alternate), so audit a build whose
+  // siteUrl is the local server's own origin. The server starts first to learn its port, then serves the build.
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      const pathname = decodeURIComponent((req.url ?? "/").split("?")[0]!);
+      const candidates = [pathname, path.posix.join(pathname, "index.html")];
+      const file = candidates.map((c) => path.join(auditDir, c)).find((f) => f.startsWith(auditDir) && existsSync(f) && !f.endsWith(path.sep) && /\.[a-z0-9]+$/i.test(f));
+      if (!file) {
+        res.writeHead(404, { "content-type": "text/plain" });
+        res.end("not found");
+        return;
+      }
+      res.writeHead(200, { "content-type": MIME[path.extname(file)] ?? "application/octet-stream" });
+      res.end(readFileSync(file));
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    auditDir = mkdtempSync(path.join(os.tmpdir(), "wfa-demo-audit-"));
+    await buildDemo(auditDir, base);
+  }, 90_000);
+  afterAll(async () => {
+    if (server) await new Promise((r) => (server.closeAllConnections(), server.close(r)));
+    if (auditDir) rmSync(auditDir, { recursive: true, force: true });
   });
 
   for (const route of ["/", `/books/${BOOKS[0]}`]) {
-    it(`scores at least 90 on ${route}`, async () => {
+    it(`scores 100 on ${route}`, async () => {
       const report = await audit(base + route, { timeoutMs: 5000 });
       const failing = report.checks.filter((c) => c.status !== "pass");
-      if (failing.length > 0) console.log(`audit ${route}: ${report.score}`, report.error ?? "", JSON.stringify(failing, null, 2));
       console.log(`audit ${route}: score ${report.score}`);
+      if (failing.length > 0) console.log(`audit ${route}: non-pass checks`, report.error ?? "", JSON.stringify(failing, null, 2));
       expect(report.error).toBeUndefined();
-      expect(report.score).toBeGreaterThanOrEqual(90);
+      expect(report.score).toBe(100);
     }, 20_000);
   }
 });
