@@ -1,10 +1,9 @@
+import { isValidActionName } from "../../shared/agent";
 import { AGENT_GLOBAL } from "../../shared/conventions";
 import { runFormAction } from "./formAutomation";
 import { EMPTY_OBJECT_SCHEMA, schemaFromForm, validateInput } from "./formSchema";
 import type { ActionKind, AgentActionDescriptor, AgentActionResult, AgentActionSpec, JsonSchema } from "./types";
 import { exposeTool, type WebMcpTool } from "./webmcp";
-
-const NAME_RE = /^[A-Za-z0-9_.-]{1,128}$/;
 
 interface Entry {
   name: string;
@@ -26,7 +25,7 @@ let nextId = 1;
 let syncScheduled = false;
 
 export function assertValidActionName(name: string): void {
-  if (typeof name !== "string" || !NAME_RE.test(name)) {
+  if (!isValidActionName(name)) {
     throw new Error(`[web-for-agents] invalid action name "${name}": use 1-128 chars of A-Z a-z 0-9 _ - .`);
   }
 }

@@ -1,18 +1,6 @@
-export type JsonSchema = {
-  type?: "string" | "number" | "integer" | "boolean" | "array" | "object";
-  description?: string;
-  enum?: Array<string | number>;
-  format?: "email" | "uri" | "date" | "time";
-  minimum?: number;
-  maximum?: number;
-  minLength?: number;
-  maxLength?: number;
-  pattern?: string;
-  items?: JsonSchema;
-  properties?: Record<string, JsonSchema>;
-  required?: string[];
-  additionalProperties?: boolean;
-};
+import type { JsonSchema } from "../../shared/agent";
+
+export type { ActionKind, AgentActionDescriptor, AgentActionResult, JsonSchema } from "../../shared/agent";
 
 export interface AgentActionSpec<I = Record<string, unknown>, R = unknown> {
   /** /^[A-Za-z0-9_.-]{1,128}$/ */
@@ -32,23 +20,3 @@ export interface AgentActionSpec<I = Record<string, unknown>, R = unknown> {
   /** Form fallback wait before reporting; default 300. */
   submitSettleMs?: number;
 }
-
-export type ActionKind = "handler" | "form" | "click";
-
-export interface AgentActionDescriptor {
-  name: string;
-  title?: string;
-  description: string;
-  inputSchema: JsonSchema;
-  destructive: boolean;
-  readOnly: boolean;
-  kind: ActionKind;
-}
-
-export type AgentActionResult =
-  | { status: "ok"; result: unknown }
-  | { status: "submitted"; url: string; messages: string[] }
-  | { status: "clicked" }
-  | { status: "invalid"; errors: Array<{ field: string; message: string }> }
-  | { status: "cancelled"; reason: "user-declined" }
-  | { status: "error"; message: string };
