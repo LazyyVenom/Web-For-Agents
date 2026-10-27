@@ -86,7 +86,8 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
   const bodyFallbackRoutes: string[] = [];
 
   const attempt = async (route: string, renderer: RendererName) => {
-    const url = opts.origin + mount + (route === "/" && mount !== "" ? "" : route);
+    // The root is requested as "/sub/", the URL a host serves; routers given basename "/sub/" do not match "/sub".
+    const url = opts.origin + mount + route;
     const result = await render(url, renderer, opts.timeoutMs, opts.inPage);
     const markdownUrl = opts.markdownUrl?.(route);
     const html = finalizeHtml(result.html, {

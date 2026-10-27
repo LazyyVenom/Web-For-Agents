@@ -3,7 +3,7 @@ import { get } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { startStaticServer, type StaticServer } from "../../../src/vite/prerender/server";
+import { fixImportMeta, startStaticServer, type StaticServer } from "../../../src/vite/prerender/server";
 
 let dir: string;
 beforeAll(() => {
@@ -89,6 +89,29 @@ describe("server with absolute base URL", () => {
     try {
       expect((await raw(s.origin, "/assets/app.js")).status).toBe(200);
       expect((await raw(s.origin, "/about")).body).toBe("<shell>");
+    } finally {
+      await s.close();
+    }
+  });
+});
+
+describe("fixImportMeta", () => {
+  it("gives `return import.meta.x` a punctuation predecessor and leaves other uses alone", () => {
+    expect(fixImportMeta("function s(e){return import.meta.resolve?1:2}")).toBe(
+      "function s(e){return !0&&import.meta.resolve?1:2}",
+    );
+    expect(fixImportMeta("new URL(e,import.meta.url)")).toBe("new URL(e,import.meta.url)");
+  });
+});
+
+describe("server with relative base", () => {
+  it("resolves nested asset requests against the root", async () => {
+    const s = await startStaticServer({ dir, base: "./", shell: "<shell>" });
+    try {
+      const r = await raw(s.origin, "/docs/deep/assets/app.js");
+      expect(r.status).toBe(200);
+      expect(r.body).toBe("console.log(1)");
+      expect((await raw(s.origin, "/docs/deep/assets/missing.js")).status).toBe(404);
     } finally {
       await s.close();
     }

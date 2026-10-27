@@ -28,6 +28,15 @@ const TYPES: Record<string, string> = {
   ".xml": "application/xml; charset=utf-8",
 };
 
+/**
+ * happy-dom rewrites `import.meta` only when the previous non-space character is punctuation, so
+ * the `return import.meta.resolve ...` that Vite's dynamic-import helper emits is left as-is and
+ * fails to parse. `!0&&` is value-neutral here (true && v === v) and gives it a valid predecessor.
+ */
+export function fixImportMeta(code: string): string {
+  return code.replace(/\breturn\s+import\.meta\./g, "return !0&&import.meta.");
+}
+
 async function isFile(p: string): Promise<boolean> {
   try {
     return (await stat(p)).isFile();
@@ -68,15 +77,30 @@ export function startStaticServer(opts: {
       if (target !== root && !target.startsWith(root + sep)) return notFound();
 
       const rootIndex = resolve(root, "index.html");
-      const serve = async (file: string) =>
-        send(200, TYPES[extname(file).toLowerCase()] ?? "application/octet-stream", await readFile(file));
+      const serve = async (file: string) => {
+        const ext = extname(file).toLowerCase();
+        const type = TYPES[ext] ?? "application/octet-stream";
+        if (ext === ".js" || ext === ".mjs") return send(200, type, fixImportMeta(await readFile(file, "utf8")));
+        send(200, type, await readFile(file));
+      };
 
       const shell = () => send(200, TYPES[".html"]!, opts.shell);
       if (await isFile(target)) return target === rootIndex ? shell() : await serve(target);
       const index = resolve(target, "index.html");
       if (await isFile(index)) return index === rootIndex ? shell() : await serve(index);
       const last = pathname.split("/").filter(Boolean).pop() ?? "";
-      if (extname(last)) return notFound();
+      if (extname(last)) {
+        // happy-dom ignores <base> for script URLs, so with a relative Vite base "./assets/x.js" on
+        // /blog/hello requests /blog/assets/x.js. Resolve it against the root like <base href="/"> would.
+        if (relative) {
+          const segments = pathname.split("/").filter(Boolean);
+          for (let i = 1; i < segments.length; i++) {
+            const candidate = resolve(root, ...segments.slice(i));
+            if (candidate.startsWith(root + sep) && (await isFile(candidate))) return await serve(candidate);
+          }
+        }
+        return notFound();
+      }
       return shell();
     } catch {
       send(500, "text/plain; charset=utf-8", "Internal error");
