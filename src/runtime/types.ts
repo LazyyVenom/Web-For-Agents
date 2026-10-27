@@ -1,3 +1,4 @@
+/** One managed `<head>` tag. `key` identifies it when nested `Seo` entries merge. */
 export type HeadTag =
   | { kind: "title"; key: "title"; text: string }
   | { kind: "meta"; key: string; attrs: Record<string, string> }

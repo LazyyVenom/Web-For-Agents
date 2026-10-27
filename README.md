@@ -10,7 +10,7 @@ SEO and LLM-readiness helpers for React + Vite. At runtime it manages `<head>` m
 npm i @anubhav-choubey/web-for-agents
 ```
 
-Requires `react >=18` and `react-dom >=18`. The Vite plugin needs `vite >=5` (optional peer); CI tests it against Vite 5, 6, 7 and 8.
+Requires Node 20.19 or later. The runtime components and hooks need `react >=18` and `react-dom >=18`, and the Vite plugin needs `vite >=5`; CI tests it against Vite 5, 6, 7 and 8. All three are optional peers, so the CLI works without them.
 
 ## Quick start
 
@@ -504,6 +504,16 @@ if (import.meta.hot) {
 ```
 
 Pass `siteUrl` and `base` so the panel's markdown links match the build; both are optional.
+
+## Advanced exports
+
+- `HeadTag` (main entry): the type of one managed `<head>` tag: a title, meta or link with its merge key.
+- `serializeJsonLd(data)` (main entry): the escaped JSON string `<JsonLd>` puts in its script, for rendering JSON-LD yourself.
+- `CONTENT_ATTR` (`"data-wfa-content"`, main entry): the attribute `ContentRegion` sets, for marking the content region in plain HTML.
+- `EXCLUDE_ATTR` (`"data-wfa-exclude"`, main entry): the attribute `ExcludeFromContent` sets.
+- `PRERENDERED_ATTR` (`"data-wfa-prerendered"`, main entry): set on `<html>` in prerendered pages.
+- `READY_GLOBAL` (`"__WFA_READY__"`, main entry): the window flag `holdPrerender()` sets to `false` while a hold is active.
+- `OVERLAY_HOST_ATTR` (`"data-wfa-overlay"`, `/overlay` entry): the attribute on the overlay's host element, for excluding it from your own DOM queries or tests.
 
 ## Development
 

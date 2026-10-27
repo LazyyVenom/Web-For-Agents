@@ -7,9 +7,13 @@ export const LLMS_FULL_TXT_PATH = "/llms-full.txt";
 export const AGENT_MAP_PATH = "/agents.json";
 export const MARKDOWN_MIME = "text/markdown";
 
+/** Marks the content region used for markdown (set by `ContentRegion`). */
 export const CONTENT_ATTR = "data-wfa-content";
+/** Marks content left out of the markdown (set by `ExcludeFromContent`). */
 export const EXCLUDE_ATTR = "data-wfa-exclude";
+/** Set on `<html>` in prerendered pages. */
 export const PRERENDERED_ATTR = "data-wfa-prerendered";
+/** Window flag that is `false` while a `holdPrerender()` hold is active. */
 export const READY_GLOBAL = "__WFA_READY__";
 /** Marks head tags managed by <Seo>; the value is the tag key. */
 export const HEAD_OWNED_ATTR = "data-wfa";

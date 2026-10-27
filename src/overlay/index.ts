@@ -2,6 +2,7 @@ import { collectPageReport, type CollectOptions } from "./collect";
 import { renderPanel, REFRESH_ATTR } from "./panel";
 import { DEFAULT_SHORTCUT, matchesShortcut, parseShortcut } from "../shared/shortcut";
 
+/** Attribute on the overlay's host element. */
 export const OVERLAY_HOST_ATTR = "data-wfa-overlay";
 
 export interface OverlayOptions {
