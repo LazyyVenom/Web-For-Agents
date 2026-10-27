@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
-import { schemaFromForm, validateInput } from "../../../src/runtime/agent/formSchema";
+import { EMPTY_OBJECT_SCHEMA, schemaFromForm, validateInput } from "../../../src/runtime/agent/formSchema";
 
 function form(html: string): HTMLFormElement {
   document.body.innerHTML = `<form>${html}</form>`;
@@ -142,5 +142,44 @@ describe("validateInput", () => {
     const r = validateInput(s, { e: "nope", u: "nope", n: 9, t: "b", l: ["y"] });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.errors.map((e) => e.field).sort()).toEqual(["e", "l[0]", "n", "t", "t", "u"].sort());
+  });
+});
+
+describe("hardening", () => {
+  it("excludes fieldset[disabled] controls and disabled options", () => {
+    const s = schemaFromForm(
+      form(`<fieldset disabled><input name="x"></fieldset><input name="y">
+      <select name="z"><option value="a">A</option><option value="b" disabled>B</option></select>`),
+    );
+    expect(Object.keys(s.properties!)).toEqual(["y", "z"]);
+    expect(s.properties!.z!.enum).toEqual(["a"]);
+  });
+  it("anchors patterns and fails closed on invalid ones", () => {
+    const s = schemaFromForm(form(`<input name="p" pattern="[a-z]+">`));
+    expect(validateInput(s, { p: "abc" }).ok).toBe(true);
+    expect(validateInput(s, { p: "abc123" }).ok).toBe(false);
+    const bad = { type: "object" as const, properties: { p: { type: "string" as const, pattern: "([" } } };
+    expect(validateInput(bad, { p: "x" }).ok).toBe(false);
+  });
+  it("treats __proto__ and constructor as normal keys", () => {
+    const s = schemaFromForm(form(`<input name="__proto__" required><input name="constructor">`));
+    expect(Object.keys(s.properties!)).toEqual(["__proto__", "constructor"]);
+    expect(s.required).toEqual(["__proto__"]);
+    const input = JSON.parse('{"__proto__":"a","constructor":"b"}');
+    expect(validateInput(s, input).ok).toBe(true);
+    expect(validateInput(s, {}).ok).toBe(false);
+  });
+  it("rejects inherited keys and non-plain objects", () => {
+    const s = schemaFromForm(form(`<input name="a">`));
+    expect(validateInput(s, { toString: 1 })).toEqual({
+      ok: false,
+      errors: [{ field: "toString", message: "is not an allowed field" }],
+    });
+    expect(validateInput(s, new Date()).ok).toBe(false);
+    expect(validateInput(s, Object.create(null)).ok).toBe(true);
+  });
+  it("freezes EMPTY_OBJECT_SCHEMA", () => {
+    expect(Object.isFrozen(EMPTY_OBJECT_SCHEMA)).toBe(true);
+    expect(Object.isFrozen(EMPTY_OBJECT_SCHEMA.properties)).toBe(true);
   });
 });

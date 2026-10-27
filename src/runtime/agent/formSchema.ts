@@ -4,11 +4,11 @@ import {
 } from "../../shared/conventions";
 import type { JsonSchema } from "./types";
 
-export const EMPTY_OBJECT_SCHEMA: JsonSchema = {
+export const EMPTY_OBJECT_SCHEMA: JsonSchema = Object.freeze({
   type: "object",
-  properties: {},
+  properties: Object.freeze({}),
   additionalProperties: false,
-};
+}) as JsonSchema;
 
 const EXCLUDED_TYPES = new Set(["hidden", "password", "file", "submit", "button", "reset", "image"]);
 
@@ -99,14 +99,14 @@ export function schemaFromForm(form: HTMLFormElement): JsonSchema {
     if (tag !== "INPUT" && tag !== "SELECT" && tag !== "TEXTAREA") continue;
     const el = raw as Field;
     const name = el.getAttribute("name");
-    if (!name || el.hasAttribute("disabled")) continue;
+    if (!name || el.hasAttribute("disabled") || el.closest("fieldset[disabled]")) continue;
     if (tag === "INPUT" && EXCLUDED_TYPES.has((el.getAttribute("type") ?? "text").toLowerCase())) continue;
     const list = groups.get(name);
     if (list) list.push(el);
     else groups.set(name, [el]);
   }
 
-  const properties: Record<string, JsonSchema> = {};
+  const properties: Record<string, JsonSchema> = Object.create(null);
   const required: string[] = [];
 
   for (const [name, els] of groups) {
@@ -118,6 +118,7 @@ export function schemaFromForm(form: HTMLFormElement): JsonSchema {
     if (first.tagName === "SELECT") {
       const sel = first as HTMLSelectElement;
       const opts = Array.from(sel.querySelectorAll("option"))
+        .filter((o) => !o.hasAttribute("disabled"))
         .map((o) => ({ value: o.getAttribute("value") ?? clean(o.textContent), label: clean(o.textContent) }))
         .filter((o) => o.value !== "");
       const values = opts.map((o) => o.value);
@@ -142,6 +143,8 @@ export function schemaFromForm(form: HTMLFormElement): JsonSchema {
   if (required.length) out.required = required;
   return out;
 }
+
+const hasOwn = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
 
 type Errors = Array<{ field: string; message: string }>;
 
@@ -176,13 +179,13 @@ function checkValue(s: JsonSchema, v: unknown, field: string, errors: Errors): v
     if (s.minLength !== undefined && v.length < s.minLength) bad(`must be at least ${s.minLength} characters`);
     if (s.maxLength !== undefined && v.length > s.maxLength) bad(`must be at most ${s.maxLength} characters`);
     if (s.pattern !== undefined) {
-      let re: RegExp | null = null;
+      let ok = false;
       try {
-        re = new RegExp(s.pattern);
+        ok = new RegExp(`^(?:${s.pattern})$`).test(v);
       } catch {
-        re = null;
+        ok = false;
       }
-      if (re && !re.test(v)) bad(`must match pattern ${s.pattern}`);
+      if (!ok) bad(`must match pattern ${s.pattern}`);
     }
     if (s.format === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) bad("must be a valid email");
     if (s.format === "uri") {
@@ -206,18 +209,19 @@ export function validateInput(
   schema: JsonSchema,
   input: unknown,
 ): { ok: true; value: Record<string, unknown> } | { ok: false; errors: Errors } {
-  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+  const proto = typeof input === "object" && input !== null ? Object.getPrototypeOf(input) : undefined;
+  if (proto !== Object.prototype && proto !== null) {
     return { ok: false, errors: [{ field: "", message: "input must be an object" }] };
   }
   const obj = input as Record<string, unknown>;
   const errors: Errors = [];
   const props = schema.properties ?? {};
   for (const name of schema.required ?? []) {
-    if (obj[name] === undefined) errors.push({ field: name, message: "is required" });
+    if (!hasOwn(obj, name) || obj[name] === undefined) errors.push({ field: name, message: "is required" });
   }
   for (const [key, value] of Object.entries(obj)) {
     const prop = props[key];
-    if (!Object.prototype.hasOwnProperty.call(props, key) || !prop) {
+    if (!hasOwn(props, key) || !prop) {
       if (schema.additionalProperties === false) errors.push({ field: key, message: "is not an allowed field" });
       continue;
     }
