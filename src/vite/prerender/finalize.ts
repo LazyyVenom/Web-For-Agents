@@ -16,6 +16,8 @@ export interface FinalizeOptions {
   fullBase?: string;
 }
 
+const DEDUPE_RELS = new Set(["modulepreload", "stylesheet", "preload"]);
+
 /** Elements and attributes holding asset URLs. */
 const URL_ATTRS: ReadonlyArray<readonly [tag: string, attr: string]> = [
   ["link", "href"],
@@ -79,8 +81,11 @@ export function finalizeHtml(html: string, opts: FinalizeOptions): string {
 
     // Rewriting can make a runtime-inserted link identical to one from the shell.
     const seen = new Set<string>();
+    // Only asset links are deduped; other rels (hreflang alternates, icons) legitimately repeat an href.
     document.querySelectorAll("link[href]").forEach((el) => {
-      const key = `${el.getAttribute("rel") ?? ""}\n${el.getAttribute("href")}`;
+      const rel = el.getAttribute("rel") ?? "";
+      if (!DEDUPE_RELS.has(rel)) return;
+      const key = [rel, el.getAttribute("href"), el.getAttribute("as"), el.getAttribute("media"), el.getAttribute("type")].join("\n");
       if (seen.has(key)) el.remove();
       else seen.add(key);
     });

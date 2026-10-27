@@ -115,6 +115,24 @@ describe("finalizeHtml", () => {
       expect(out).toContain('src="http://127.0.0.1:43210/other.png"');
     });
 
+    it("dedupes asset links but keeps other rels that share an href", () => {
+      const out = finalizeHtml(
+        base(
+          `<link rel="alternate" hreflang="en" href="/"><link rel="alternate" hreflang="x-default" href="/">` +
+            `<link rel="icon" sizes="16x16" href="/i.png"><link rel="icon" sizes="32x32" href="/i.png">` +
+            `<link rel="modulepreload" href="/a.js"><link rel="modulepreload" href="/a.js">` +
+            `<link rel="preload" as="style" href="/a.css"><link rel="preload" as="font" href="/a.css">`,
+        ),
+        { route: "/", relativeBase: false },
+      );
+      const { document, dispose } = parseHtml(out);
+      expect(document.querySelectorAll('link[rel="alternate"]').length).toBe(2);
+      expect(document.querySelectorAll('link[rel="icon"]').length).toBe(2);
+      expect(document.querySelectorAll('link[rel="modulepreload"]').length).toBe(1);
+      expect(document.querySelectorAll('link[rel="preload"]').length).toBe(2);
+      dispose();
+    });
+
     it("rewrites origin URLs relative to the route for a relative base", () => {
       const deep = finalizeHtml(leaked("./"), { route: "/blog/hello", relativeBase: true, origin });
       expect(deep).not.toContain(`${origin}/`);
