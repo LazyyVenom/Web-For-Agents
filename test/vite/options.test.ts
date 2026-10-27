@@ -156,6 +156,9 @@ describe("stage 2 options", () => {
       resolveOptions({ ...base, robots: { ai }, ...extra } as never).warnings;
     const t = warn({ training: "block", search: "allow" });
     expect(t).toHaveLength(1);
+    expect(t[0]).toBe(
+      "[web-for-agents] robots.ai blocks AI training crawlers, but llms.txt, llms-full.txt, .md files are still generated and publicly fetchable",
+    );
     for (const s of ["blocks AI training crawlers", "llms.txt", "llms-full.txt", ".md files"]) {
       expect(t[0]).toContain(s);
     }

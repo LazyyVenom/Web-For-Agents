@@ -228,7 +228,7 @@ export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
   const files = agentOutputs(resolved);
   if (blocked.length > 0 && files.length > 0) {
     warnings.push(
-      `${PREFIX} robots blocks AI ${blocked.join(" and ")} crawlers, but ${files.join(", ")} will still be generated for agents`,
+      `${PREFIX} robots.ai blocks AI ${blocked.join(" and ")} crawlers, but ${files.join(", ")} are still generated and publicly fetchable`,
     );
   }
   return resolved;

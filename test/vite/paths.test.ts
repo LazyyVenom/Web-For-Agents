@@ -47,6 +47,12 @@ describe("linkToRoute", () => {
     expect(linkToRoute(`${o}/files/a.pdf`, o, "/")).toBeNull();
     expect(linkToRoute(`${o}/x/index.html`, o, "/")).toBe("/x");
   });
+  it("rejects non-http and unsafe links", () => {
+    expect(linkToRoute("tel:1", o, "/")).toBeNull();
+    expect(linkToRoute("javascript:void(0)", o, "/")).toBeNull();
+    expect(linkToRoute(`${o}/a%2F..%2Fb`, o, "/")).toBeNull();
+    expect(linkToRoute(`${o}/../etc`, o, "/")).toBe("/etc");
+  });
   it("base /sub/", () => {
     expect(linkToRoute(`${o}/sub/about`, o, "/sub/")).toBe("/about");
     expect(linkToRoute(`${o}/sub`, o, "/sub/")).toBe("/");
