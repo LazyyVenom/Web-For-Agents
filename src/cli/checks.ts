@@ -207,7 +207,7 @@ function checkRobots({ page, robots }: AuditInputs): Outcome {
   const serverFix = "Fix the server error on /robots.txt; crawlers may treat the whole site as disallowed."
   if (robots.status >= 500) return fail(`${ROBOTS_PATH} returned HTTP ${robots.status}`, serverFix)
   if (robots.status === 0 && robots.error !== undefined) {
-    return fail(`${ROBOTS_PATH} unreachable (${robots.error})`, serverFix)
+    return fail(`robots.txt unreachable (${robots.error})`, serverFix)
   }
   if (isMissing(robots)) return warn(`${ROBOTS_PATH} not found${why(robots)}`, missingFix)
   const parsed = parseRobots(robots.body)
