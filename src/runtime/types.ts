@@ -1,9 +1,7 @@
 export type HeadTag =
   | { kind: "title"; key: "title"; text: string }
   | { kind: "meta"; key: string; attrs: Record<string, string> }
-  | { kind: "link"; key: string; attrs: Record<string, string> }
-  /** Tombstone: removes `key` from the merge, so a deeper entry can opt out of an ancestor's tag. */
-  | { kind: "remove"; key: string };
+  | { kind: "link"; key: string; attrs: Record<string, string> };
 
 export interface SeoDefaults {
   siteName?: string;

@@ -237,6 +237,49 @@ describe("default canonical", () => {
     expect(ogUrl()).toBeUndefined();
   });
 
+  it("an ancestor's explicit canonical survives a deeper Seo with no canonical", () => {
+    setPath("/a");
+    render(
+      <SeoProvider defaults={defaults}>
+        <Seo title="Layout" canonical="/layout" />
+        <Seo title="Page" />
+      </SeoProvider>,
+    );
+    expect(canonical()).toBe("https://site.test/layout");
+    expect(ogUrl()).toBe("https://site.test/layout");
+  });
+
+  it("a deeper explicit canonical beats an ancestor's explicit one", () => {
+    setPath("/a");
+    render(
+      <SeoProvider defaults={defaults}>
+        <Seo title="Layout" canonical="/layout" />
+        <Seo title="Page" canonical="/page" />
+      </SeoProvider>,
+    );
+    expect(canonical()).toBe("https://site.test/page");
+    expect(ogUrl()).toBe("https://site.test/page");
+  });
+
+  it("a deeper false removes an ancestor's explicit canonical", () => {
+    setPath("/a");
+    render(
+      <SeoProvider defaults={defaults}>
+        <Seo title="Layout" canonical="/layout" />
+        <Seo title="Page" canonical={false} />
+      </SeoProvider>,
+    );
+    expect(canonical()).toBeUndefined();
+    expect(ogUrl()).toBeUndefined();
+  });
+
+  it("a provider with siteUrl and no Seo yields the default", () => {
+    setPath("/a/");
+    render(<SeoProvider defaults={defaults}>{null}</SeoProvider>);
+    expect(canonical()).toBe("https://site.test/a");
+    expect(ogUrl()).toBe("https://site.test/a");
+  });
+
   it("updates after navigation on a remount or prop change", () => {
     setPath("/a");
     const { rerender } = render(
@@ -259,5 +302,51 @@ describe("default canonical", () => {
       </SeoProvider>,
     );
     expect(canonical()).toBe("https://site.test/c");
+  });
+});
+
+describe("navigation watching", () => {
+  const canonical = () => document.head.querySelector('link[rel="canonical"]')?.getAttribute("href");
+  const happy = (window as unknown as { happyDOM: { setURL(u: string): void } }).happyDOM;
+  const defaults = { siteUrl: "https://site.test" };
+
+  it("popstate triggers a re-flush", () => {
+    happy.setURL("https://site.test/a");
+    render(
+      <SeoProvider defaults={defaults}>
+        <Seo title="Layout" />
+      </SeoProvider>,
+    );
+    expect(canonical()).toBe("https://site.test/a");
+    happy.setURL("https://site.test/back");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(canonical()).toBe("https://site.test/back");
+  });
+
+  // Last on purpose: it leaves our wrapper under a foreign one, which is the case being tested.
+  it("reuses its wrapper when a foreign patch sits on top at unmount", () => {
+    happy.setURL("https://site.test/a");
+    const tree = (
+      <SeoProvider defaults={defaults}>
+        <Seo title="Layout" />
+      </SeoProvider>
+    );
+    const first = render(tree);
+    const ours = history.pushState;
+    const foreign = function (this: History, ...args: Parameters<History["pushState"]>) {
+      return ours.apply(this, args);
+    };
+    history.pushState = foreign;
+    first.unmount();
+    expect(history.pushState).toBe(foreign);
+    render(tree);
+    expect(history.pushState).toBe(foreign);
+    let dispatched = 0;
+    const count = () => dispatched++;
+    window.addEventListener("wfa:navigate", count);
+    history.pushState({}, "", "/b");
+    window.removeEventListener("wfa:navigate", count);
+    expect(dispatched).toBe(1);
+    expect(canonical()).toBe("https://site.test/b");
   });
 });

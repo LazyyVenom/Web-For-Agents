@@ -26,7 +26,6 @@ function defaultDoc(): Document | undefined {
 export function applyHeadTags(tags: HeadTag[], doc: Document | undefined = defaultDoc()): void {
   if (!doc) return;
   for (const tag of tags) {
-    if (tag.kind === "remove") continue;
     const selector = selectorFor(tag.key);
     if (!selector) continue;
     let el = doc.head.querySelector(selector);

@@ -1,6 +1,6 @@
 import { createContext, createElement, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { buildHeadTags } from "./buildHeadTags";
+import { buildEntryTags, buildHeadTags, defaultCanonicalTags } from "./buildHeadTags";
 import { HEAD_OWNED_ATTR } from "../shared/conventions";
 import { applyHeadTags, removeHeadTag } from "./headManager";
 import type { HeadTag, SeoDefaults, SeoProps } from "./types";
@@ -15,6 +15,8 @@ interface Entry {
 
 interface Store {
   base: HeadTag[];
+  /** siteUrl from the SeoProvider; feeds the default canonical. */
+  siteUrl: string | undefined;
   stack: Entry[];
   applied: Set<string>;
   seeded: boolean;
@@ -27,7 +29,7 @@ const stores = new WeakMap<Document, Store>();
 function getStore(doc: Document): Store {
   let s = stores.get(doc);
   if (!s) {
-    s = { base: [], stack: [], applied: new Set(), seeded: false };
+    s = { base: [], siteUrl: undefined, stack: [], applied: new Set(), seeded: false };
     stores.set(doc, s);
   }
   return s;
@@ -45,10 +47,12 @@ function flush(doc: Document): void {
   }
   const merged = new Map<string, HeadTag>();
   for (const tag of store.base) merged.set(tag.key, tag);
-  // Tags are built here, so every entry sees the current path.
-  const path = doc.location?.pathname;
-  for (const entry of [...store.stack].sort((a, b) => a.order - b.order)) {
-    for (const tag of buildHeadTags(entry.props, entry.defaults, path)) {
+  const entries = [...store.stack].sort((a, b) => a.order - b.order);
+  // Lowest-priority layer: the default canonical for the current path. Tags are built here so they follow it.
+  const siteUrl = store.siteUrl ?? entries.find((e) => e.defaults.siteUrl)?.defaults.siteUrl;
+  for (const tag of defaultCanonicalTags(siteUrl, doc.location?.pathname)) merged.set(tag.key, tag);
+  for (const entry of entries) {
+    for (const tag of buildEntryTags(entry.props, entry.defaults)) {
       if (tag.kind === "remove") merged.delete(tag.key);
       else merged.set(tag.key, tag);
     }
@@ -62,7 +66,8 @@ function flush(doc: Document): void {
 const NAV_EVENT = "wfa:navigate";
 let watchers = 0;
 let unwatch: (() => void) | null = null;
-let patched: { push: History["pushState"]; replace: History["replaceState"] } | null = null;
+const PATCHED = ["pushState", "replaceState"] as const;
+const patches: { [K in (typeof PATCHED)[number]]?: { orig: History[K]; wrapped: History[K] } } = {};
 
 const onNavigate = () => flush(document);
 
@@ -78,33 +83,29 @@ function watchNavigation(): () => void {
     };
   }
   window.addEventListener(NAV_EVENT, onNavigate);
-  if (!patched) {
-    const push = history.pushState;
-    const replace = history.replaceState;
-    const wrap =
-      (orig: History["pushState"]): History["pushState"] =>
-      function (this: History, ...args) {
-        const result = orig.apply(this, args);
-        window.dispatchEvent(new Event(NAV_EVENT));
-        return result;
-      };
-    const wrappedPush = wrap(push);
-    const wrappedReplace = wrap(replace);
-    history.pushState = wrappedPush;
-    history.replaceState = wrappedReplace;
-    patched = { push, replace };
-    return () => {
-      window.removeEventListener("popstate", onNavigate);
-      window.removeEventListener(NAV_EVENT, onNavigate);
-      // Only unpatch when nobody wrapped us since; otherwise the wrappers stay and dispatch to no one.
-      if (history.pushState === wrappedPush) history.pushState = push;
-      if (history.replaceState === wrappedReplace) history.replaceState = replace;
-      patched = null;
+  for (const name of PATCHED) {
+    if (patches[name]) continue; // our wrapper is still installed (a foreign one may sit on top): reuse it
+    const orig = history[name];
+    const wrapped: History[typeof name] = function (this: History, ...args: Parameters<History[typeof name]>) {
+      const result = orig.apply(this, args);
+      window.dispatchEvent(new Event(NAV_EVENT));
+      return result;
     };
+    history[name] = wrapped;
+    patches[name] = { orig, wrapped };
   }
   return () => {
     window.removeEventListener("popstate", onNavigate);
     window.removeEventListener(NAV_EVENT, onNavigate);
+    for (const name of PATCHED) {
+      const patch = patches[name];
+      // Unpatch only when ours is on top. Otherwise a foreign wrapper chains to ours: leave it installed
+      // (still recorded) and reuse it on the next mount instead of wrapping again.
+      if (patch && history[name] === patch.wrapped) {
+        history[name] = patch.orig;
+        patches[name] = undefined;
+      }
+    }
   };
 }
 
@@ -134,10 +135,11 @@ export function SeoProvider(props: SeoProviderProps) {
   useIsoLayoutEffect(() => {
     const store = getStore(document);
     store.base = buildHeadTags({}, defaults);
-    // No default canonical here: it comes from each Seo, so canonical={false} can opt a page out.
+    store.siteUrl = defaults.siteUrl;
     flush(document);
     return () => {
       store.base = [];
+      store.siteUrl = undefined;
       flush(document);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
