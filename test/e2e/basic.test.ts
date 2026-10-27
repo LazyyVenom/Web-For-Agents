@@ -1,21 +1,16 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { build, createLogger } from "vite";
+import { copyFixture, fixturePath, jsBundle, removeFixtureCopies } from "./helpers";
 
-const fixture = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../fixtures/basic");
+const fixture = fixturePath("basic");
 const tmpDirs: string[] = [];
-afterAll(() => tmpDirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
-
-function jsBundle(dist: string): string {
-  const dir = path.join(dist, "assets");
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".js"))
-    .map((f) => readFileSync(path.join(dir, f), "utf8"))
-    .join("\n");
-}
+afterAll(() => {
+  tmpDirs.forEach((d) => rmSync(d, { recursive: true, force: true }));
+  removeFixtureCopies();
+});
 
 describe("basic fixture build", () => {
   it("emits sitemap.xml and robots.txt without leaking build code", async () => {
@@ -33,9 +28,7 @@ describe("basic fixture build", () => {
   }, 30_000);
 
   it("does not overwrite user files", async () => {
-    const root = mkdtempSync(path.join(fixture, "..", "tmp-"));
-    tmpDirs.push(root);
-    cpSync(fixture, root, { recursive: true, filter: (s) => path.relative(fixture, s).split(path.sep)[0] !== "dist" });
+    const root = copyFixture("basic");
     mkdirSync(path.join(root, "public"), { recursive: true });
     writeFileSync(path.join(root, "public/robots.txt"), "# mine");
 

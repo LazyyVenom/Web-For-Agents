@@ -1,8 +1,7 @@
-import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, type Dirent } from "node:fs";
+import { cpSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { Browser } from "happy-dom";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -11,10 +10,9 @@ import { webForAgents } from "../../src/vite/index";
 import type { WebForAgentsOptions } from "../../src/vite/options";
 import { createChromeRenderer } from "../../src/vite/prerender/renderers";
 import { startStaticServer } from "../../src/vite/prerender/server";
+import { copyFixture, distFiles, jsBundle, makeTempDir, removeFixtureCopies } from "./helpers";
 
-const fixture = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../fixtures/spa");
-const tmpDirs: string[] = [];
-afterAll(() => tmpDirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
+afterAll(removeFixtureCopies);
 
 async function chromeWorks(): Promise<boolean> {
   try {
@@ -34,9 +32,7 @@ interface Built {
 async function buildFixture(
   opts: { base?: string; siteUrl?: string; routes?: string[]; extra?: Partial<WebForAgentsOptions> },
 ): Promise<Built> {
-  const root = mkdtempSync(path.join(fixture, "..", "tmp-"));
-  tmpDirs.push(root);
-  cpSync(fixture, root, { recursive: true });
+  const root = copyFixture("spa");
   await build({
     root,
     configFile: false,
@@ -58,9 +54,7 @@ async function buildFixture(
 
 const read = (dist: string, file: string) => readFileSync(path.join(dist, file), "utf8");
 const filesContaining = (dist: string, needle: string) =>
-  (readdirSync(dist, { recursive: true, withFileTypes: true }) as Dirent[])
-    .filter((e) => e.isFile())
-    .map((e) => path.join(e.parentPath, e.name))
+  distFiles(dist)
     .filter((f) => readFileSync(f).includes(needle))
     .map((f) => path.relative(dist, f));
 const count = (s: string, needle: string) => s.split(needle).length - 1;
@@ -121,18 +115,13 @@ describe("default build", () => {
   });
 
   it("keeps build-only code out of the client bundle", () => {
-    const dir = path.join(dist, "assets");
-    const js = readdirSync(dir)
-      .filter((f) => f.endsWith(".js"))
-      .map((f) => readFileSync(path.join(dir, f), "utf8"))
-      .join("\n");
+    const js = jsBundle(dist);
     for (const bad of ["turndown", "happy-dom", "__WFA_PROBE__"]) expect(js).not.toContain(bad);
   });
 
   it("replace boot does not duplicate head tags and drops stale ones", async () => {
     // Serve a copy whose prerendered /about carries an og:image the client no longer renders.
-    const copy = mkdtempSync(path.join(fixture, "..", "tmp-"));
-    tmpDirs.push(copy);
+    const copy = makeTempDir();
     cpSync(dist, copy, { recursive: true });
     const stale = '<meta data-wfa="property:og:image" property="og:image" content="https://example.com/stale.png">';
     const about = read(copy, "about/index.html");
@@ -258,11 +247,8 @@ describe("full-URL base", () => {
 
 describe("failures", () => {
   it("a route that throws fails the build and writes nothing", async () => {
-    let dist = "";
-    const root = mkdtempSync(path.join(fixture, "..", "tmp-"));
-    tmpDirs.push(root);
-    cpSync(fixture, root, { recursive: true });
-    dist = path.join(root, "dist");
+    const root = copyFixture("spa");
+    const dist = path.join(root, "dist");
     await expect(
       build({
         root,

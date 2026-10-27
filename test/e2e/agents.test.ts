@@ -1,23 +1,14 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, type Dirent } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { build, createLogger } from "vite";
 import { webForAgents } from "../../src/vite/index";
 import type { WebForAgentsOptions } from "../../src/vite/options";
+import type { AgentMap, AgentMapPage } from "../../src/shared/agent";
+import { copyFixture, distFiles, jsBundle, removeFixtureCopies } from "./helpers";
 
-const fixture = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../fixtures/agents");
-const tmpDirs: string[] = [];
-afterAll(() => tmpDirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
-
-/** Copies the fixture next to itself (so relative imports of ../src resolve). */
-function copyFixture(): string {
-  const root = mkdtempSync(path.join(fixture, "..", "tmp-"));
-  tmpDirs.push(root);
-  cpSync(fixture, root, { recursive: true, filter: (s) => path.relative(fixture, s).split(path.sep)[0] !== "dist" });
-  return root;
-}
+afterAll(removeFixtureCopies);
 
 async function buildAt(root: string, extra: Partial<WebForAgentsOptions> = {}): Promise<{ dist: string; warnings: string[] }> {
   const warnings: string[] = [];
@@ -41,41 +32,15 @@ async function buildAt(root: string, extra: Partial<WebForAgentsOptions> = {}): 
 }
 
 const read = (dist: string, file: string) => readFileSync(path.join(dist, file), "utf8");
-const distFiles = (dist: string) =>
-  (readdirSync(dist, { recursive: true, withFileTypes: true }) as Dirent[])
-    .filter((e) => e.isFile())
-    .map((e) => path.join(e.parentPath, e.name));
-const jsBundle = (dist: string) =>
-  distFiles(dist)
-    .filter((f) => f.endsWith(".js"))
-    .map((f) => readFileSync(f, "utf8"))
-    .join("\n");
-
-interface MapAction {
-  name: string;
-  description: string;
-  kind: string;
-  destructive: boolean;
-  readOnly: boolean;
-  inputSchema: { properties?: Record<string, { enum?: string[]; format?: string; description?: string }>; required?: string[] };
-}
-interface MapPage {
-  path: string;
-  url: string;
-  title?: string;
-  description?: string;
-  markdown?: string;
-  actions: MapAction[];
-}
 
 describe("agent map build", () => {
   let dist: string;
   let warnings: string[];
-  let map: { version: number; site: { url: string; name?: string }; llms?: string; pages: MapPage[] };
-  const page = (p: string) => map.pages.find((x) => x.path === p)!;
+  let map: AgentMap;
+  const page = (p: string): AgentMapPage => map.pages.find((x) => x.path === p)!;
 
   beforeAll(async () => {
-    ({ dist, warnings } = await buildAt(copyFixture()));
+    ({ dist, warnings } = await buildAt(copyFixture("agents")));
     map = JSON.parse(read(dist, "agents.json"));
   }, 120_000);
 
@@ -159,7 +124,7 @@ describe("agent map build", () => {
 
 describe("agent map options", () => {
   it("does not overwrite public/agents.json", async () => {
-    const root = copyFixture();
+    const root = copyFixture("agents");
     mkdirSync(path.join(root, "public"), { recursive: true });
     writeFileSync(path.join(root, "public/agents.json"), '{"mine":true}\n');
     const { dist, warnings } = await buildAt(root);
@@ -168,7 +133,7 @@ describe("agent map options", () => {
   }, 120_000);
 
   it("agentMap: false writes no agents.json and no llms.txt section", async () => {
-    const { dist } = await buildAt(copyFixture(), { agentMap: false });
+    const { dist } = await buildAt(copyFixture("agents"), { agentMap: false });
     expect(existsSync(path.join(dist, "agents.json"))).toBe(false);
     const llms = read(dist, "llms.txt");
     expect(llms).not.toContain("agents.json");
@@ -176,7 +141,7 @@ describe("agent map options", () => {
   }, 120_000);
 
   it("an agent map failure fails the build and writes nothing", async () => {
-    const root = copyFixture();
+    const root = copyFixture("agents");
     const dist = path.join(root, "dist");
     await expect(buildAt(root, { routes: ["/broken"] })).rejects.toThrow(/extension "agent-map" failed[\s\S]*agent map boom/);
     for (const f of ["agents.json", "llms.txt", "sitemap.xml", "robots.txt", "200.html", "index.md", "contact/index.html", "broken/index.html"]) {
