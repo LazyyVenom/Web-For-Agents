@@ -1,3 +1,4 @@
+import { LOG_PREFIX } from "../../shared/errors";
 import type { LlmsSection } from "../llms";
 
 /** A listed (indexable) prerendered page. Pages are sorted by route. */
@@ -48,11 +49,11 @@ export function assertExtensionNames(exts: PrerenderExtension[]): void {
   for (const ext of exts) {
     if (typeof ext.name !== "string" || !NAME.test(ext.name)) {
       throw new Error(
-        `[web-for-agents] invalid prerender extension name ${JSON.stringify(ext.name)} (expected /^[a-z0-9-]+$/)`,
+        `${LOG_PREFIX} invalid prerender extension name ${JSON.stringify(ext.name)} (expected /^[a-z0-9-]+$/)`,
       );
     }
     if (seen.has(ext.name)) {
-      throw new Error(`[web-for-agents] duplicate prerender extension "${ext.name}"`);
+      throw new Error(`${LOG_PREFIX} duplicate prerender extension "${ext.name}"`);
     }
     seen.add(ext.name);
   }

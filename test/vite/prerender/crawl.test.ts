@@ -39,6 +39,20 @@ function opts(over: Partial<CrawlOptions> = {}): CrawlOptions {
 }
 
 describe("crawlRoutes", () => {
+  it("mounts full-URL and relative bases at the origin root", async () => {
+    for (const base of ["https://cdn.example.com/app/", "//cdn.example.com/", "./", ""]) {
+      const urls: string[] = [];
+      const render: RenderFn = async (url) => {
+        urls.push(url);
+        const path = new URL(url).pathname;
+        return { html: path === "/" ? page(a("/a")) : page("A"), finalPath: path, inPage: {} };
+      };
+      const r = await crawlRoutes(opts({ base, relativeBase: true }), render);
+      expect(urls, base).toEqual([`${ORIGIN}/`, `${ORIGIN}/a`]);
+      expect(r.pages.map((p) => p.route), base).toEqual(["/", "/a"]);
+    }
+  });
+
   it("follows same-origin links and skips unsafe/excluded ones", async () => {
     const calls: string[] = [];
     const render = fakeRender(

@@ -1,8 +1,10 @@
-import { isExcluded, normalizeRoute, type RendererName } from "../options";
+import { normalizeRoute } from "../../shared/conventions";
+import { errorMessage, LOG_PREFIX } from "../../shared/errors";
+import { isExcluded, type RendererName } from "../options";
 import { analyzePage, type PageInfo } from "./analyze";
 import { finalizeHtml } from "./finalize";
-import { isSafeRoute, linkToRoute } from "./paths";
-import { errorMessage, type InPageScripts, type RenderResult } from "./renderers";
+import { byRoute, isSafeRoute, linkToRoute, trimTrailingSlash } from "./paths";
+import type { InPageScripts, RenderResult } from "./renderCore";
 
 export interface PrerenderedPage {
   route: string;
@@ -40,7 +42,7 @@ export interface CrawlOptions {
   rendererFor(route: string): RendererName;
   fallback: RendererName | false;
   origin: string;
-  /** Absolute mount, e.g. "/" or "/sub/". */
+  /** Absolute mount on `origin`, e.g. "/" or "/sub/". Anything else (relative or full-URL bases) mounts at "/". */
   base: string;
   relativeBase: boolean;
   contentSelector: string;
@@ -59,7 +61,8 @@ export type RenderFn = (
 ) => Promise<RenderResult>;
 
 export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise<CrawlResult> {
-  const mount = opts.base.replace(/\/+$/, "");
+  const mount = opts.base.startsWith("/") && !opts.base.startsWith("//") ? trimTrailingSlash(opts.base) : "";
+  const linkBase = mount + "/";
   const skip = (route: string) => opts.skipRoute?.(route) === true;
   const seen = new Set<string>();
   const queue: string[] = [];
@@ -136,7 +139,7 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
     const found: string[] = [];
     let redirected = false;
     if (result.finalPath) {
-      const finalRoute = linkToRoute(new URL(result.finalPath, url).href, opts.origin, opts.base);
+      const finalRoute = linkToRoute(new URL(result.finalPath, url).href, opts.origin, linkBase);
       if (finalRoute !== route) {
         redirected = true;
         if (opts.crawl && candidate(finalRoute)) found.push(finalRoute);
@@ -153,7 +156,7 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
     if (info.contentSource === "body") bodyFallbackRoutes.push(route);
     if (opts.crawl) {
       for (const link of info.links) {
-        const r = linkToRoute(link, opts.origin, opts.base);
+        const r = linkToRoute(link, opts.origin, linkBase);
         if (candidate(r)) found.push(r);
       }
     }
@@ -177,8 +180,8 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
     for (const r of [...new Set(found.flat())].sort()) enqueue(r);
   }
 
-  pages.sort((a, b) => (a.route < b.route ? -1 : a.route > b.route ? 1 : 0));
-  failures.sort((a, b) => (a.route < b.route ? -1 : a.route > b.route ? 1 : 0));
+  pages.sort(byRoute);
+  failures.sort(byRoute);
   bodyFallbackRoutes.sort();
   return { pages, failures, truncated, bodyFallbackRoutes };
 }
@@ -189,5 +192,5 @@ export function formatFailures(failures: CrawlFailure[], fallback: RendererName 
     fallback === false
       ? 'Set prerender.fallback to "chrome" or "msedge" to retry failed routes in a real browser, or use prerender.routeRenderers, exclude, or prerender: false.'
       : "Check that these routes render in your browser, or exclude them with `exclude`.";
-  return `[web-for-agents] prerender failed for ${failures.length} route(s):\n${lines.join("\n")}\n${hint}`;
+  return `${LOG_PREFIX} prerender failed for ${failures.length} route(s):\n${lines.join("\n")}\n${hint}`;
 }

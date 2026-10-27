@@ -1,13 +1,15 @@
+import { DEFAULT_CONTENT_SELECTOR } from "../../shared/content";
+import { LOG_PREFIX } from "../../shared/errors";
 import type { ResolvedOptions } from "../options";
 import { isExcluded } from "../options";
 import { crawlRoutes, formatFailures, type CrawlResult } from "./crawl";
 import { assertExtensionNames, inPageExpression, type PrerenderExtension } from "./extensions";
-import { publicMdUrl } from "./paths";
+import { isRelativeBase, publicMdUrl } from "./paths";
 import { prepareShell } from "./probe";
 import { createRendererPool, type InPageScripts } from "./renderers";
 import { startStaticServer } from "./server";
 
-export * from "./crawl";
+export type { CrawlFailure, CrawlResult, PrerenderedPage } from "./crawl";
 
 export async function prerenderSite(input: {
   outDir: string;
@@ -19,7 +21,7 @@ export async function prerenderSite(input: {
 }): Promise<CrawlResult> {
   const { options } = input;
   const pr = options.prerender;
-  if (pr === false) throw new Error("[web-for-agents] prerenderSite called with prerender disabled");
+  if (pr === false) throw new Error(`${LOG_PREFIX} prerenderSite called with prerender disabled`);
   assertExtensionNames(input.extensions);
 
   const inPage: InPageScripts = {};
@@ -27,7 +29,7 @@ export async function prerenderSite(input: {
     if (ext.inPage) inPage[ext.name] = inPageExpression(ext.inPage);
   }
 
-  const relativeBase = input.base === "" || input.base.startsWith(".");
+  const relativeBase = isRelativeBase(input.base);
   const mount = relativeBase ? "/" : input.base;
   const markdown = options.markdown;
 
@@ -50,7 +52,7 @@ export async function prerenderSite(input: {
           origin: server.origin,
           base: mount,
           relativeBase,
-          contentSelector: markdown ? markdown.contentSelector : "main",
+          contentSelector: markdown ? markdown.contentSelector : DEFAULT_CONTENT_SELECTOR,
           ...(markdown ? { markdownUrl: (route: string) => publicMdUrl(options.siteUrl, route) } : {}),
           inPage,
           skipRoute: input.skipRoute,

@@ -48,6 +48,16 @@ describe("analyzePage", () => {
     expect(run(page("<p>x</p>"), "/zzz").title).toBe("/zzz");
   });
 
+  it("titleFromDocument", () => {
+    expect(run(page("<p>x</p>", "<title>T</title>")).titleFromDocument).toBe(true);
+    expect(run(page("<h1>H</h1>")).titleFromDocument).toBe(true);
+    const fallback = run(page("<p>x</p>"), "/");
+    expect(fallback.title).toBe("/");
+    expect(fallback.titleFromDocument).toBe(false);
+    // A page literally titled "/" is still a document title.
+    expect(run(page("<p>x</p>", "<title>/</title>"), "/").titleFromDocument).toBe(true);
+  });
+
   it("links", () => {
     const r = run(page(`<a href="team">t</a><a href="mailto:a@b.c">m</a><a href="javascript:void(0)">j</a><a href="/f.pdf" download>d</a><a href="https://other.com/x">o</a>`));
     expect(r.links).toEqual(["http://h/team", "https://other.com/x"]);

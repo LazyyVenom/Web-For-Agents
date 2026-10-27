@@ -2,7 +2,10 @@ import { selectContentRegion, type ContentSource } from "../../shared/content";
 import { parseHtml } from "./dom";
 
 export interface PageInfo {
+  /** <title>, else the first <h1>, else the route. */
   title: string;
+  /** False when `title` fell back to the route because the page has no <title> or <h1> text. */
+  titleFromDocument: boolean;
   description?: string;
   noindex: boolean;
   links: string[];
@@ -17,10 +20,8 @@ export function analyzePage(
 ): PageInfo {
   const { document, dispose } = parseHtml(html);
   try {
-    const title =
-      document.title.trim() ||
-      (document.querySelector("h1")?.textContent ?? "").trim() ||
-      opts.route;
+    const docTitle = document.title.trim() || (document.querySelector("h1")?.textContent ?? "").trim();
+    const title = docTitle || opts.route;
 
     const description =
       document.querySelector('meta[name="description"]')?.getAttribute("content")?.trim() || undefined;
@@ -50,6 +51,7 @@ export function analyzePage(
 
     return {
       title,
+      titleFromDocument: docTitle !== "",
       ...(description !== undefined ? { description } : {}),
       noindex,
       links,
