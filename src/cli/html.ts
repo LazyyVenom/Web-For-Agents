@@ -13,7 +13,14 @@ const INLINE = new Set([
   "a", "abbr", "b", "bdi", "bdo", "cite", "code", "data", "del", "dfn", "em", "i", "ins",
   "kbd", "mark", "q", "s", "samp", "small", "span", "strong", "sub", "sup", "time", "u", "var",
 ])
-const NAMED: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " }
+const HEAD_OK = new Set(["html", "head", "title", "meta", "link", "base", "script", "style", "noscript", "template"])
+const NAMED: Record<string, string> = {
+  amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: "\u00a0",
+  mdash: "\u2014", ndash: "\u2013", copy: "\u00a9", reg: "\u00ae", trade: "\u2122",
+  hellip: "\u2026", rarr: "\u2192", larr: "\u2190", laquo: "\u00ab", raquo: "\u00bb",
+  lsquo: "\u2018", rsquo: "\u2019", ldquo: "\u201c", rdquo: "\u201d", bull: "\u2022",
+  middot: "\u00b7", euro: "\u20ac", pound: "\u00a3",
+}
 
 function decode(s: string): string {
   if (s.indexOf("&") === -1) return s
@@ -32,7 +39,7 @@ const isAlpha = (c: number): boolean => (c >= 65 && c <= 90) || (c >= 97 && c <=
 function findRawEnd(html: string, name: string, from: number): number {
   let i = html.indexOf("</", from)
   while (i !== -1) {
-    if (html.substr(i + 2, name.length).toLowerCase() === name) return i
+    if (html.slice(i + 2, i + 2 + name.length).toLowerCase() === name) return i
     i = html.indexOf("</", i + 2)
   }
   return -1
@@ -134,7 +141,13 @@ export function extractHtmlFacts(html: string): HtmlFacts {
       continue
     }
 
-    if (name === "main") hasMain = true
+    // </head> is optional: the first non-head element ends an unclosed head.
+    if ((depth.head ?? 0) > 0 && excluded === depth.head && !HEAD_OK.has(name)) {
+      excluded -= depth.head
+      depth.head = 0
+    }
+
+    if (name === "main" && excluded === 0) hasMain = true
     if (name === "meta") {
       metas.push(attrs)
     } else if (name === "link") {

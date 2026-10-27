@@ -78,4 +78,25 @@ describe("extractHtmlFacts", () => {
     expect(Date.now() - t).toBeLessThan(2000)
     expect(f.text.startsWith("word word")).toBe(true)
   })
+
+  it("an unclosed head ends at the first body element", () => {
+    const f = extractHtmlFacts("<head><title>t</title><body><p>hi</p>")
+    expect(f.title).toBe("t")
+    expect(f.text).toBe("hi")
+    expect(extractHtmlFacts("<head><meta name=a content=b><main>x</main>").text).toBe("x")
+  })
+
+  it("decodes common named entities", () => {
+    const f = extractHtmlFacts(
+      "<p>&mdash;&ndash;&copy;&reg;&trade;&hellip;&rarr;&larr;&laquo;&raquo;&lsquo;&rsquo;&ldquo;&rdquo;&bull;&middot;&euro;&pound;</p>",
+    )
+    expect(f.text).toBe("\u2014\u2013\u00a9\u00ae\u2122\u2026\u2192\u2190\u00ab\u00bb\u2018\u2019\u201c\u201d\u2022\u00b7\u20ac\u00a3")
+    expect(extractHtmlFacts("<p>a&nbsp;b</p>").text).toBe("a b")
+  })
+
+  it("hasMain ignores main inside template, noscript or svg", () => {
+    expect(extractHtmlFacts("<template><main>x</main></template>").hasMain).toBe(false)
+    expect(extractHtmlFacts("<noscript><main>x</main></noscript>").hasMain).toBe(false)
+    expect(extractHtmlFacts("<svg><main>x</main></svg>").hasMain).toBe(false)
+  })
 })
