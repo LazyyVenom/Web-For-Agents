@@ -65,4 +65,9 @@ describe("buildHeadTags", () => {
     const t2 = buildHeadTags({ title: "T" });
     expect(JSON.stringify(t2)).not.toContain("undefined");
   });
+
+  it("does not treat $ in title as a replacement pattern", () => {
+    const t = buildHeadTags({ title: "Save $$ $&" }, { titleTemplate: "%s | Acme" });
+    expect(find(t, "title")).toMatchObject({ text: "Save $$ $& | Acme" });
+  });
 });

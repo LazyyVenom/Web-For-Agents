@@ -22,7 +22,7 @@ export function buildHeadTags(props: SeoProps, defaults: SeoDefaults = {}): Head
   const title =
     props.title !== undefined
       ? defaults.titleTemplate
-        ? defaults.titleTemplate.replace("%s", props.title)
+        ? defaults.titleTemplate.replace("%s", () => props.title as string)
         : props.title
       : defaults.siteName;
   if (title !== undefined) byKey.set("title", { kind: "title", key: "title", text: title });

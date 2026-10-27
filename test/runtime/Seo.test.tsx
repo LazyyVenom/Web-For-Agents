@@ -2,7 +2,7 @@
 import React, { StrictMode } from "react";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render, cleanup } from "@testing-library/react";
-import { Seo, SeoProvider } from "../../src/runtime/Seo";
+import { Seo, SeoProvider, useSeo } from "../../src/runtime/Seo";
 
 const meta = (sel: string) => document.head.querySelector(sel)?.getAttribute("content");
 
@@ -104,5 +104,30 @@ describe("Seo", () => {
     expect(document.title).toBe("Strict");
     expect(document.head.querySelectorAll('meta[property="og:title"]')).toHaveLength(1);
     expect(document.querySelectorAll("title")).toHaveLength(1);
+  });
+
+  it("nested Seo: child wins on first mount and after swap; unmount restores parent", () => {
+    const Layout = ({ children }: { children?: React.ReactNode }) => {
+      useSeo({ title: "Section" });
+      return <>{children}</>;
+    };
+    const Page = ({ t }: { t: string }) => {
+      useSeo({ title: t });
+      return null;
+    };
+    const { rerender } = render(
+      <Layout>
+        <Page t="Page" />
+      </Layout>,
+    );
+    expect(document.title).toBe("Page");
+    rerender(
+      <Layout>
+        <Page key="2" t="Page2" />
+      </Layout>,
+    );
+    expect(document.title).toBe("Page2");
+    rerender(<Layout>{null}</Layout>);
+    expect(document.title).toBe("Section");
   });
 });
