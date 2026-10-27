@@ -2,7 +2,7 @@ import { DEFAULT_CONTENT_SELECTOR, selectContentRegion, type ContentSource } fro
 import { buildPageMarkdown } from "../shared/markdown";
 import { readPageMeta } from "../shared/pageMeta";
 import { jsonLdTypes } from "../shared/jsonLd";
-import { trimTrailingSlash } from "../shared/url";
+import { mountPath, trimTrailingSlash } from "../shared/url";
 import {
   ACTION_ATTR,
   ACTION_DESCRIPTION_ATTR,
@@ -56,7 +56,7 @@ function noMainWarning(selector: string): string {
 
 /** The build's route for `pathname`: an absolute-path `base` ("/sub/") is stripped; other bases mount at "/". */
 function routeOf(pathname: string, base = "/"): string {
-  const b = base.startsWith("/") && !base.startsWith("//") ? trimTrailingSlash(base) : "";
+  const b = mountPath(base);
   if (b !== "" && (pathname === b || pathname.startsWith(b + "/"))) pathname = pathname.slice(b.length);
   return normalizeRoute(pathname);
 }

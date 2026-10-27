@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasScheme, resolveUrl, trimTrailingSlash, tryResolveUrl } from "../../src/shared/url";
+import { hasScheme, mountPath, resolveUrl, trimTrailingSlash, tryResolveUrl } from "../../src/shared/url";
 
 describe("resolveUrl", () => {
   it("resolves against a base", () => {
@@ -38,5 +38,15 @@ describe("trimTrailingSlash", () => {
     expect(trimTrailingSlash("https://a.com//")).toBe("https://a.com");
     expect(trimTrailingSlash("/")).toBe("");
     expect(trimTrailingSlash("/a/b")).toBe("/a/b");
+  });
+});
+
+describe("mountPath", () => {
+  it("returns the path of an absolute-path base without its trailing slash", () => {
+    expect(mountPath("/sub/")).toBe("/sub");
+    expect(mountPath("/a/b//")).toBe("/a/b");
+  });
+  it("mounts at the root for \"/\", relative, protocol-relative and full-URL bases", () => {
+    for (const b of ["/", "", "./", "sub/", "//cdn.example/x/", "https://cdn.example/x/"]) expect(mountPath(b), b).toBe("");
   });
 });

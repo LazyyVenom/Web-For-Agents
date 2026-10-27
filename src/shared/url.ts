@@ -22,3 +22,8 @@ export function resolveUrl(value: string, base?: string): string {
   if (!base || !value) return value;
   return tryResolveUrl(value, base) ?? value;
 }
+
+/** The path a build is mounted at: "/sub/" -> "/sub". Full-URL, protocol-relative and relative bases mount at "" (the root). */
+export function mountPath(base: string): string {
+  return base.startsWith("/") && !base.startsWith("//") ? trimTrailingSlash(base) : "";
+}
