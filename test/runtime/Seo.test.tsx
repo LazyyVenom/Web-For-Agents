@@ -131,3 +131,19 @@ describe("Seo", () => {
     expect(document.title).toBe("Section");
   });
 });
+
+describe("Seo prerendered head", () => {
+  it("removes a prerendered tag the client does not produce", () => {
+    document.head.innerHTML = '<meta property="og:image" content="https://a.com/old.png" data-wfa="property:og:image">';
+    render(<Seo title="Hello" />);
+    expect(document.head.querySelector('meta[property="og:image"]')).toBeNull();
+    expect(meta('meta[property="og:title"]')).toBe("Hello");
+  });
+
+  it("adopts a prerendered tag the client also produces (exactly one)", () => {
+    document.head.innerHTML = '<meta property="og:title" content="Old" data-wfa="property:og:title">';
+    render(<Seo title="Hello" />);
+    expect(document.head.querySelectorAll('meta[property="og:title"]').length).toBe(1);
+    expect(meta('meta[property="og:title"]')).toBe("Hello");
+  });
+});
