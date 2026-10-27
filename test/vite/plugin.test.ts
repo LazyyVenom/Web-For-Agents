@@ -12,6 +12,17 @@ describe("webForAgents plugin", () => {
   it("fails fast on invalid options", () => {
     expect(() => webForAgents({ siteUrl: "nope", robots })).toThrow(/\[web-for-agents\]/);
   });
+  it("emits nothing for SSR builds", () => {
+    const p: any = webForAgents({ siteUrl: "https://a.com", robots });
+    const emitted: unknown[] = [];
+    const ctx = { emitFile: (f: unknown) => void emitted.push(f) };
+    p.configResolved({ build: { ssr: true }, publicDir: "", logger: { warn() {} } });
+    p.generateBundle.call(ctx);
+    expect(emitted).toHaveLength(0);
+    p.configResolved({ build: { ssr: false }, publicDir: "", logger: { warn() {} } });
+    p.generateBundle.call(ctx);
+    expect(emitted).toHaveLength(2);
+  });
   it("re-exports AI_BOTS", () => {
     expect(AI_BOTS.training).toContain("GPTBot");
   });

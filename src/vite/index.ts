@@ -16,6 +16,7 @@ export function webForAgents(options: WebForAgentsOptions): Plugin {
       config = c;
     },
     generateBundle() {
+      if (config?.build.ssr) return;
       const files: Array<[string, string]> = [["robots.txt", buildRobots(resolved)]];
       if (resolved.sitemap) {
         files.push(["sitemap.xml", buildSitemap(resolved.siteUrl, resolved.routes)]);
