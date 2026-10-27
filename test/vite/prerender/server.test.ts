@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { get } from "node:http";
 import { tmpdir } from "node:os";
@@ -320,6 +320,26 @@ describe("happyDomCompat", () => {
       expect(bodies.map((b) => b.body)).toEqual(Array(8).fill("function f(e){return(/a:/).test(e)}"));
       expect(parseCalls.count).toBe(1);
     } finally {
+      await s.close();
+    }
+  });
+});
+
+describe("happyDomCompat read failures", () => {
+  // Root can read a mode-000 file, so the first read would not fail.
+  it.skipIf(process.getuid?.() === 0)("does not cache a failed read", async () => {
+    const file = join(dir, "assets/locked.js");
+    writeFileSync(file, "function f(e){return/a:/.test(e)}");
+    chmodSync(file, 0o000);
+    const s = await startStaticServer({ dir, base: "/", shell: "<shell>", happyDomCompat: true });
+    try {
+      expect((await raw(s.origin, "/assets/locked.js")).status).toBe(500);
+      chmodSync(file, 0o644);
+      const ok = await raw(s.origin, "/assets/locked.js");
+      expect(ok.status).toBe(200);
+      expect(ok.body).toBe("function f(e){return(/a:/).test(e)}");
+    } finally {
+      chmodSync(file, 0o644);
       await s.close();
     }
   });
