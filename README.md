@@ -8,7 +8,7 @@ SEO and LLM-readiness helpers for React + Vite. At runtime it manages `<head>` m
 npm i @anubhav-choubey/web-for-agents
 ```
 
-Requires `react >=18`. The Vite plugin needs `vite >=5` (optional peer).
+Requires `react >=18` and `react-dom >=18`. The Vite plugin needs `vite >=5` (optional peer).
 
 ## Quick start
 
@@ -61,9 +61,10 @@ After `vite build`, the plugin serves your `dist` locally, starts at `/` plus an
 
 - `dist/<route>/index.html`: the rendered page with its `<head>` (title, Open Graph, JSON-LD) and a `data-wfa-prerendered` attribute on `<html>`. Your client bundle is kept, so the app still boots.
 - `dist/<route>.md`: the markdown version (`dist/index.md` for `/`).
+- `dist/200.html`: your original SPA shell (the built `index.html` before `/` is prerendered over it), for host fallbacks. See [SPA fallback](#spa-fallback).
 - `llms.txt`, `llms-full.txt`, `sitemap.xml`, `robots.txt`.
 
-Non-page links (other origins, `mailto:`, files with an extension, `exclude`d routes) are not followed. Routes marked `<Seo noindex>` are written but left out of the sitemap and `llms.txt`. Nothing is written until every route has rendered: if any route fails, the build rejects with one error listing each failing route and renderer.
+Non-page links (other origins, `mailto:`, files with an extension, `exclude`d routes) are not followed. A path whose last segment contains a dot (`/v1.2`, `/files/report.final`) is treated as a file and not crawled; list such pages in `routes` to prerender them. Routes marked `<Seo noindex>` are written but left out of the sitemap and `llms.txt`. Nothing is written until every route has rendered: if any route fails, the build rejects with one error listing each failing route and renderer.
 
 The default renderer is [happy-dom](https://github.com/capricorn86/happy-dom), which needs no browser. Pages that need a real browser can use your installed Chrome or Edge:
 
@@ -102,6 +103,42 @@ useEffect(() => {
 ```
 
 `holdPrerender()` returns an idempotent release function and does nothing in a normal browser session. A route that is not ready after `prerender.timeoutMs` (default 15000) fails the build.
+
+Pages that never go idle (polling requests, a long-lived `fetch` stream, a DOM that keeps changing) time out the same way. Hold and release around the work the page actually needs, so the renderer captures it once that is done, or raise `prerender.timeoutMs` for slow routes.
+
+### SPA fallback
+
+After prerendering, `dist/index.html` is the rendered `/` page. If your host serves `index.html` for unknown URLs, deep links that were not prerendered would get the home page's HTML: it flashes before the app boots, and `hydrateApp` would hydrate the wrong markup. Point the fallback at `dist/200.html` instead, which is the untouched shell. If `public/200.html` exists, it is used as is and not generated.
+
+Netlify, `public/_redirects`:
+
+```
+/*  /200.html  200
+```
+
+Vercel, `vercel.json`:
+
+```json
+{ "rewrites": [{ "source": "/(.*)", "destination": "/200.html" }] }
+```
+
+Vercel serves existing files before applying rewrites, so prerendered pages are still served directly.
+
+Cloudflare Pages: when the output has no top-level `404.html` it already serves the SPA shell, but that is `index.html`. Add `public/_redirects` with the same rule as Netlify:
+
+```
+/*  /200.html  200
+```
+
+nginx (`$uri/` serves `<route>/index.html` through the default `index` directive):
+
+```nginx
+location / {
+  try_files $uri $uri/ /200.html;
+}
+```
+
+Surge and other hosts that look for `200.html` pick it up with no configuration.
 
 ### Hydration
 
