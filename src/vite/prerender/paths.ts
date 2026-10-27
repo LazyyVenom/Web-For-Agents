@@ -1,4 +1,5 @@
 import { markdownPathFor, normalizeRoute } from "../../shared/conventions";
+import { compareStrings } from "../../shared/sort";
 
 export function trimTrailingSlash(s: string): string {
   return s.replace(/\/+$/, "");
@@ -6,7 +7,7 @@ export function trimTrailingSlash(s: string): string {
 
 /** Orders anything with a `route` by route ("/" first, then code-unit order). */
 export function byRoute(a: { route: string }, b: { route: string }): number {
-  return a.route < b.route ? -1 : a.route > b.route ? 1 : 0;
+  return compareStrings(a.route, b.route);
 }
 
 /**

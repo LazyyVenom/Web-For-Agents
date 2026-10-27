@@ -28,7 +28,9 @@ export interface PrerenderExtension<T = unknown> {
    * Self-contained (no closure refs, no imports), JSON-serializable return. Evaluated in each
    * route's page after ready and after the HTML is serialized; same expression in happy-dom and Chrome.
    */
-  inPage?: () => T;
+  inPage?: (arg: never) => T;
+  /** JSON-serializable argument passed to `inPage`. */
+  inPageArg?: unknown;
   /** Listed pages only, in route order, before llms.txt is built. */
   onRoute?(route: string, data: T): void | Promise<void>;
   /** Appended to llms.txt after "## Pages". */
@@ -37,9 +39,13 @@ export interface PrerenderExtension<T = unknown> {
   finalize?(ctx: ExtensionContext): void | Promise<void>;
 }
 
-/** Serializes a self-contained function into an expression that evaluates to its JSON result. */
-export function inPageExpression(fn: () => unknown): string {
-  return `JSON.stringify((${fn.toString()})())`;
+/**
+ * Serializes a self-contained function into an expression that evaluates to its JSON result.
+ * `arg`, when given, is inlined as JSON and passed as the only argument.
+ */
+export function inPageExpression(fn: (arg: never) => unknown, arg?: unknown): string {
+  const args = arg === undefined ? "" : JSON.stringify(arg);
+  return `JSON.stringify((${fn.toString()})(${args}))`;
 }
 
 const NAME = /^[a-z0-9-]+$/;

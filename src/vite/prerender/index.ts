@@ -31,7 +31,7 @@ export async function prerenderSite(input: {
 
   const inPage: InPageScripts = {};
   for (const ext of input.extensions) {
-    if (ext.inPage) inPage[ext.name] = inPageExpression(ext.inPage);
+    if (ext.inPage) inPage[ext.name] = inPageExpression(ext.inPage, ext.inPageArg);
   }
 
   const relativeBase = isRelativeBase(input.base);

@@ -167,6 +167,16 @@ const suite = (name: RendererName, make: () => Promise<Renderer>) => {
       expect(res.inPage.t).toEqual({ title: "Static App", n: 1 });
     });
 
+    it("passes the JSON argument", async () => {
+      const res = await r.render(url("/fetch"), 5000, {
+        t: inPageExpression((arg: { sel: string; tag: string }) => ({
+          n: document.querySelectorAll(arg.sel).length,
+          tag: arg.tag,
+        }), { sel: "main", tag: "a\"b</script>" }),
+      });
+      expect(res.inPage.t).toEqual({ n: 1, tag: 'a"b</script>' });
+    });
+
     it("fails the render when a script throws", async () => {
       const err = await r
         .render(url("/fetch"), 5000, {

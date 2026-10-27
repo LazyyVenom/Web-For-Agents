@@ -3,9 +3,8 @@ import { Window } from "happy-dom";
 import { AGENT_GLOBAL } from "../../src/shared/conventions";
 import { inPageExpression } from "../../src/vite/prerender/extensions";
 import { buildAgentMap, agentMapExtension, agentMapLlmsSection, collectAgentPageInPage } from "../../src/vite/agentMap";
-import { resolveOptions } from "../../src/vite/options";
 import type { ExtensionContext } from "../../src/vite/prerender/extensions";
-import type { AgentActionDescriptor } from "../../src/runtime/agent/types";
+import type { AgentActionDescriptor } from "../../src/shared/agent";
 
 const desc: AgentActionDescriptor = {
   name: "contact",
@@ -20,28 +19,23 @@ const desc: AgentActionDescriptor = {
 function run(setup: (w: Window) => void) {
   const w = new Window();
   setup(w);
-  return JSON.parse(w.eval(inPageExpression(collectAgentPageInPage)) as string);
+  return JSON.parse(w.eval(inPageExpression(collectAgentPageInPage, AGENT_GLOBAL)) as string);
 }
 
 describe("collectAgentPageInPage", () => {
-  it("global key literal matches convention", () => {
-    expect(collectAgentPageInPage.toString()).toContain(AGENT_GLOBAL);
+  it("has no hardcoded global key", () => {
+    expect(collectAgentPageInPage.toString()).not.toContain(AGENT_GLOBAL);
   });
 
-  it("is self-contained and reads title, description and actions", () => {
+  it("is self-contained and reads actions from the global named by its argument", () => {
     const data = run((w) => {
-      w.document.head.innerHTML = '<meta name="description" content="About it">';
-      w.document.title = "Hello";
       (w as any)[AGENT_GLOBAL] = { version: 1, actions: () => [desc] };
     });
-    expect(data).toEqual({ title: "Hello", description: "About it", actions: [desc] });
+    expect(data).toEqual({ actions: [desc] });
   });
 
-  it("defaults to no actions and null description", () => {
-    const data = run((w) => {
-      w.document.title = "T";
-    });
-    expect(data).toEqual({ title: "T", description: null, actions: [] });
+  it("defaults to no actions", () => {
+    expect(run(() => {})).toEqual({ actions: [] });
   });
 });
 
@@ -53,8 +47,8 @@ describe("buildAgentMap", () => {
     siteName: "Acme",
     llmsUrl: "https://a.com/llms.txt",
     pages: [
-      { path: "/contact", title: "Contact", description: "Reach us", markdown: "https://a.com/contact.md", actions: [b, a, { ...a, description: "dup" }] },
-      { path: "/", actions: [] },
+      { route: "/contact", title: "Contact", description: "Reach us", markdown: "https://a.com/contact.md", actions: [b, a, { ...a, description: "dup" }] },
+      { route: "/", actions: [] },
     ],
   });
   const map = JSON.parse(out);
@@ -75,10 +69,12 @@ describe("buildAgentMap", () => {
     expect(map.pages[1].markdown).toBe("https://a.com/contact.md");
     expect(map.pages[1].actions.map((x: any) => x.name)).toEqual(["a", "b"]);
     expect(map.pages[1].actions[0].description).toBe(desc.description);
+    expect(Object.keys(map)).toEqual(["version", "generator", "site", "llms", "webmcp", "pages"]);
+    expect(Object.keys(map.pages[1])).toEqual(["path", "url", "title", "description", "markdown", "actions"]);
   });
 
   it("omits absent optional fields", () => {
-    const min = buildAgentMap({ siteUrl: "https://a.com", pages: [{ path: "/x", actions: [] }] });
+    const min = buildAgentMap({ siteUrl: "https://a.com", pages: [{ route: "/x", actions: [] }] });
     expect(min).not.toContain("undefined");
     expect(min).not.toContain("null");
     const m = JSON.parse(min);
@@ -98,15 +94,14 @@ describe("agentMapLlmsSection", () => {
 });
 
 describe("agentMapExtension", () => {
-  const robots = { ai: { training: "allow", search: "allow" } } as const;
-
   it("collects actions per route and emits the map from the analyzed pages", async () => {
-    const ext = agentMapExtension(resolveOptions({ siteUrl: "https://a.com", robots, agentMap: { fileName: "ai.json" } }));
+    const ext = agentMapExtension({ siteUrl: "https://a.com", fileName: "ai.json" });
     expect(ext.name).toBe("agent-map");
     expect(ext.inPage).toBe(collectAgentPageInPage);
+    expect(ext.inPageArg).toBe(AGENT_GLOBAL);
     expect(ext.llmsSections!()).toEqual([agentMapLlmsSection("https://a.com", "ai.json")]);
-    await ext.onRoute!("/contact", { title: "In-page contact", description: "in page", actions: [desc] });
-    await ext.onRoute!("/", { title: "In-page home", description: "home in page", actions: [] });
+    await ext.onRoute!("/contact", { actions: [desc] });
+    await ext.onRoute!("/", { actions: [] });
 
     const emitted: Array<[string, string]> = [];
     const ctx: ExtensionContext = {
@@ -128,9 +123,9 @@ describe("agentMapExtension", () => {
         siteName: "Site",
         llmsUrl: "https://a.com/llms.txt",
         pages: [
-          { path: "/", title: "In-page home", description: "home in page", markdown: "https://a.com/index.md", actions: [] },
-          { path: "/about", title: "About", actions: [] },
-          { path: "/contact", title: "Contact", description: "Write to us", markdown: "https://a.com/contact.md", actions: [desc] },
+          { route: "/", markdown: "https://a.com/index.md", actions: [] },
+          { route: "/about", title: "About", actions: [] },
+          { route: "/contact", title: "Contact", description: "Write to us", markdown: "https://a.com/contact.md", actions: [desc] },
         ],
       }),
     );

@@ -17,7 +17,10 @@ import { AI_BOTS } from "./robots";
 
 export function webForAgents(options: WebForAgentsOptions): Plugin {
   const resolved = resolveOptions(options);
-  return createBuildPlugin(resolved, resolved.agentMap ? [agentMapExtension(resolved)] : []);
+  const extensions = resolved.agentMap
+    ? [agentMapExtension({ siteUrl: resolved.siteUrl, fileName: resolved.agentMap.fileName })]
+    : [];
+  return createBuildPlugin(resolved, extensions);
 }
 
 export { AI_BOTS };

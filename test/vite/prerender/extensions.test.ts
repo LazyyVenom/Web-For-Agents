@@ -18,6 +18,16 @@ describe("inPageExpression", () => {
     expect(JSON.parse(out)).toEqual({ title: "T", n: 2 });
     window.close();
   });
+
+  it("inlines the argument as JSON", () => {
+    const fn = (arg: { key: string }) => ({ key: arg.key, v: (window as any)[arg.key] });
+    const expr = inPageExpression(fn, { key: "__X__" });
+    expect(expr).toBe(`JSON.stringify((${fn.toString()})({"key":"__X__"}))`);
+    const window = new Window({ settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true } });
+    (window as any).__X__ = 7;
+    expect(JSON.parse(window.eval(expr) as string)).toEqual({ key: "__X__", v: 7 });
+    window.close();
+  });
 });
 
 describe("assertExtensionNames", () => {

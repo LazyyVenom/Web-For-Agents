@@ -1,40 +1,59 @@
-import { AGENT_MAP_PATH } from "../shared/conventions";
+import { AGENT_GLOBAL } from "../shared/conventions";
+import {
+  AGENT_MAP_VERSION,
+  type AgentActionDescriptor,
+  type AgentGlobal,
+  type AgentMap,
+  type AgentMapPage,
+} from "../shared/agent";
+import { compareStrings } from "../shared/sort";
 import { publicUrl, trimTrailingSlash, byRoute } from "./prerender/paths";
 import type { LlmsSection } from "./llms";
-import type { ResolvedOptions } from "./options";
 import type { PrerenderExtension } from "./prerender/extensions";
-import type { AgentActionDescriptor } from "../runtime/agent/types";
+
+export const AGENT_MAP_GENERATOR = "@anubhav-choubey/web-for-agents";
+export const WEBMCP_INFO: AgentMap["webmcp"] = {
+  api: "document.modelContext",
+  spec: "https://webmachinelearning.github.io/webmcp/",
+};
 
 export interface AgentPageData {
-  title: string;
-  description: string | null;
   actions: AgentActionDescriptor[];
 }
 
 /**
  * Runs inside the page (happy-dom or Chrome). Must stay self-contained: no imports or outer
- * helpers, so it survives toString() / page.evaluate. The global key mirrors AGENT_GLOBAL.
+ * helpers, so it survives toString() / page.evaluate. `globalKey` is AGENT_GLOBAL.
  */
-export function collectAgentPageInPage(): AgentPageData {
-  const meta = document.querySelector('meta[name="description"]');
-  const api = (window as unknown as Record<string, { actions?: () => unknown[] } | undefined>)["__WEB_FOR_AGENTS__"];
-  return {
-    title: document.title,
-    description: meta ? meta.getAttribute("content") : null,
-    actions: (api && api.actions ? api.actions() : []) as AgentActionDescriptor[],
-  };
+export function collectAgentPageInPage(globalKey: string): AgentPageData {
+  const api = (window as unknown as Record<string, Partial<AgentGlobal> | undefined>)[globalKey];
+  return { actions: api && typeof api.actions === "function" ? api.actions() : [] };
 }
 
 export interface AgentMapPageInput {
-  path: string;
+  route: string;
   title?: string;
-  description?: string | null;
+  description?: string;
   /** Absolute .md URL. */
   markdown?: string;
   actions: AgentActionDescriptor[];
 }
 
-const byName = (a: { name: string }, b: { name: string }) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+const byName = (a: { name: string }, b: { name: string }): number => compareStrings(a.name, b.name);
+
+function toPage(siteUrl: string, p: AgentMapPageInput): AgentMapPage {
+  const seen = new Set<string>();
+  const actions = p.actions.filter((a) => !seen.has(a.name) && !!seen.add(a.name)).sort(byName);
+  // Spread in AgentMapPage key order; absent optional fields are omitted.
+  return {
+    path: p.route,
+    url: publicUrl(siteUrl, p.route),
+    ...(p.title ? { title: p.title } : {}),
+    ...(p.description ? { description: p.description } : {}),
+    ...(p.markdown ? { markdown: p.markdown } : {}),
+    actions,
+  };
+}
 
 export function buildAgentMap(input: {
   siteUrl: string;
@@ -43,33 +62,16 @@ export function buildAgentMap(input: {
   llmsUrl?: string;
   pages: AgentMapPageInput[];
 }): string {
-  const site: Record<string, string> = { url: trimTrailingSlash(input.siteUrl) };
+  const site: AgentMap["site"] = { url: trimTrailingSlash(input.siteUrl) };
   if (input.siteName) site.name = input.siteName;
-
-  const pages = input.pages
-    .map((p) => ({ route: p.path, p }))
-    .sort(byRoute)
-    .map(({ p }) => {
-      const seen = new Set<string>();
-      const actions = p.actions
-        .filter((a) => !seen.has(a.name) && !!seen.add(a.name))
-        .sort(byName);
-      const page: Record<string, unknown> = { path: p.path, url: publicUrl(input.siteUrl, p.path) };
-      if (p.title) page.title = p.title;
-      if (p.description) page.description = p.description;
-      if (p.markdown) page.markdown = p.markdown;
-      page.actions = actions;
-      return page;
-    });
-
-  const map: Record<string, unknown> = {
-    version: 1,
-    generator: "@anubhav-choubey/web-for-agents",
+  const map: AgentMap = {
+    version: AGENT_MAP_VERSION,
+    generator: AGENT_MAP_GENERATOR,
     site,
+    ...(input.llmsUrl ? { llms: input.llmsUrl } : {}),
+    webmcp: { ...WEBMCP_INFO },
+    pages: [...input.pages].sort(byRoute).map((p) => toPage(input.siteUrl, p)),
   };
-  if (input.llmsUrl) map.llms = input.llmsUrl;
-  map.webmcp = { api: "document.modelContext", spec: "https://webmachinelearning.github.io/webmcp/" };
-  map.pages = pages;
   return JSON.stringify(map, null, 2) + "\n";
 }
 
@@ -83,32 +85,27 @@ export function agentMapLlmsSection(siteUrl: string, fileName: string): LlmsSect
 }
 
 /** Stage 2 prerender extension: collects each page's actions and writes the agent map. */
-export function agentMapExtension(opts: ResolvedOptions): PrerenderExtension<AgentPageData> {
-  const fileName = opts.agentMap ? opts.agentMap.fileName : AGENT_MAP_PATH.slice(1);
+export function agentMapExtension(opts: { siteUrl: string; fileName: string }): PrerenderExtension<AgentPageData> {
+  const { siteUrl, fileName } = opts;
   const data = new Map<string, AgentPageData>();
   return {
     name: "agent-map",
     inPage: collectAgentPageInPage,
+    inPageArg: AGENT_GLOBAL,
     onRoute(route, page) {
       data.set(route, page);
     },
-    llmsSections: () => [agentMapLlmsSection(opts.siteUrl, fileName)],
+    llmsSections: () => [agentMapLlmsSection(siteUrl, fileName)],
     finalize(ctx) {
       const pages = ctx.pages.map((p): AgentMapPageInput => {
-        const inPage = data.get(p.route);
-        const page: AgentMapPageInput = { path: p.route, actions: inPage?.actions ?? [] };
-        // Analysis values first, so agents.json and llms.txt agree.
-        const title = p.title || inPage?.title;
-        const description = p.description ?? inPage?.description;
-        if (title) page.title = title;
-        if (description) page.description = description;
+        const page: AgentMapPageInput = { route: p.route, actions: data.get(p.route)?.actions ?? [] };
+        // Title and description come from the analysis, so agents.json and llms.txt agree.
+        if (p.title) page.title = p.title;
+        if (p.description) page.description = p.description;
         if (p.mdUrl) page.markdown = p.mdUrl;
         return page;
       });
-      ctx.emitFile(
-        fileName,
-        buildAgentMap({ siteUrl: ctx.site.url, siteName: ctx.site.title, llmsUrl: ctx.llmsUrl, pages }),
-      );
+      ctx.emitFile(fileName, buildAgentMap({ siteUrl, siteName: ctx.site.title, llmsUrl: ctx.llmsUrl, pages }));
     },
   };
 }
