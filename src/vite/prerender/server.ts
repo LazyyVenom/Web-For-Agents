@@ -2,6 +2,9 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { readFile, stat } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
+import { isRelativeBase } from "./paths";
+
+export { isRelativeBase };
 
 export interface StaticServer {
   origin: string;
@@ -37,14 +40,6 @@ const TYPES: Record<string, string> = {
  */
 export function fixImportMeta(code: string): string {
   return code.replace(/\breturn[ \t]+import\.meta\./g, "return(0,import.meta).");
-}
-
-/**
- * True when Vite's `base` is not an absolute path: "", "./x", a full URL or a protocol-relative
- * URL. The server then mounts the build at "/".
- */
-export function isRelativeBase(base: string): boolean {
-  return base === "" || base.startsWith(".") || base.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(base);
 }
 
 export interface StaticServerOptions {
