@@ -9,11 +9,13 @@ import { assertValidActionName, refreshAgentActions, registerAgentAction } from 
 import type { AgentActionSpec } from "./types";
 
 export type AgentHintProps = {
-  "data-agent-action": string;
-  "data-agent-description": string;
+  [ACTION_ATTR]: string;
+  [ACTION_DESCRIPTION_ATTR]: string;
   "aria-description": string;
-  "data-agent-destructive"?: "true";
+  [ACTION_DESTRUCTIVE_ATTR]?: "true";
 };
+
+export type AgentParamProps = { [ACTION_PARAM_ATTR]: string };
 
 const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
@@ -49,8 +51,8 @@ export function useAgentAction<I = Record<string, unknown>, R = unknown>(
     [ACTION_ATTR]: name,
     [ACTION_DESCRIPTION_ATTR]: description,
     "aria-description": description,
-  } as AgentHintProps;
-  if (destructive) hintProps[ACTION_DESTRUCTIVE_ATTR as "data-agent-destructive"] = "true";
+  };
+  if (destructive) hintProps[ACTION_DESTRUCTIVE_ATTR] = "true";
   return { ref, hintProps };
 }
 
@@ -62,6 +64,6 @@ export function AgentForm<I = Record<string, unknown>, R = unknown>(
   return <form ref={ref} {...hintProps} {...formProps} />;
 }
 
-export function agentParam(description: string): { "data-agent-param": string } {
-  return { [ACTION_PARAM_ATTR]: description } as { "data-agent-param": string };
+export function agentParam(description: string): AgentParamProps {
+  return { [ACTION_PARAM_ATTR]: description };
 }
