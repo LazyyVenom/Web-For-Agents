@@ -42,8 +42,8 @@ describe("import boundaries", () => {
     expect(overlayFiles.length).toBeGreaterThan(0);
   });
 
-  it("runtime, overlay, shared and index never reach src/vite or src/cli or import vite", () => {
-    for (const file of [...runtimeFiles, ...overlayFiles, ...sharedFiles]) {
+  it("runtime, shared and index never reach src/vite or src/cli or import vite", () => {
+    for (const file of [...runtimeFiles, ...sharedFiles]) {
       for (const spec of specifiers(readFileSync(file, "utf8"))) {
         const where = `${relative(SRC, file)} -> ${spec}`;
         expect(spec === "vite" || spec.startsWith("vite/"), where).toBe(false);
@@ -59,17 +59,6 @@ describe("import boundaries", () => {
     for (const file of runtimeFiles) {
       for (const spec of specifiers(readFileSync(file, "utf8"))) {
         if (spec.startsWith(".")) expect(inDir(resolved(file, spec), overlay), `${relative(SRC, file)} -> ${spec}`).toBe(false);
-      }
-    }
-  });
-
-  it("overlay imports src/runtime only via import type", () => {
-    const runtime = join(SRC, "runtime");
-    for (const file of overlayFiles) {
-      for (const line of readFileSync(file, "utf8").split("\n")) {
-        const spec = specifiers(line)[0];
-        if (!spec || !spec.startsWith(".") || !inDir(resolved(file, spec), runtime)) continue;
-        expect(line, `${relative(SRC, file)}: ${line}`).toMatch(/^\s*import\s+type\s/);
       }
     }
   });
@@ -109,15 +98,17 @@ describe("import boundaries", () => {
       }
     }
   });
-  it("overlay never reaches src/vite or node", () => {
+  it("overlay never reaches src/vite, src/runtime, src/cli or node, and never imports vite", () => {
     for (const file of overlayFiles) {
       for (const spec of specifiers(readFileSync(file, "utf8"))) {
         const where = `${relative(SRC, file)} -> ${spec}`;
         expect(spec === "vite" || spec.startsWith("vite/") || spec.startsWith("node:"), where).toBe(false);
-        if (spec.startsWith(".")) expect(inDir(resolved(file, spec), vite), where).toBe(false);
+        if (!spec.startsWith(".")) continue;
+        for (const dir of [vite, join(SRC, "runtime"), cli]) expect(inDir(resolved(file, spec), dir), where).toBe(false);
       }
     }
   });
+
   it("leaf shared modules import nothing", () => {
     for (const name of ["errors", "url", "bots", "conventions", "sort", "text", "pageMeta", "shortcut"]) {
       const file = join(SRC, "shared", `${name}.ts`);

@@ -9,7 +9,9 @@ import {
   WEBMCP_TOOLDESCRIPTION_ATTR,
   WEBMCP_TOOLNAME_ATTR,
 } from "../shared/conventions";
-import type { ActionKind, AgentActionDescriptor } from "../runtime/agent/types";
+import type { ActionKind, AgentGlobal } from "../shared/agent";
+import { errorMessage } from "../shared/errors";
+import { compareStrings } from "../shared/sort";
 
 export interface OverlayAction {
   name: string;
@@ -70,7 +72,7 @@ function collectJsonLd(doc: Document): PageReport["jsonLd"] {
       collectTypes(JSON.parse(raw), types);
       return { raw, types: Array.from(new Set(types)) };
     } catch (e) {
-      return { raw, types: [], error: e instanceof Error ? e.message || "Invalid JSON" : "Invalid JSON" };
+      return { raw, types: [], error: errorMessage(e) || "Invalid JSON" };
     }
   });
 }
@@ -78,7 +80,7 @@ function collectJsonLd(doc: Document): PageReport["jsonLd"] {
 function registryActions(doc: Document): OverlayAction[] {
   try {
     const g = (doc.defaultView as unknown as Record<string, unknown> | null)?.[AGENT_GLOBAL] as
-      | { actions?: () => AgentActionDescriptor[] }
+      | Partial<AgentGlobal>
       | undefined;
     const list = g?.actions?.();
     if (!Array.isArray(list)) return [];
@@ -128,7 +130,7 @@ function collectActions(doc: Document): OverlayAction[] {
     seen.add(a.name);
     out.push(a);
   }
-  return out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return out.sort((a, b) => compareStrings(a.name, b.name));
 }
 
 /** Reads the live document into a report for the dev overlay. Never throws; never mutates `doc`. */
@@ -157,7 +159,7 @@ export function collectPageReport(
       ...(region.source === "body" ? { warning: NO_MAIN_WARNING } : {}),
     };
   } catch (e) {
-    content = { source: "body", markdown: "", warning: e instanceof Error ? e.message : "Could not read page content." };
+    content = { source: "body", markdown: "", warning: errorMessage(e) || "Could not read page content." };
   }
 
   let jsonLd: PageReport["jsonLd"] = [];

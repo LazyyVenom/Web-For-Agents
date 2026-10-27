@@ -1,6 +1,6 @@
 import type { PageReport } from "./collect";
 
-export const MARKDOWN_LIMIT = 20_000;
+const MARKDOWN_LIMIT = 20_000;
 const PANEL_CLASS = "panel";
 export const REFRESH_ATTR = "data-wfa-refresh";
 
