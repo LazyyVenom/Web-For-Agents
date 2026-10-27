@@ -42,7 +42,8 @@ export function startStaticServer(opts: {
   shell: string;
 }): Promise<StaticServer> {
   const root = resolve(opts.dir);
-  const relative = opts.base === "" || opts.base.startsWith(".");
+  const relative =
+    opts.base === "" || opts.base.startsWith(".") || /^[a-z][a-z0-9+.-]*:/i.test(opts.base) || opts.base.startsWith("//");
   const mount = relative ? "" : opts.base.replace(/\/+$/, "");
 
   const server = createServer(async (req, res) => {
@@ -66,15 +67,17 @@ export function startStaticServer(opts: {
       const target = resolve(root, "." + pathname);
       if (target !== root && !target.startsWith(root + sep)) return notFound();
 
+      const rootIndex = resolve(root, "index.html");
       const serve = async (file: string) =>
         send(200, TYPES[extname(file).toLowerCase()] ?? "application/octet-stream", await readFile(file));
 
-      if (await isFile(target)) return await serve(target);
+      const shell = () => send(200, TYPES[".html"]!, opts.shell);
+      if (await isFile(target)) return target === rootIndex ? shell() : await serve(target);
       const index = resolve(target, "index.html");
-      if (await isFile(index)) return await serve(index);
+      if (await isFile(index)) return index === rootIndex ? shell() : await serve(index);
       const last = pathname.split("/").filter(Boolean).pop() ?? "";
       if (extname(last)) return notFound();
-      return send(200, TYPES[".html"]!, opts.shell);
+      return shell();
     } catch {
       send(500, "text/plain; charset=utf-8", "Internal error");
     }

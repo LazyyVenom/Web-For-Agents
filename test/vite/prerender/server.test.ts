@@ -48,6 +48,11 @@ describe("server", () => {
     expect((await raw(s.origin, "/missing.js")).status).toBe(404);
   });
 
+  it("serves the shell for the root route", async () => {
+    expect((await raw(s.origin, "/")).body).toBe("<shell>");
+    expect((await raw(s.origin, "/index.html")).body).toBe("<shell>");
+  });
+
   it("rejects traversal", async () => {
     expect((await raw(s.origin, "/%2e%2e/%2e%2e/etc/passwd")).status).toBe(404);
     expect((await raw(s.origin, "/../package.json")).status).toBe(404);
@@ -72,6 +77,20 @@ describe("server with base /sub/", () => {
   it("mounts under base", async () => {
     expect((await raw(s.origin, "/sub/assets/app.js")).status).toBe(200);
     expect((await raw(s.origin, "/sub/about")).body).toBe("<shell>");
+    expect((await raw(s.origin, "/sub/")).body).toBe("<shell>");
+    expect((await raw(s.origin, "/sub")).body).toBe("<shell>");
     expect((await raw(s.origin, "/assets/app.js")).status).toBe(404);
+  });
+});
+
+describe("server with absolute base URL", () => {
+  it("mounts at /", async () => {
+    const s = await startStaticServer({ dir, base: "https://cdn.example.com/app/", shell: "<shell>" });
+    try {
+      expect((await raw(s.origin, "/assets/app.js")).status).toBe(200);
+      expect((await raw(s.origin, "/about")).body).toBe("<shell>");
+    } finally {
+      await s.close();
+    }
   });
 });

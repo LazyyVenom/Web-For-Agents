@@ -66,6 +66,24 @@ describe("probe readiness", () => {
     expect(check().ready).toBe(false);
   });
 
+  it("is not ready until document.readyState is complete", async () => {
+    const { window, check } = setup();
+    Object.defineProperty(window.document, "readyState", { value: "loading", configurable: true });
+    await sleep(IDLE_MS + 50);
+    expect(check().ready).toBe(false);
+    Object.defineProperty(window.document, "readyState", { value: "complete", configurable: true });
+    expect(check().ready).toBe(true);
+  });
+
+  it("records failed resource loads", () => {
+    const { window, check } = setup();
+    const s = window.document.createElement("script");
+    s.setAttribute("src", "/missing.js");
+    window.document.body.appendChild(s);
+    s.dispatchEvent(new window.Event("error"));
+    expect(check().errors.join("\n")).toContain("/missing.js");
+  });
+
   it("collects errors", () => {
     const { window, check } = setup();
     window.dispatchEvent(new window.ErrorEvent("error", { message: "boom" }));

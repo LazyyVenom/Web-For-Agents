@@ -37,8 +37,14 @@ export const PROBE_SCRIPT = `(function () {
     });
   }
   w.addEventListener("error", function (e) {
-    p.errors.push(String((e && e.message) || (e && e.error) || "error")); touch();
-  });
+    var t = e && e.target;
+    if (t && t !== w && t.nodeType === 1) {
+      p.errors.push("Failed to load " + String(t.src || t.href || t.tagName));
+    } else {
+      p.errors.push(String((e && e.message) || (e && e.error) || "error"));
+    }
+    touch();
+  }, true);
   w.addEventListener("unhandledrejection", function (e) {
     var r = e && e.reason;
     p.errors.push(String((r && r.message) || r || "unhandledrejection")); touch();
@@ -49,7 +55,7 @@ export const PROBE_SCRIPT = `(function () {
 export const READY_CHECK = `(function () {
   var p = window.__WFA_PROBE__;
   if (!p) return { ready: false, errors: [], path: location.pathname };
-  var ready = p.inflight === 0 && Date.now() - p.last >= ${IDLE_MS} && window.${READY_GLOBAL} !== false;
+  var ready = document.readyState === "complete" && p.inflight === 0 && Date.now() - p.last >= ${IDLE_MS} && window.${READY_GLOBAL} !== false;
   return { ready: ready, errors: p.errors.slice(), path: location.pathname };
 })()`;
 
