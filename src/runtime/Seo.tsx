@@ -44,7 +44,12 @@ const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : use
 
 const DefaultsContext = createContext<SeoDefaults>({});
 
-export function SeoProvider(props: { defaults: SeoDefaults; children?: ReactNode }) {
+export interface SeoProviderProps {
+  defaults: SeoDefaults;
+  children?: ReactNode;
+}
+
+export function SeoProvider(props: SeoProviderProps) {
   const { defaults, children } = props;
   const key = JSON.stringify(defaults);
   useIsoLayoutEffect(() => {
