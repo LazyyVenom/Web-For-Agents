@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { schema, serializeJsonLd } from "../../src/runtime/jsonld";
+import { schema, serializeJsonLd } from "../../src/runtime/schema";
 
 describe("schema builders", () => {
   it("sets @context and @type", () => {

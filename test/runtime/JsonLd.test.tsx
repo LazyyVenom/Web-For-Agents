@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { JsonLd } from "../../src/runtime/JsonLd.tsx";
-import { schema } from "../../src/runtime/jsonld";
+import { JsonLd } from "../../src/runtime/JsonLd";
+import { schema } from "../../src/runtime/schema";
 
 describe("JsonLd", () => {
   it("renders one script tag", () => {
