@@ -40,7 +40,7 @@
     "web-for-agents": "./dist/bin.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.19"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -98,6 +98,12 @@
     "playwright-core": ">=1.40"
   },
   "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    },
     "vite": {
       "optional": true
     },
