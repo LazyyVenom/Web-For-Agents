@@ -14,7 +14,12 @@ export function byRoute(a: { route: string }, b: { route: string }): number {
  * (relative), and full URLs ("https://cdn…", "//cdn…"). The app is then mounted at "/" for prerendering.
  */
 export function isRelativeBase(base: string): boolean {
-  return base === "" || base.startsWith(".") || base.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(base);
+  return base === "" || base.startsWith(".") || isFullUrlBase(base);
+}
+
+/** True for "https://cdn…/" and "//cdn…/" bases. */
+export function isFullUrlBase(base: string): boolean {
+  return base.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(base);
 }
 
 function segments(route: string): string[] {

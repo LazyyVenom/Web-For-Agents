@@ -4,7 +4,7 @@ import type { ResolvedOptions, ResolvedPrerender } from "../options";
 import { isExcluded } from "../options";
 import { crawlRoutes, formatFailures, type CrawlResult } from "./crawl";
 import { assertExtensionNames, inPageExpression, type PrerenderExtension } from "./extensions";
-import { isRelativeBase, publicMdUrl } from "./paths";
+import { isFullUrlBase, isRelativeBase, publicMdUrl } from "./paths";
 import { prepareShell } from "./probe";
 import { createRendererPool, type InPageScripts } from "./renderers";
 import { startStaticServer } from "./server";
@@ -38,6 +38,7 @@ export async function prerenderSite(input: {
   const mount = relativeBase ? "/" : input.base;
   const markdown = options.markdown;
 
+  const fullBase = isFullUrlBase(input.base) ? input.base : undefined;
   const shell = prepareShell(input.shell, { relativeBase });
   const pool = createRendererPool(pr.executablePath !== undefined ? { executablePath: pr.executablePath } : {});
   try {
@@ -46,6 +47,7 @@ export async function prerenderSite(input: {
       base: input.base,
       shell,
       relativeBase,
+      ...(fullBase !== undefined ? { fullBase } : {}),
       rewriteImportMeta: mayUseHappyDom(pr),
     });
     try {
@@ -63,6 +65,7 @@ export async function prerenderSite(input: {
           origin: server.origin,
           base: mount,
           relativeBase,
+          ...(fullBase !== undefined ? { fullBase } : {}),
           contentSelector: markdown ? markdown.contentSelector : DEFAULT_CONTENT_SELECTOR,
           ...(markdown ? { markdownUrl: (route: string) => publicMdUrl(options.siteUrl, route) } : {}),
           inPage,

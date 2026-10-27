@@ -1,4 +1,6 @@
 import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, type Dirent } from "node:fs";
+import http from "node:http";
+import https from "node:https";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
@@ -211,6 +213,45 @@ describe("other bases", () => {
     expect(html).not.toContain('src="./assets/');
     expect(html).toMatch(/<link rel="stylesheet"[^>]* href="\.\.\/\.\.\/assets\/Post-[^"]+\.css">/);
     expect(html).not.toContain("blog/assets/");
+    expect(filesContaining(dist, "127.0.0.1")).toEqual([]);
+  }, 120_000);
+});
+
+describe("full-URL base", () => {
+  it.each(["https://cdn.example.com/app/", "//cdn.example.com/app/"])("makes no non-local requests with base %s", async (base) => {
+    const hosts: string[] = [];
+    const note = (a: unknown) => {
+      try {
+        if (typeof a === "string" || a instanceof URL) hosts.push(new URL(a, "http://unknown.invalid").hostname);
+        else if (a && typeof a === "object") {
+          const o = a as { hostname?: string; host?: string; url?: string };
+          hosts.push(o.hostname ?? o.host?.split(":")[0] ?? (o.url ? new URL(o.url, "http://unknown.invalid").hostname : "unknown.invalid"));
+        }
+      } catch {
+        hosts.push("unparseable");
+      }
+    };
+    const orig = { fetch: globalThis.fetch, hr: http.request, hg: http.get, sr: https.request, sg: https.get };
+    globalThis.fetch = ((a: unknown, ...r: unknown[]) => (note(a), (orig.fetch as Function)(a, ...r))) as typeof fetch;
+    for (const [m, k] of [[http, "request"], [http, "get"], [https, "request"], [https, "get"]] as const) {
+      const f = (m as any)[k];
+      (m as any)[k] = (...a: unknown[]) => (note(a[0]), f.apply(m, a));
+    }
+    let dist: string;
+    try {
+      dist = (await buildFixture({ base })).dist;
+    } finally {
+      globalThis.fetch = orig.fetch;
+      http.request = orig.hr;
+      http.get = orig.hg;
+      https.request = orig.sr;
+      https.get = orig.sg;
+    }
+    expect(hosts.length).toBeGreaterThan(0); // the spy sees the local requests
+    expect(hosts.filter((h) => h !== "127.0.0.1")).toEqual([]);
+    const html = read(dist, "blog/hello/index.html");
+    expect(html).toMatch(new RegExp(`src="${base}assets/`));
+    expect(html).toMatch(new RegExp(`href="${base}assets/Post-[^"]+\\.css"`));
     expect(filesContaining(dist, "127.0.0.1")).toEqual([]);
   }, 120_000);
 });

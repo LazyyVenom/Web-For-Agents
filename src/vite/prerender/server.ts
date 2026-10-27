@@ -53,6 +53,11 @@ export interface StaticServerOptions {
   relativeBase?: boolean;
   /** Apply fixImportMeta to served JS. Needed only by the happy-dom renderer. Default false. */
   rewriteImportMeta?: boolean;
+  /**
+   * Full-URL Vite base ("https://cdn…/app/"). In the shell, JS and CSS it serves, the base is replaced by
+   * this server's origin so the renderer never contacts the real host; finalizeHtml maps the origin back.
+   */
+  fullBase?: string;
 }
 
 async function isFile(p: string): Promise<boolean> {
@@ -67,6 +72,9 @@ export function startStaticServer(opts: StaticServerOptions): Promise<StaticServ
   const root = resolve(opts.dir);
   const relative = opts.relativeBase ?? isRelativeBase(opts.base);
   const rewrite = opts.rewriteImportMeta === true;
+  let origin = "";
+  const baseUrl = opts.fullBase === undefined ? undefined : opts.fullBase.replace(/\/*$/, "/");
+  const local = (code: string) => (baseUrl === undefined ? code : code.split(baseUrl).join(origin + "/"));
   const mount = relative ? "" : opts.base.replace(/\/+$/, "");
 
   const server = createServer(async (req, res) => {
@@ -95,12 +103,15 @@ export function startStaticServer(opts: StaticServerOptions): Promise<StaticServ
         const ext = extname(file).toLowerCase();
         const type = TYPES[ext] ?? "application/octet-stream";
         if (rewrite && (ext === ".js" || ext === ".mjs")) {
-          return send(200, type, fixImportMeta(await readFile(file, "utf8")));
+          return send(200, type, local(fixImportMeta(await readFile(file, "utf8"))));
+        }
+        if (baseUrl !== undefined && (ext === ".js" || ext === ".mjs" || ext === ".css")) {
+          return send(200, type, local(await readFile(file, "utf8")));
         }
         send(200, type, await readFile(file));
       };
 
-      const shell = () => send(200, TYPES[".html"]!, opts.shell);
+      const shell = () => send(200, TYPES[".html"]!, local(opts.shell));
       if (await isFile(target)) return target === rootIndex ? shell() : await serve(target);
       const index = resolve(target, "index.html");
       if (await isFile(index)) return index === rootIndex ? shell() : await serve(index);
@@ -127,8 +138,9 @@ export function startStaticServer(opts: StaticServerOptions): Promise<StaticServ
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
       const { port } = server.address() as AddressInfo;
+      origin = `http://127.0.0.1:${port}`;
       resolveP({
-        origin: `http://127.0.0.1:${port}`,
+        origin,
         close: () =>
           new Promise<void>((res, rej) => {
             server.close((e) => (e ? rej(e) : res()));

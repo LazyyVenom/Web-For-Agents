@@ -12,6 +12,8 @@ export interface FinalizeOptions {
    * helper inserts absolute `<link>` hrefs at runtime) are rewritten to site paths. Omitted: kept.
    */
   origin?: string;
+  /** Full-URL Vite base: URLs on `origin` are mapped back to it instead of to site paths. */
+  fullBase?: string;
 }
 
 /** Elements and attributes holding asset URLs. */
@@ -30,8 +32,8 @@ function mapSrcset(value: string, fn: (url: string) => string): string {
   return value.replace(/(^|,)(\s*)([^\s,][^\s]*?)(?=,|\s|$)/g, (_m, sep: string, ws: string, url: string) => sep + ws + fn(url));
 }
 
-function rewriteUrls(document: Document, fn: (url: string) => string): void {
-  for (const [tag, attr] of URL_ATTRS) {
+function rewriteUrls(document: Document, fn: (url: string) => string, attrs = URL_ATTRS): void {
+  for (const [tag, attr] of attrs) {
     document.querySelectorAll(`${tag}[${attr}]`).forEach((el) => {
       const v = el.getAttribute(attr)!;
       const next = attr === "srcset" ? mapSrcset(v, fn) : fn(v);
@@ -55,13 +57,16 @@ export function finalizeHtml(html: string, opts: FinalizeOptions): string {
       // The server mounts an absolute base at its path, so the URL path already carries the base;
       // with a relative base it mounts at "/", and "./" paths are made route-relative below.
       const origin = opts.origin.replace(/\/+$/, "");
+      // With a full-URL base the app's own JS may emit the base anywhere (e.g. BASE_URL links), so anchors are mapped too.
+      const attrs = opts.fullBase ? [...URL_ATTRS, ["a", "href"] as const] : URL_ATTRS;
       rewriteUrls(document, (u) => {
         if (!u.startsWith(origin)) return u;
         const rest = u.slice(origin.length);
         if (rest !== "" && !/^[/?#]/.test(rest)) return u; // another port or host
         const path = rest.startsWith("/") ? rest : "/" + rest;
+        if (opts.fullBase) return opts.fullBase.replace(/\/*$/, "/") + path.slice(1);
         return opts.relativeBase ? "." + path : path;
-      });
+      }, attrs);
     }
 
     if (opts.relativeBase) {

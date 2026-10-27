@@ -183,7 +183,7 @@ export function createBuildPlugin(resolved: ResolvedOptions, extensions: Prerend
       );
     }
     logger.info(
-      `${LOG_PREFIX} prerendered ${result.pages.length} routes (${listed.length} listed in sitemap and llms.txt)`,
+      `${LOG_PREFIX} prerendered ${result.pages.length} routes (${listed.length} listed in llms.txt and the sitemap; the sitemap also keeps configured routes served from publicDir)`,
     );
   };
 

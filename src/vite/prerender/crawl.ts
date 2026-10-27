@@ -45,6 +45,8 @@ export interface CrawlOptions {
   /** Absolute mount on `origin`, e.g. "/" or "/sub/". Anything else (relative or full-URL bases) mounts at "/". */
   base: string;
   relativeBase: boolean;
+  /** Full-URL Vite base, mapped back into the output by finalizeHtml. */
+  fullBase?: string;
   contentSelector: string;
   /** Set when markdown is on; passed to finalizeHtml. */
   markdownUrl?(route: string): string;
@@ -97,6 +99,7 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
       route,
       relativeBase: opts.relativeBase,
       origin: opts.origin,
+      ...(opts.fullBase !== undefined ? { fullBase: opts.fullBase } : {}),
       ...(markdownUrl !== undefined ? { markdownUrl } : {}),
     });
     const info = analyzePage(html, { pageUrl: url, contentSelector: opts.contentSelector, route });
