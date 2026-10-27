@@ -49,7 +49,7 @@ describe("headManager", () => {
     expect(els[0].getAttribute("content")).toBe("b");
   });
 
-  it("handles name and rel keys and drops stale attributes", () => {
+  it("handles name and rel keys", () => {
     applyHeadTags([
       { kind: "meta", key: "name:description", attrs: { name: "description", content: "d" } },
       { kind: "link", key: "rel:canonical", attrs: { rel: "canonical", href: "https://a.com/" } },

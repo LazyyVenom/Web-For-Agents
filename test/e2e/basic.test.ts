@@ -35,7 +35,7 @@ describe("basic fixture build", () => {
   it("does not overwrite user files", async () => {
     const root = mkdtempSync(path.join(fixture, "..", "tmp-"));
     tmpDirs.push(root);
-    cpSync(fixture, root, { recursive: true, filter: (s) => !s.includes(`${path.sep}dist`) });
+    cpSync(fixture, root, { recursive: true, filter: (s) => path.relative(fixture, s).split(path.sep)[0] !== "dist" });
     mkdirSync(path.join(root, "public"), { recursive: true });
     writeFileSync(path.join(root, "public/robots.txt"), "# mine");
 

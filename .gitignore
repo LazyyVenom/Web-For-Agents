@@ -1,4 +1,5 @@
 node_modules
 dist
 test/fixtures/*/dist
+test/fixtures/tmp-*
 .superpowers/
