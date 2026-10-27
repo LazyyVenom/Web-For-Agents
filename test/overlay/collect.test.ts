@@ -22,6 +22,7 @@ describe("collectPageReport", () => {
     const r = collectPageReport(document);
     expect(r.meta).toEqual({
       title: "Hello",
+      titleSource: "title",
       description: "Desc",
       canonical: "https://x.test/a",
       robots: "noindex",
@@ -45,12 +46,13 @@ describe("collectPageReport", () => {
 
   it("main region", () => {
     document.body.innerHTML =
-      "<header>H</header><main><h1>Hi</h1><p>Body</p><div data-wfa-exclude>ads</div></main><footer>F</footer>";
+      "<header>HEADERZ</header><main><h1>Hi</h1><p>Body</p><div data-wfa-exclude>ads</div></main><footer>FOOTERZ</footer>";
     const { content } = collectPageReport(document);
     expect(content.source).toBe("selector");
     expect(content.markdown).toContain("# Hi");
     expect(content.markdown).not.toContain("ads");
-    expect(content.markdown).not.toContain("F");
+    expect(content.markdown).not.toContain("HEADERZ");
+    expect(content.markdown).not.toContain("FOOTERZ");
     expect(content.warning).toBeUndefined();
   });
 
@@ -67,19 +69,20 @@ describe("collectPageReport", () => {
   });
 
   it("no main", () => {
-    document.body.innerHTML = "<nav>N</nav><div><h1>T</h1></div><footer>F</footer>";
+    document.body.innerHTML = "<nav>NAVZ</nav><div><h1>TITLEZ</h1></div><footer>FOOTERZ</footer>";
     const { content } = collectPageReport(document);
     expect(content.source).toBe("body");
     expect(content.warning).toBe(NO_MAIN_WARNING);
-    expect(content.markdown).toContain("T");
-    expect(content.markdown).not.toContain("N");
-    expect(content.markdown).not.toContain("F");
+    expect(content.markdown).toContain("TITLEZ");
+    expect(content.markdown).not.toContain("NAVZ");
+    expect(content.markdown).not.toContain("FOOTERZ");
   });
 
   it("empty document", () => {
     document.documentElement.innerHTML = "";
     const r = collectPageReport(document);
     expect(r.meta.title).toBeNull();
+    expect(r.meta.titleSource).toBeNull();
     expect(r.meta.description).toBeNull();
     expect(r.meta.canonical).toBeNull();
     expect(r.meta.robots).toBeNull();
@@ -129,5 +132,43 @@ describe("collectPageReport", () => {
     };
     document.body.innerHTML = "";
     expect(collectPageReport(document).actions).toEqual([]);
+  });
+
+  it("a throwing registry still yields markup actions", () => {
+    const w = window as unknown as Record<string, unknown>;
+    w.__WEB_FOR_AGENTS__ = {
+      version: 1,
+      actions: () => {
+        throw new Error("boom");
+      },
+    };
+    document.body.innerHTML = '<button data-agent-action="keep-me">k</button>';
+    expect(collectPageReport(document).actions.map((a) => a.name)).toEqual(["keep-me"]);
+  });
+
+  it("drops malformed registry entries but keeps valid ones", () => {
+    const w = window as unknown as Record<string, unknown>;
+    w.__WEB_FOR_AGENTS__ = {
+      version: 1,
+      actions: () => [null, { name: 5 }, { name: "good", kind: "handler" }, undefined],
+    };
+    expect(collectPageReport(document).actions.map((a) => a.name)).toEqual(["good"]);
+  });
+
+  it("reads twitter tags by name or property", () => {
+    document.head.innerHTML = `<meta name="twitter:card" content="summary"><meta property="twitter:title" content="TW">`;
+    expect(collectPageReport(document).meta.twitter).toEqual({ "twitter:card": "summary", "twitter:title": "TW" });
+  });
+
+  it("reports the title source", () => {
+    document.body.innerHTML = "<main><h1>Heading</h1></main>";
+    let r = collectPageReport(document);
+    expect(r.meta).toMatchObject({ title: "Heading", titleSource: "h1" });
+    document.head.innerHTML = "<title>Real</title>";
+    r = collectPageReport(document);
+    expect(r.meta).toMatchObject({ title: "Real", titleSource: "title" });
+    document.head.innerHTML = "";
+    document.body.innerHTML = "";
+    expect(collectPageReport(document).meta).toMatchObject({ title: null, titleSource: null });
   });
 });

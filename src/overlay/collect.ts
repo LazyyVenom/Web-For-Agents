@@ -23,6 +23,8 @@ export interface PageReport {
   url: string;
   meta: {
     title: string | null;
+    /** Where `title` came from: the <title> element, the first <h1> (fallback), or nowhere. */
+    titleSource: "title" | "h1" | null;
     description: string | null;
     canonical: string | null;
     robots: string | null;
@@ -37,10 +39,10 @@ export interface PageReport {
 const NO_MAIN_WARNING =
   "No <main> or [data-wfa-content] found; markdown falls back to <body> without nav/header/footer/aside. Wrap page content in <main>.";
 
-function prefixed(doc: Document, attr: "property" | "name", prefix: string): Record<string, string> {
+function prefixed(doc: Document, attrs: Array<"property" | "name">, prefix: string): Record<string, string> {
   const out: Record<string, string> = {};
-  doc.querySelectorAll(`meta[${attr}^="${prefix}"]`).forEach((m) => {
-    const key = m.getAttribute(attr);
+  doc.querySelectorAll(attrs.map((a) => `meta[${a}^="${prefix}"]`).join(", ")).forEach((m) => {
+    const key = attrs.map((a) => m.getAttribute(a)).find((k) => k?.startsWith(prefix));
     const value = m.getAttribute("content");
     if (key && value !== null && !(key in out)) out[key] = value;
   });
@@ -80,13 +82,15 @@ function registryActions(doc: Document): OverlayAction[] {
       | undefined;
     const list = g?.actions?.();
     if (!Array.isArray(list)) return [];
-    return list.map((a) => ({
-      name: a.name,
-      description: a.description ?? null,
-      kind: a.kind,
-      destructive: a.destructive === true,
-      source: "registry" as const,
-    }));
+    return list
+      .filter((a) => typeof a?.name === "string")
+      .map((a) => ({
+        name: a.name,
+        description: a.description ?? null,
+        kind: a.kind,
+        destructive: a.destructive === true,
+        source: "registry" as const,
+      }));
   } catch {
     return [];
   }
@@ -136,11 +140,12 @@ export function collectPageReport(
   const page = readPageMeta(doc);
   const meta: PageReport["meta"] = {
     title: page.title,
+    titleSource: page.title === null ? null : page.titleTag ? "title" : "h1",
     description: page.description,
     canonical: page.canonical,
     robots: page.robots,
-    openGraph: prefixed(doc, "property", "og:"),
-    twitter: prefixed(doc, "name", "twitter:"),
+    openGraph: prefixed(doc, ["property"], "og:"),
+    twitter: prefixed(doc, ["name", "property"], "twitter:"),
   };
 
   let content: PageReport["content"];
