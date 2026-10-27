@@ -89,11 +89,12 @@ export async function fetchText(url: string, opts: FetchOptions): Promise<FetchR
       }
     }
   } catch (e) {
-    const err = e as { name?: string; message?: string }
+    const err = e as { name?: string; message?: string; cause?: { message?: string } }
     if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
       result.error = `timed out after ${opts.timeoutMs}ms`
     } else {
-      result.error = `network error: ${err?.message ?? String(e)}`
+      const cause = err?.cause?.message
+      result.error = `network error: ${err?.message ?? String(e)}${cause ? `: ${cause}` : ''}`
     }
   }
   result.body = decode(concat(chunks, total), result.contentType)

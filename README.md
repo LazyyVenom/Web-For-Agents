@@ -364,6 +364,44 @@ Search bots (`robots.ai.search`):
 
 The list is exported as `AI_BOTS` from `@anubhav-choubey/web-for-agents/vite`.
 
+## CLI
+
+Audit any URL for AI-agent readiness. Nothing is installed in the target site.
+
+```sh
+npx @anubhav-choubey/web-for-agents audit example.com
+npx @anubhav-choubey/web-for-agents audit https://example.com/docs --json --min-score 80
+```
+
+Flags:
+
+- `--json` prints the report as one JSON document on stdout.
+- `--min-score <0-100>` exits with code 1 when the score is lower.
+- `--timeout <ms>` sets the per-request timeout (default 10000).
+- `-h`, `--help` prints usage.
+
+Checks and weights (total 100):
+
+| Check | Weight |
+| --- | --- |
+| Content without JavaScript | 25 |
+| JSON-LD | 12 |
+| robots.txt | 10 |
+| Title | 8 |
+| Meta description | 8 |
+| Sitemap | 8 |
+| Open Graph | 7 |
+| llms.txt | 7 |
+| Markdown copy | 6 |
+| Canonical URL | 5 |
+| Agent map | 4 |
+
+A passing check earns its full weight, a warning half, a failure none. Each non-passing check prints a `Fix:` line.
+
+Exit codes: `0` ok, `1` score below `--min-score`, `2` usage error or fatal error (unreachable page, non-2xx status, not HTML, timeout).
+
+The programmatic API is available from `@anubhav-choubey/web-for-agents/cli` (`audit`, `runCli`, `formatText`).
+
 ## Roadmap
 
 - Stage 1 (done): head metadata, JSON-LD, sitemap.xml, robots.txt.

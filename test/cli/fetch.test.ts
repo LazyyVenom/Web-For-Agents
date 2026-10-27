@@ -39,6 +39,15 @@ describe('fetchText', () => {
     const r = await fetchText(s.url + '/loop', { timeoutMs: 2000 })
     expect(r.status).toBe(0)
     expect(r.error?.startsWith('network error:')).toBe(true)
+    expect(r.error).toMatch(/redirect/i)
+  })
+
+  it('names the underlying cause of network errors', async () => {
+    const s = await serve({})
+    const url = s.url + '/'
+    await s.close()
+    const r = await fetchText(url, { timeoutMs: 2000 })
+    expect(r.error).toMatch(/^network error: .+: .*ECONNREFUSED/)
   })
 
   it('timeout covers headers', async () => {

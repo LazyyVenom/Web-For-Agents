@@ -26,6 +26,9 @@
   "files": [
     "dist"
   ],
+  "bin": {
+    "web-for-agents": "./dist/bin.js"
+  },
   "engines": {
     "node": ">=20"
   },
@@ -36,6 +39,9 @@
     "*": {
       "vite": [
         "dist/vite.d.ts"
+      ],
+      "cli": [
+        "dist/cli.d.ts"
       ]
     }
   },
@@ -47,6 +53,10 @@
     "./vite": {
       "types": "./dist/vite.d.ts",
       "import": "./dist/vite.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
     },
     "./package.json": "./package.json"
   },
