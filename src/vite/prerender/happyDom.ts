@@ -112,6 +112,10 @@ export function createHappyDomRenderer(): Renderer {
     settings: {
       enableJavaScriptEvaluation: true,
       suppressInsecureJavaScriptEnvironmentWarning: true,
+      // With CSS loading off (the default) every <link rel=stylesheet> fires "error", failing the
+      // probe and Vite's CSS preload for lazy chunks. "handleDisabledFileLoadingAsSuccess" is no
+      // substitute: it fires "load" synchronously on append, before Vite's helper listens for it.
+      enableCSSFileLoading: true,
     },
   });
 

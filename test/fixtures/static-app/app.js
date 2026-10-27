@@ -48,6 +48,17 @@ function start() {
     case "/dynamic":
       import("./chunk.js").then((m) => m.render(root));
       break;
+    case "/css": {
+      // what Vite's preload helper does for a lazy chunk's CSS: append a stylesheet, then listen
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.crossOrigin = "";
+      link.href = "/style.css";
+      document.head.appendChild(link);
+      link.addEventListener("load", () => show("<h1>Styled</h1>"));
+      link.addEventListener("error", () => show("<h1>Unstyled</h1>"));
+      break;
+    }
     case "/empty":
       break;
   }

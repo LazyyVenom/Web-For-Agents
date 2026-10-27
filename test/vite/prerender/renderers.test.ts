@@ -89,6 +89,11 @@ const suite = (name: RendererName, make: () => Promise<Renderer>) => {
     expect(res.html).toContain("Chunk");
   });
 
+  it("loads stylesheets (CSS imports must not fail the render)", async () => {
+    const res = await r.render(url("/css"), 5000);
+    expect(res.html).toContain("<h1>Styled</h1>");
+  });
+
   it("renders an empty route without throwing", async () => {
     const res = await r.render(url("/empty"), 5000);
     expect(res.finalPath).toBe("/empty");

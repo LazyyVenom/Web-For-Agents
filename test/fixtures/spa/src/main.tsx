@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
 import { SeoProvider } from "../../../../src/index";
 import { App } from "./App";
+import "./main.css";
 
 const base = import.meta.env.BASE_URL;
 
