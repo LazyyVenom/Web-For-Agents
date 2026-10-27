@@ -1,7 +1,5 @@
-import { schemaFromForm, validateInput } from "./formSchema";
+import { agentFields, schemaFromForm, validateInput, type Field } from "./formSchema";
 import type { AgentActionResult } from "./types";
-
-type Field = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 
 const MESSAGE_SELECTOR = '[role="alert"], [role="status"], [aria-live]';
 const MAX_MESSAGE = 500;
@@ -17,21 +15,13 @@ function notify(el: Element): void {
   el.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
-const SKIP_TYPES = new Set(["hidden", "password", "file", "submit", "button", "reset", "image"]);
-
-function fieldsNamed(form: HTMLFormElement, name: string): Field[] {
-  return Array.from(form.elements).filter(
-    (e): e is Field =>
-      (e.tagName === "INPUT" || e.tagName === "SELECT" || e.tagName === "TEXTAREA") && e.getAttribute("name") === name &&
-      !e.hasAttribute("disabled") &&
-      !(e.tagName === "INPUT" && SKIP_TYPES.has((e.getAttribute("type") ?? "text").toLowerCase())),
-  );
-}
-
+/** Writes only to agentFields(form): the same fields the schema advertises. */
 function fill(form: HTMLFormElement, values: Record<string, unknown>): void {
-  for (const [name, value] of Object.entries(values)) {
+  for (const [name, els] of agentFields(form)) {
+    if (!Object.prototype.hasOwnProperty.call(values, name)) continue;
+    const value = values[name];
     if (value === undefined) continue;
-    for (const el of fieldsNamed(form, name)) {
+    for (const el of els) {
       if (el instanceof HTMLSelectElement) {
         if (el.multiple) {
           const wanted = new Set(Array.isArray(value) ? value.map(String) : []);
@@ -81,16 +71,31 @@ function submit(form: HTMLFormElement): void {
   if (!ev.defaultPrevented) form.submit();
 }
 
+export interface FormActionOptions {
+  settleMs?: number;
+  signal?: AbortSignal;
+}
+
+/** Validates input against the form's current fields, then fills and submits. */
 export async function runFormAction(
   form: HTMLFormElement,
   input: unknown,
-  opts: { settleMs?: number; signal?: AbortSignal } = {},
+  opts: FormActionOptions = {},
 ): Promise<AgentActionResult> {
   const checked = validateInput(schemaFromForm(form), input);
   if (!checked.ok) return { status: "invalid", errors: checked.errors };
+  return submitFormAction(form, checked.value, opts);
+}
+
+/** Fills and submits already-validated input (the caller ran validateInput(schemaFromForm(form))). */
+export async function submitFormAction(
+  form: HTMLFormElement,
+  value: Record<string, unknown>,
+  opts: FormActionOptions = {},
+): Promise<AgentActionResult> {
   if (opts.signal?.aborted) return { status: "error", message: "aborted" };
 
-  fill(form, checked.value);
+  fill(form, value);
 
   if (!form.checkValidity()) {
     const errors = Array.from(form.elements)

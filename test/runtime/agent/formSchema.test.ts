@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
-import { EMPTY_OBJECT_SCHEMA, schemaFromForm, validateInput } from "../../../src/runtime/agent/formSchema";
+import { EMPTY_OBJECT_SCHEMA, agentFields, schemaFromForm, validateInput } from "../../../src/runtime/agent/formSchema";
 
 function form(html: string): HTMLFormElement {
   document.body.innerHTML = `<form>${html}</form>`;
@@ -184,5 +184,90 @@ describe("hardening", () => {
   it("freezes EMPTY_OBJECT_SCHEMA", () => {
     expect(Object.isFrozen(EMPTY_OBJECT_SCHEMA)).toBe(true);
     expect(Object.isFrozen(EMPTY_OBJECT_SCHEMA.properties)).toBe(true);
+  });
+
+  it("excludes readonly fields from the schema", () => {
+    const s = schemaFromForm(form(`<input name="price" readonly value="10"><input name="qty" type="number">`));
+    expect(Object.keys(s.properties!)).toEqual(["qty"]);
+  });
+});
+
+describe("agentFields", () => {
+  it("groups agent-writable fields by name, skipping excluded, disabled, readonly and unnamed ones", () => {
+    const f = form(`
+      <input name="q" id="q1">
+      <fieldset disabled><input name="q" id="q2"></fieldset>
+      <input name="r" type="radio" value="a" id="r1"><input name="r" type="radio" value="b" id="r2">
+      <input name="price" readonly>
+      <input name="off" disabled>
+      <input name="h" type="hidden">
+      <input name="pw" type="password">
+      <input>
+      <button name="go">go</button>
+      <textarea name="t" id="t"></textarea>
+      <select name="s" id="s"><option>x</option></select>`);
+    const ids = Object.fromEntries(Array.from(agentFields(f), ([k, els]) => [k, els.map((e) => e.id)]));
+    expect(ids).toEqual({ q: ["q1"], r: ["r1", "r2"], t: ["t"], s: ["s"] });
+  });
+});
+
+describe("nested validation", () => {
+  const nested = {
+    type: "object",
+    properties: {
+      addr: {
+        type: "object",
+        properties: { zip: { type: "string" }, city: { type: "string" } },
+        required: ["zip"],
+      },
+      tags: {
+        type: "array",
+        items: { type: "object", properties: { id: { type: "integer" } }, required: ["id"] },
+      },
+    },
+    required: ["addr"],
+    additionalProperties: false,
+  } as const;
+  const schema = nested as unknown as Parameters<typeof validateInput>[0];
+
+  it("rejects a wrong nested type and an unknown nested key, with field paths", () => {
+    expect(validateInput(schema, { addr: { zip: 5, evil: 1 } })).toEqual({
+      ok: false,
+      errors: [
+        { field: "addr.zip", message: "must be string" },
+        { field: "addr.evil", message: "is not an allowed field" },
+      ],
+    });
+  });
+
+  it("checks nested required and non-object values", () => {
+    expect(validateInput(schema, { addr: {} })).toEqual({
+      ok: false,
+      errors: [{ field: "addr.zip", message: "is required" }],
+    });
+    for (const addr of [null, [], "x", new Date()]) {
+      expect(validateInput(schema, { addr })).toEqual({ ok: false, errors: [{ field: "addr", message: "must be object" }] });
+    }
+  });
+
+  it("validates object array items recursively", () => {
+    expect(validateInput(schema, { addr: { zip: "1" }, tags: [{ id: 1 }, { id: 1.5, x: true }, {}] })).toEqual({
+      ok: false,
+      errors: [
+        { field: "tags[1].id", message: "must be integer" },
+        { field: "tags[1].x", message: "is not an allowed field" },
+        { field: "tags[2].id", message: "is required" },
+      ],
+    });
+  });
+
+  it("allows extra nested keys only with additionalProperties: true", () => {
+    const open = { type: "object", properties: { o: { type: "object", additionalProperties: true } } } as const;
+    expect(validateInput(open as unknown as Parameters<typeof validateInput>[0], { o: { any: 1 } }).ok).toBe(true);
+  });
+
+  it("accepts valid nested input", () => {
+    const input = { addr: { zip: "12345", city: "X" }, tags: [{ id: 1 }] };
+    expect(validateInput(schema, input)).toEqual({ ok: true, value: input });
   });
 });

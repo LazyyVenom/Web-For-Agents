@@ -169,4 +169,25 @@ describe("runFormAction", () => {
     });
     expect(screen.getByTestId("out").textContent).toBe("Ada|false|l");
   });
+
+  it("never lists or fills a readonly field", async () => {
+    const f = mount(`<form><input name="price" readonly value="10"><input name="qty"></form>`);
+    f.addEventListener("submit", (e) => e.preventDefault());
+    const price = f.elements.namedItem("price") as HTMLInputElement;
+    expect(await run(f, { price: "0", qty: "2" })).toEqual({
+      status: "invalid",
+      errors: [{ field: "price", message: "is not an allowed field" }],
+    });
+    expect(price.value).toBe("10");
+    expect((await run(f, { qty: "2" })).status).toBe("submitted");
+    expect(price.value).toBe("10");
+  });
+
+  it("never writes a same-named field inside a disabled fieldset", async () => {
+    const f = mount(`<form><input name="q" id="a"><fieldset disabled><input name="q" id="b" value="keep"></fieldset></form>`);
+    f.addEventListener("submit", (e) => e.preventDefault());
+    expect((await run(f, { q: "new" })).status).toBe("submitted");
+    expect((document.getElementById("a") as HTMLInputElement).value).toBe("new");
+    expect((document.getElementById("b") as HTMLInputElement).value).toBe("keep");
+  });
 });

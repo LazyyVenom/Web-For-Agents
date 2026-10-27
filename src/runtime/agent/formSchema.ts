@@ -2,6 +2,7 @@ import {
   ACTION_PARAM_ATTR,
   WEBMCP_TOOLPARAMDESCRIPTION_ATTR,
 } from "../../shared/conventions";
+import { collapseWhitespace as clean } from "../../shared/text";
 import type { JsonSchema } from "./types";
 
 export const EMPTY_OBJECT_SCHEMA: JsonSchema = Object.freeze({
@@ -12,10 +13,31 @@ export const EMPTY_OBJECT_SCHEMA: JsonSchema = Object.freeze({
 
 const EXCLUDED_TYPES = new Set(["hidden", "password", "file", "submit", "button", "reset", "image"]);
 
-type Field = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+export type Field = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 
-function clean(s: string | null | undefined): string {
-  return (s ?? "").replace(/\s+/g, " ").trim();
+function isAgentField(e: Element): e is Field {
+  const tag = e.tagName;
+  if (tag !== "INPUT" && tag !== "SELECT" && tag !== "TEXTAREA") return false;
+  if (!e.getAttribute("name")) return false;
+  if (e.hasAttribute("disabled") || e.hasAttribute("readonly") || e.closest("fieldset[disabled]")) return false;
+  return !(tag === "INPUT" && EXCLUDED_TYPES.has((e.getAttribute("type") ?? "text").toLowerCase()));
+}
+
+/**
+ * The fields an agent may see and write, grouped by name in document order. The single
+ * predicate for both the advertised schema and form filling: excludes hidden/password/file and
+ * button-like inputs, disabled, readonly, inside fieldset[disabled], and unnamed fields.
+ */
+export function agentFields(form: HTMLFormElement): Map<string, Field[]> {
+  const groups = new Map<string, Field[]>();
+  for (const el of Array.from(form.elements)) {
+    if (!isAgentField(el)) continue;
+    const name = el.getAttribute("name")!;
+    const list = groups.get(name);
+    if (list) list.push(el);
+    else groups.set(name, [el]);
+  }
+  return groups;
 }
 
 function labelText(el: Field): string {
@@ -92,50 +114,40 @@ function withDescription(s: JsonSchema, desc: string): JsonSchema {
   return s;
 }
 
-export function schemaFromForm(form: HTMLFormElement): JsonSchema {
-  const groups = new Map<string, Field[]>();
-  for (const raw of Array.from(form.elements)) {
-    const tag = raw.tagName;
-    if (tag !== "INPUT" && tag !== "SELECT" && tag !== "TEXTAREA") continue;
-    const el = raw as Field;
-    const name = el.getAttribute("name");
-    if (!name || el.hasAttribute("disabled") || el.closest("fieldset[disabled]")) continue;
-    if (tag === "INPUT" && EXCLUDED_TYPES.has((el.getAttribute("type") ?? "text").toLowerCase())) continue;
-    const list = groups.get(name);
-    if (list) list.push(el);
-    else groups.set(name, [el]);
-  }
+function selectSchema(sel: HTMLSelectElement, desc: string): JsonSchema {
+  const opts = Array.from(sel.querySelectorAll("option"))
+    .filter((o) => !o.hasAttribute("disabled"))
+    .map((o) => ({ value: o.getAttribute("value") ?? clean(o.textContent), label: clean(o.textContent) }))
+    .filter((o) => o.value !== "");
+  const values = opts.map((o) => o.value);
+  const list = opts.map((o) => (o.label && o.label !== o.value ? `${o.value} (${o.label})` : o.value)).join(", ");
+  const schema: JsonSchema = sel.hasAttribute("multiple")
+    ? { type: "array", items: { type: "string", enum: values } }
+    : { type: "string", enum: values };
+  return withDescription(schema, [desc, `Options: ${list}`].filter(Boolean).join(". "));
+}
 
+const isType = (e: Field, t: string): boolean =>
+  e.tagName === "INPUT" && (e.getAttribute("type") ?? "").toLowerCase() === t;
+
+/** Schema for one same-named group of fields. */
+function groupSchema(els: Field[]): JsonSchema {
+  const first = els[0]!;
+  const desc = els.map(describe).find(Boolean) ?? "";
+  if (first.tagName === "SELECT") return selectSchema(first as HTMLSelectElement, desc);
+  const values = (): string[] => els.map((e) => e.getAttribute("value") ?? "on");
+  if (els.every((e) => isType(e, "radio"))) return withDescription({ type: "string", enum: values() }, desc);
+  if (els.length > 1 && els.every((e) => isType(e, "checkbox"))) {
+    return withDescription({ type: "array", items: { type: "string", enum: values() } }, desc);
+  }
+  return withDescription(inputSchema(first as HTMLInputElement | HTMLTextAreaElement), desc);
+}
+
+export function schemaFromForm(form: HTMLFormElement): JsonSchema {
   const properties: Record<string, JsonSchema> = Object.create(null);
   const required: string[] = [];
-
-  for (const [name, els] of groups) {
-    const first = els[0]!;
-    const isType = (e: Field, t: string) => e.tagName === "INPUT" && (e.getAttribute("type") ?? "").toLowerCase() === t;
-    let schema: JsonSchema;
-    let desc = els.map(describe).find(Boolean) ?? "";
-
-    if (first.tagName === "SELECT") {
-      const sel = first as HTMLSelectElement;
-      const opts = Array.from(sel.querySelectorAll("option"))
-        .filter((o) => !o.hasAttribute("disabled"))
-        .map((o) => ({ value: o.getAttribute("value") ?? clean(o.textContent), label: clean(o.textContent) }))
-        .filter((o) => o.value !== "");
-      const values = opts.map((o) => o.value);
-      const list = opts.map((o) => (o.label && o.label !== o.value ? `${o.value} (${o.label})` : o.value)).join(", ");
-      desc = [desc, `Options: ${list}`].filter(Boolean).join(". ");
-      schema = sel.hasAttribute("multiple")
-        ? { type: "array", items: { type: "string", enum: values } }
-        : { type: "string", enum: values };
-    } else if (els.every((e) => isType(e, "radio"))) {
-      schema = { type: "string", enum: els.map((e) => e.getAttribute("value") ?? "on") };
-    } else if (els.length > 1 && els.every((e) => isType(e, "checkbox"))) {
-      schema = { type: "array", items: { type: "string", enum: els.map((e) => e.getAttribute("value") ?? "on") } };
-    } else {
-      schema = inputSchema(first as HTMLInputElement | HTMLTextAreaElement);
-    }
-
-    properties[name] = withDescription(schema, desc);
+  for (const [name, els] of agentFields(form)) {
+    properties[name] = groupSchema(els);
     if (els.some((e) => e.hasAttribute("required"))) required.push(name);
   }
 
@@ -169,8 +181,9 @@ function checkValue(s: JsonSchema, v: unknown, field: string, errors: Errors): v
       if (!Array.isArray(v)) return bad("must be array");
       break;
     case "object":
-      if (typeof v !== "object" || v === null || Array.isArray(v)) return bad("must be object");
-      break;
+      if (!isPlainObject(v)) return bad("must be object");
+      checkObject(s, v, `${field}.`, errors);
+      return;
   }
   if (s.enum && !s.enum.includes(v as string | number)) {
     return bad(`must be one of: ${s.enum.join(", ")}`);
@@ -205,28 +218,35 @@ function checkValue(s: JsonSchema, v: unknown, field: string, errors: Errors): v
   }
 }
 
-export function validateInput(
-  schema: JsonSchema,
-  input: unknown,
-): { ok: true; value: Record<string, unknown> } | { ok: false; errors: Errors } {
-  const proto = typeof input === "object" && input !== null ? Object.getPrototypeOf(input) : undefined;
-  if (proto !== Object.prototype && proto !== null) {
-    return { ok: false, errors: [{ field: "", message: "input must be an object" }] };
-  }
-  const obj = input as Record<string, unknown>;
-  const errors: Errors = [];
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  if (typeof v !== "object" || v === null) return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+}
+
+/** `required`, `properties`, and unknown keys (rejected unless additionalProperties is true). */
+function checkObject(schema: JsonSchema, obj: Record<string, unknown>, prefix: string, errors: Errors): void {
   const props = schema.properties ?? {};
   for (const name of schema.required ?? []) {
-    if (!hasOwn(obj, name) || obj[name] === undefined) errors.push({ field: name, message: "is required" });
+    if (!hasOwn(obj, name) || obj[name] === undefined) errors.push({ field: prefix + name, message: "is required" });
   }
   for (const [key, value] of Object.entries(obj)) {
     const prop = props[key];
     if (!hasOwn(props, key) || !prop) {
-      if (schema.additionalProperties === false) errors.push({ field: key, message: "is not an allowed field" });
+      if (schema.additionalProperties !== true) errors.push({ field: prefix + key, message: "is not an allowed field" });
       continue;
     }
     if (value === undefined) continue;
-    checkValue(prop, value, key, errors);
+    checkValue(prop, value, prefix + key, errors);
   }
-  return errors.length ? { ok: false, errors } : { ok: true, value: obj };
+}
+
+export function validateInput(
+  schema: JsonSchema,
+  input: unknown,
+): { ok: true; value: Record<string, unknown> } | { ok: false; errors: Errors } {
+  if (!isPlainObject(input)) return { ok: false, errors: [{ field: "", message: "input must be an object" }] };
+  const errors: Errors = [];
+  checkObject(schema, input, "", errors);
+  return errors.length ? { ok: false, errors } : { ok: true, value: input };
 }
