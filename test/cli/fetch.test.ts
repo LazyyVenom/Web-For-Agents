@@ -47,7 +47,7 @@ describe('fetchText', () => {
     const url = s.url + '/'
     await s.close()
     const r = await fetchText(url, { timeoutMs: 2000 })
-    expect(r.error).toMatch(/^network error: .+: .*ECONNREFUSED/)
+    expect(r.error).toMatch(/^network error: fetch failed: .*ECONNREFUSED/)
   })
 
   it('timeout covers headers', async () => {

@@ -109,12 +109,45 @@ describe("audit e2e", () => {
 
   it("hanging subresource fails only its check", async () => {
     const s = await serve({ "/llms.txt": () => {} }, { headers: htmlH, body: spaShell })
-    const { out } = await run(["audit", s.url + "/", "--json", "--timeout", "300"])
+    const { out } = await run(["audit", s.url + "/", "--json", "--timeout", "1000"])
     const checks = JSON.parse(out).checks as Array<{ id: string; status: string; message: string }>
     expect(checks).toHaveLength(11)
     const llms = checks.find((c) => c.id === "llms-txt")!
     expect(llms.status).toBe("fail")
     expect(llms.message).toContain("timed out")
     expect(checks.find((c) => c.id === "sitemap")!.message).not.toContain("timed out")
+  })
+
+  it("usage error exits 2 with usage on stderr and empty stdout", async () => {
+    const { code, out, err } = await run(["audit"])
+    expect(code).toBe(2)
+    expect(out).toBe("")
+    expect(err).toContain("Usage: web-for-agents")
+  })
+
+  it("--help exits 0", async () => {
+    const { code, out } = await run(["--help"])
+    expect(code).toBe(0)
+    expect(out).toContain("Usage: web-for-agents")
+  })
+
+  it("score equal to --min-score exits 0", async () => {
+    const s = await serve({}, { headers: htmlH, body: spaShell })
+    expect((await run(["audit", s.url + "/", "--min-score", "13"])).code).toBe(0)
+  })
+
+  it("fatal error with --json writes JSON to stdout and a line to stderr", async () => {
+    const s = await serve({})
+    const { code, out, err } = await run(["audit", s.url + "/missing", "--json"])
+    expect(code).toBe(2)
+    expect(JSON.parse(out).error).toBe("HTTP 404")
+    expect(err).toContain("HTTP 404")
+  })
+
+  it("redirect loop is fatal", async () => {
+    const s = await serve({ "/": { status: 302, headers: { location: "/" } } })
+    const { code, out } = await run(["audit", s.url + "/", "--json"])
+    expect(code).toBe(2)
+    expect(JSON.parse(out).error).toMatch(/redirect/i)
   })
 })

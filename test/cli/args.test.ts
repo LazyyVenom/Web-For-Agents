@@ -25,6 +25,10 @@ describe("parseCliArgs", () => {
       ["audit", "ftp://a"],
       ["frobnicate"],
       ["audit", "u", "--nope"],
+      ["audit", "u", "--min-score", "0x10"],
+      ["audit", "u", "--min-score", "1e1"],
+      ["audit", "u", "--min-score", " 5"],
+      ["audit", "u", "--min-score", "-1"],
       ["audit", "u", "--timeout", "0"],
     ]) {
       expect(() => parseCliArgs(argv), argv.join(" ")).toThrow(/\[web-for-agents\]/)

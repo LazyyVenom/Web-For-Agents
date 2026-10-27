@@ -66,7 +66,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
   const args: CliArgs = { command: "audit", url: normalizeInputUrl(input), json: values.json === true, timeoutMs: DEFAULT_TIMEOUT_MS }
   if (values["min-score"] !== undefined) {
     const n = Number(values["min-score"])
-    if (values["min-score"].trim() === "" || !Number.isFinite(n) || n < 0 || n > 100) {
+    if (!/^\d+(\.\d+)?$/.test(values["min-score"]) || n > 100) {
       return fail(`--min-score must be a number from 0 to 100, got "${values["min-score"]}"`)
     }
     args.minScore = n
