@@ -20,6 +20,7 @@ jobs:
   test:
     name: Node ${{ matrix.node }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -41,6 +42,7 @@ jobs:
   vite-compat:
     name: Vite ${{ matrix.vite }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -55,11 +57,15 @@ jobs:
       # Installs vite@<major> and the matching @vitejs/plugin-react with --no-save.
       - run: node scripts/install-vite.mjs ${{ matrix.vite }}
       - run: npx vitest run test/vite test/e2e test/cli/audit.e2e.test.ts
+        env:
+          # test/vite/viteVersion.test.ts fails if the tests did not get this Vite major.
+          WFA_EXPECT_VITE: ${{ matrix.vite }}
       - run: npm run demo:build
 
   pack:
     name: Packed package (Vite ${{ matrix.vite }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:

@@ -8,7 +8,7 @@
 // needs Vite >=6.4, so for Vite 5 a Vite 8 copy is installed under another name and linked into
 // vitest's own node_modules: Vitest runs on Vite 8, while the tests and the plugin import Vite 5.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import path from "node:path";
 
 const PLUGIN_REACT = { 5: "4", 6: "4", 7: "5", 8: "6" };
@@ -34,9 +34,29 @@ if (major === "5") {
 }
 
 const version = (p) => JSON.parse(readFileSync(path.join("node_modules", p, "package.json"), "utf8")).version;
-const got = version("vite");
-if (got.split(".")[0] !== major) {
-  console.error(`expected vite ${major}.x, found ${got}`);
+const fail = (message) => {
+  console.error(message);
   process.exit(1);
+};
+const got = version("vite");
+if (got.split(".")[0] !== major) fail(`expected vite ${major}.x, found ${got}`);
+
+if (major === "5") {
+  const forVitest = version("vite-for-vitest");
+  if (forVitest.split(".")[0] !== "8") fail(`expected vite-for-vitest 8.x, found ${forVitest}`);
+  const target = realpathSync("node_modules/vite-for-vitest");
+  for (const dir of ["vitest", "@vitest/mocker"]) {
+    const link = path.join("node_modules", dir, "node_modules/vite");
+    let resolved;
+    try {
+      resolved = realpathSync(link);
+    } catch (e) {
+      fail(`${link} does not resolve: ${e.message}`);
+    }
+    if (resolved !== target) fail(`${link} resolves to ${resolved}, expected ${target}`);
+    const linked = JSON.parse(readFileSync(path.join(link, "package.json"), "utf8")).version;
+    if (linked.split(".")[0] !== "8") fail(`${link} is vite ${linked}, expected 8.x`);
+  }
+  console.log(`vitest runs on vite ${forVitest} (vite-for-vitest)`);
 }
 console.log(`vite ${got}, @vitejs/plugin-react ${version("@vitejs/plugin-react")}`);
