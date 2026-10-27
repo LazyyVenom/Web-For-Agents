@@ -70,8 +70,17 @@ describe("import boundaries", () => {
       }
     }
   });
+  it("overlay never reaches src/vite or node", () => {
+    for (const file of walk(join(SRC, "overlay"))) {
+      for (const spec of specifiers(readFileSync(file, "utf8"))) {
+        const where = `${relative(SRC, file)} -> ${spec}`;
+        expect(spec === "vite" || spec.startsWith("vite/") || spec.startsWith("node:"), where).toBe(false);
+        if (spec.startsWith(".")) expect(inDir(resolved(file, spec), vite), where).toBe(false);
+      }
+    }
+  });
   it("leaf shared modules import nothing", () => {
-    for (const name of ["errors", "url", "bots", "conventions", "sort", "text"]) {
+    for (const name of ["errors", "url", "bots", "conventions", "sort", "text", "pageMeta"]) {
       const file = join(SRC, "shared", `${name}.ts`);
       expect(specifiers(readFileSync(file, "utf8")), relative(SRC, file)).toEqual([]);
     }
