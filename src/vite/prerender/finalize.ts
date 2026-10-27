@@ -1,6 +1,6 @@
 import { PRERENDERED_ATTR, MARKDOWN_MIME } from "../../shared/conventions";
 import { parseHtml } from "./dom";
-import { routeDepth } from "./paths";
+import { routeDepth, trimTrailingSlash } from "./paths";
 import { PROBE_ATTR, REL_SRC_ATTR, TEMP_BASE_ATTR } from "./probe";
 
 export interface FinalizeOptions {
@@ -58,7 +58,7 @@ export function finalizeHtml(html: string, opts: FinalizeOptions): string {
     if (opts.origin) {
       // The server mounts an absolute base at its path, so the URL path already carries the base;
       // with a relative base it mounts at "/", and "./" paths are made route-relative below.
-      const origin = opts.origin.replace(/\/+$/, "");
+      const origin = trimTrailingSlash(opts.origin);
       // With a full-URL base the app's own JS may emit the base anywhere (e.g. BASE_URL links), so anchors are mapped too.
       const attrs = opts.fullBase ? [...URL_ATTRS, ["a", "href"] as const] : URL_ATTRS;
       rewriteUrls(document, (u) => {
@@ -66,7 +66,7 @@ export function finalizeHtml(html: string, opts: FinalizeOptions): string {
         const rest = u.slice(origin.length);
         if (rest !== "" && !/^[/?#]/.test(rest)) return u; // another port or host
         const path = rest.startsWith("/") ? rest : "/" + rest;
-        if (opts.fullBase) return opts.fullBase.replace(/\/*$/, "/") + path.slice(1);
+        if (opts.fullBase) return trimTrailingSlash(opts.fullBase) + "/" + path.slice(1);
         return opts.relativeBase ? "." + path : path;
       }, attrs);
     }

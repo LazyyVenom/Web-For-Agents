@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { readFile, stat } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
-import { isRelativeBase } from "./paths";
+import { isRelativeBase, trimTrailingSlash } from "./paths";
 
 export { isRelativeBase };
 
@@ -73,9 +73,9 @@ export function startStaticServer(opts: StaticServerOptions): Promise<StaticServ
   const relative = opts.relativeBase ?? isRelativeBase(opts.base);
   const rewrite = opts.rewriteImportMeta === true;
   let origin = "";
-  const baseUrl = opts.fullBase === undefined ? undefined : opts.fullBase.replace(/\/*$/, "/");
+  const baseUrl = opts.fullBase === undefined ? undefined : trimTrailingSlash(opts.fullBase) + "/";
   const local = (code: string) => (baseUrl === undefined ? code : code.split(baseUrl).join(origin + "/"));
-  const mount = relative ? "" : opts.base.replace(/\/+$/, "");
+  const mount = relative ? "" : trimTrailingSlash(opts.base);
 
   const server = createServer(async (req, res) => {
     const send = (status: number, type: string, body: string | Buffer) => {
