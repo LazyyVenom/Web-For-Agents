@@ -46,8 +46,8 @@ function isExcluded(route: string, exclude: Array<string | RegExp>): boolean {
       return e.test(route);
     }
     if (e.endsWith("/*")) {
-      const base = e.slice(0, -2);
-      return route === base || route.startsWith(base + "/");
+      const base = normalizeRoute(e.slice(0, -2));
+      return base === "/" || route === base || route.startsWith(base + "/");
     }
     return route === normalizeRoute(e);
   });
@@ -62,6 +62,10 @@ export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
   }
   if (!url || (url.protocol !== "http:" && url.protocol !== "https:")) {
     throw new Error(`${PREFIX} siteUrl must be an absolute http(s) URL`);
+  }
+
+  if (url.search || url.hash) {
+    throw new Error(`${PREFIX} siteUrl must not contain a query or hash`);
   }
 
   const ai = input.robots?.ai;

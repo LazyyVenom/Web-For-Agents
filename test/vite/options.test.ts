@@ -71,6 +71,22 @@ describe("resolveOptions", () => {
   });
 });
 
+describe("option edge cases", () => {
+  it("rejects siteUrl with query or hash", () => {
+    expect(() => resolveOptions({ siteUrl: "https://a.com/?x=1", robots })).toThrow(/\[web-for-agents\] siteUrl/);
+    expect(() => resolveOptions({ siteUrl: "https://a.com/#h", robots })).toThrow(/\[web-for-agents\] siteUrl/);
+  });
+  it("normalizes exclude strings without a leading slash", () => {
+    const r = resolveOptions({
+      siteUrl: "https://a.com",
+      routes: ["/blog", "/blog/a", "/blogger", "/about", "/x"],
+      exclude: ["blog/*", "about"],
+      robots,
+    });
+    expect(r.routes).toEqual(["/", "/blogger", "/x"]);
+  });
+});
+
 describe("normalizeRoute", () => {
   it("normalizes", () => {
     expect(normalizeRoute("")).toBe("/");
