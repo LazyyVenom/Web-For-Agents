@@ -1,4 +1,4 @@
-import { publicUrl, resolveUrl, routeOf, tryResolveUrl } from "../shared/url";
+import { hasScheme, publicUrl, resolveUrl, routeOf } from "../shared/url";
 import type { HeadTag, SeoDefaults, SeoProps } from "./types";
 
 const absolute = (value: string | undefined, siteUrl: string | undefined): string | undefined =>
@@ -29,12 +29,9 @@ function canonicalTags(href: string): HeadTag[] {
   ];
 }
 
-/** True for a protocol-relative URL. Spelled with charAt: happy-dom's script transform chokes on some regexes and literals. */
-const protocolRelative = (value: string): boolean => value.charAt(0) === "/" && value.charAt(1) === "/";
-
 /** A path ("/about" or "about") resolves under siteUrl's path like a route; anything else resolves as a URL. */
 function explicitCanonical(value: string, siteUrl: string | undefined): string {
-  if (siteUrl && tryResolveUrl(value) === null && !protocolRelative(value) && ![".", "?", "#"].includes(value.charAt(0))) {
+  if (siteUrl && !hasScheme(value) && !value.startsWith("//") && !/^[.?#]/.test(value)) {
     // publicUrl roots the path ("about" -> "/about") and drops a trailing slash.
     const cut = value.search(/[?#]/);
     return publicUrl(siteUrl, cut === -1 ? value : value.slice(0, cut)) + (cut === -1 ? "" : value.slice(cut));
