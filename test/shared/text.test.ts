@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { collapseWhitespace } from "../../src/shared/text";
+import { collapseWhitespace, stripBom } from "../../src/shared/text";
 
 describe("collapseWhitespace", () => {
   it("collapses runs and trims", () => {
@@ -8,5 +8,14 @@ describe("collapseWhitespace", () => {
   it("maps null and undefined to an empty string", () => {
     expect(collapseWhitespace(null)).toBe("");
     expect(collapseWhitespace(undefined)).toBe("");
+  });
+});
+
+describe("stripBom", () => {
+  it("removes one leading BOM only", () => {
+    expect(stripBom("﻿a")).toBe("a");
+    expect(stripBom("﻿﻿a")).toBe("﻿a");
+    expect(stripBom("a﻿")).toBe("a﻿");
+    expect(stripBom("")).toBe("");
   });
 });
