@@ -1,9 +1,10 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { get } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fixImportMeta, startStaticServer, type StaticServer } from "../../../src/vite/prerender/server";
+import { fixImportMeta, isRelativeBase, startStaticServer, type StaticServer } from "../../../src/vite/prerender/server";
 
 let dir: string;
 beforeAll(() => {
@@ -95,12 +96,99 @@ describe("server with absolute base URL", () => {
   });
 });
 
+/** Parses (or with `run`, executes) `code` as an ES module in node; returns the error output or "". */
+function moduleSyntaxError(code: string, run = false): string {
+  const file = join(dir, `check-${Math.random().toString(36).slice(2)}.mjs`);
+  writeFileSync(file, code);
+  const r = spawnSync(process.execPath, run ? [file] : ["--check", file], { encoding: "utf8" });
+  return r.status === 0 ? "" : r.stderr;
+}
+
 describe("fixImportMeta", () => {
-  it("gives `return import.meta.x` a punctuation predecessor and leaves other uses alone", () => {
-    expect(fixImportMeta("function s(e){return import.meta.resolve?1:2}")).toBe(
-      "function s(e){return !0&&import.meta.resolve?1:2}",
+  const VITE_HELPER =
+    "function f(e){return import.meta.resolve?new URL(import.meta.resolve(e)):new URL(e,import.meta.url)}";
+  const cases: Array<[name: string, input: string, output: string]> = [
+    [
+      "current Vite preload helper",
+      VITE_HELPER,
+      "function f(e){return(0,import.meta).resolve?new URL(import.meta.resolve(e)):new URL(e,import.meta.url)}",
+    ],
+    [
+      "nullish coalescing",
+      "function f(){return import.meta.env ?? {}}",
+      "function f(){return(0,import.meta).env ?? {}}",
+    ],
+    [
+      "assignment",
+      "function f(){return import.meta.hot = 1}",
+      "function f(){return(0,import.meta).hot = 1}",
+    ],
+    ["tab separator", "function f(){return\timport.meta.url}", "function f(){return(0,import.meta).url}"],
+  ];
+  for (const [name, input, output] of cases) {
+    it(`rewrites ${name} to valid code`, () => {
+      expect(moduleSyntaxError(input)).toBe("");
+      expect(fixImportMeta(input)).toBe(output);
+      expect(moduleSyntaxError(fixImportMeta(input))).toBe("");
+    });
+  }
+
+  it("keeps the value: (0,import.meta) is import.meta", () => {
+    const err = moduleSyntaxError(
+      `const a=(()=>{${fixImportMeta("return import.meta.url ?? 1")}})();` +
+        `if(a!==import.meta.url)throw new Error("changed");`,
+      true,
     );
+    expect(err).toBe("");
+  });
+
+  it("does not join a return with import.meta on the next line (ASI returns undefined)", () => {
+    const code = "function f(){return\nimport.meta.url}";
+    expect(fixImportMeta(code)).toBe(code);
+    expect(fixImportMeta("function f(){return \r\n import.meta.url}")).toBe(
+      "function f(){return \r\n import.meta.url}",
+    );
+  });
+
+  it("leaves other uses alone", () => {
     expect(fixImportMeta("new URL(e,import.meta.url)")).toBe("new URL(e,import.meta.url)");
+    expect(fixImportMeta("myreturn import.meta.x")).toBe("myreturn import.meta.x");
+  });
+});
+
+describe("server import.meta rewrite option", () => {
+  it("rewrites served JS only when rewriteImportMeta is set", async () => {
+    writeFileSync(join(dir, "assets/meta.js"), "function f(){return import.meta.url}");
+    const off = await startStaticServer({ dir, base: "/", shell: "<shell>" });
+    const on = await startStaticServer({ dir, base: "/", shell: "<shell>", rewriteImportMeta: true });
+    try {
+      expect((await raw(off.origin, "/assets/meta.js")).body).toBe("function f(){return import.meta.url}");
+      expect((await raw(on.origin, "/assets/meta.js")).body).toBe("function f(){return(0,import.meta).url}");
+    } finally {
+      await off.close();
+      await on.close();
+    }
+  });
+});
+
+describe("server relativeBase option", () => {
+  it("overrides the derivation from base", async () => {
+    const s = await startStaticServer({ dir, base: "/sub/", shell: "<shell>", relativeBase: true });
+    try {
+      expect((await raw(s.origin, "/assets/app.js")).status).toBe(200);
+      expect((await raw(s.origin, "/docs/deep/assets/app.js")).status).toBe(200);
+    } finally {
+      await s.close();
+    }
+  });
+});
+
+describe("isRelativeBase", () => {
+  it("is true for everything but an absolute path", () => {
+    for (const b of ["", "./", "./app/", "https://cdn.example.com/app/", "//cdn.example.com/"]) {
+      expect(isRelativeBase(b)).toBe(true);
+    }
+    for (const b of ["/", "/sub/"]) expect(isRelativeBase(b)).toBe(false);
   });
 });
 
