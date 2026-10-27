@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, type Dirent } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
@@ -55,6 +55,12 @@ async function buildFixture(
 }
 
 const read = (dist: string, file: string) => readFileSync(path.join(dist, file), "utf8");
+const filesContaining = (dist: string, needle: string) =>
+  (readdirSync(dist, { recursive: true, withFileTypes: true }) as Dirent[])
+    .filter((e) => e.isFile())
+    .map((e) => path.join(e.parentPath, e.name))
+    .filter((f) => readFileSync(f).includes(needle))
+    .map((f) => path.relative(dist, f));
 const count = (s: string, needle: string) => s.split(needle).length - 1;
 
 describe("default build", () => {
@@ -121,30 +127,71 @@ describe("default build", () => {
     for (const bad of ["turndown", "happy-dom", "__WFA_PROBE__"]) expect(js).not.toContain(bad);
   });
 
-  it("replace boot does not duplicate head tags", async () => {
-    const server = await startStaticServer({ dir: dist, base: "/", shell: read(dist, "index.html") });
+  it("replace boot does not duplicate head tags and drops stale ones", async () => {
+    // Serve a copy whose prerendered /about carries an og:image the client no longer renders.
+    const copy = mkdtempSync(path.join(fixture, "..", "tmp-"));
+    tmpDirs.push(copy);
+    cpSync(dist, copy, { recursive: true });
+    const stale = '<meta data-wfa="property:og:image" property="og:image" content="https://example.com/stale.png">';
+    const about = read(copy, "about/index.html");
+    expect(about).not.toContain('data-booted="prerendered"');
+    writeFileSync(path.join(copy, "about/index.html"), about.replace("</head>", `${stale}</head>`));
+
+    const server = await startStaticServer({
+      dir: copy,
+      base: "/",
+      shell: read(copy, "index.html"),
+      rewriteImportMeta: true,
+    });
     const browser = new Browser({
-      settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true },
+      settings: {
+        enableJavaScriptEvaluation: true,
+        enableCSSFileLoading: true,
+        suppressInsecureJavaScriptEnvironmentWarning: true,
+      },
     });
     try {
       const page = browser.newPage();
       (page.console as unknown as Record<string, unknown>).timeStamp = () => {};
       await page.goto(`${server.origin}/about`);
+      const doc = page.mainFrame.document;
+      expect(doc.querySelector('meta[property="og:image"]')).not.toBeNull();
+      // The fixture App sets data-booted="prerendered" in an effect when it mounts over prerendered HTML.
       const deadline = Date.now() + 10_000;
-      while (!page.mainFrame.document.querySelector("#root")?.textContent?.includes("About us")) {
+      while (doc.documentElement.getAttribute("data-booted") !== "prerendered") {
         if (Date.now() > deadline) throw new Error("app did not boot");
         await new Promise((r) => setTimeout(r, 25));
       }
       await new Promise((r) => setTimeout(r, 300));
-      const doc = page.mainFrame.document;
-      expect(doc.querySelectorAll('meta[property="og:title"]').length).toBe(1);
+      expect(doc.querySelector("#root")?.textContent).toContain("About us");
+      expect(doc.querySelector('meta[property="og:image"]')).toBeNull();
       expect(doc.querySelectorAll("title").length).toBe(1);
       expect(doc.querySelectorAll('script[type="application/ld+json"]').length).toBe(1);
+      const keys = [...doc.head.querySelectorAll("meta[property], meta[name]")].map(
+        (m) => m.getAttribute("property") ?? m.getAttribute("name"),
+      );
+      expect(keys).toContain("og:title");
+      expect(keys.length).toBe(new Set(keys).size);
+      const links = [...doc.head.querySelectorAll("link")].map((l) => `${l.rel} ${l.getAttribute("href")}`);
+      expect(links.length).toBe(new Set(links).size);
     } finally {
       await browser.close();
       await server.close();
     }
   }, 30_000);
+
+  it("leaves no prerender server origin in any output file", () => {
+    expect(filesContaining(dist, "127.0.0.1")).toEqual([]);
+  });
+
+  it("keeps CSS for the entry and for lazy chunks", () => {
+    const html = read(dist, "blog/hello/index.html");
+    expect(html).toMatch(/<link rel="stylesheet"[^>]* href="\/assets\/index-[^"]+\.css">/);
+    expect(html).toMatch(/<link rel="stylesheet"[^>]* href="\/assets\/Post-[^"]+\.css">/);
+    expect(html).toMatch(/<link rel="modulepreload"[^>]* href="\/assets\/byline-[^"]+\.js">/);
+    expect(html).toContain("Written by ADA");
+    expect(read(dist, "blog/index.html")).toContain("Written by GRACE");
+  });
 });
 
 describe("other bases", () => {
@@ -153,6 +200,8 @@ describe("other bases", () => {
     expect(read(dist, "about/index.html")).toContain("About us");
     expect(read(dist, "about/index.html")).toContain('src="/sub/assets/');
     expect(read(dist, "sitemap.xml")).toContain("https://example.com/sub/about");
+    expect(read(dist, "blog/hello/index.html")).toMatch(/href="\/sub\/assets\/Post-[^"]+\.css"/);
+    expect(filesContaining(dist, "127.0.0.1")).toEqual([]);
   }, 120_000);
 
   it('relative base "./"', async () => {
@@ -160,6 +209,9 @@ describe("other bases", () => {
     const html = read(dist, "blog/hello/index.html");
     expect(html).toContain('src="../../assets/');
     expect(html).not.toContain('src="./assets/');
+    expect(html).toMatch(/<link rel="stylesheet"[^>]* href="\.\.\/\.\.\/assets\/Post-[^"]+\.css">/);
+    expect(html).not.toContain("blog/assets/");
+    expect(filesContaining(dist, "127.0.0.1")).toEqual([]);
   }, 120_000);
 });
 
