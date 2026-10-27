@@ -78,4 +78,42 @@ describe("exposeTool", () => {
     expect(await exposeTool(tool, c.signal)).toBe("failed");
     expect(registerTool).not.toHaveBeenCalled();
   });
+
+  it("legacy: failed registration never unregisters on abort", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const unregisterTool = vi.fn();
+    (navigator as any).modelContext = {
+      registerTool: vi.fn().mockRejectedValue(new DOMException("dup", "InvalidStateError")),
+      unregisterTool,
+    };
+    const c = new AbortController();
+    expect(await exposeTool(tool, c.signal)).toBe("failed");
+    c.abort();
+    expect(unregisterTool).not.toHaveBeenCalled();
+  });
+
+  it("legacy: abort while registerTool pending unregisters once", async () => {
+    const unregisterTool = vi.fn();
+    let resolve!: () => void;
+    (navigator as any).modelContext = {
+      registerTool: vi.fn(() => new Promise<void>((r) => (resolve = r))),
+      unregisterTool,
+    };
+    const c = new AbortController();
+    const p = exposeTool(tool, c.signal);
+    c.abort();
+    resolve();
+    expect(await p).toBe("registered");
+    expect(unregisterTool).toHaveBeenCalledTimes(1);
+    expect(unregisterTool).toHaveBeenCalledWith("x");
+  });
+
+  it("document.modelContext path never calls unregisterTool", async () => {
+    const unregisterTool = vi.fn();
+    (document as any).modelContext = { registerTool: vi.fn(), unregisterTool };
+    const c = new AbortController();
+    await exposeTool(tool, c.signal);
+    c.abort();
+    expect(unregisterTool).not.toHaveBeenCalled();
+  });
 });

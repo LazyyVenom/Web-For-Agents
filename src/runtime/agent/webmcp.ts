@@ -48,24 +48,22 @@ export async function exposeTool(
   if (signal.aborted) return "failed";
   const { ctx, legacy } = found;
   try {
-    if (legacy && typeof ctx.unregisterTool === "function") {
-      signal.addEventListener(
-        "abort",
-        () => {
-          try {
-            ctx.unregisterTool?.(tool.name);
-          } catch {
-            // ignore
-          }
-        },
-        { once: true },
-      );
-    }
     await Promise.resolve(ctx.registerTool(tool, { signal }));
-    return "registered";
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[web-for-agents] WebMCP registerTool failed for "${tool.name}": ${message}`);
     return "failed";
   }
+  if (legacy && typeof ctx.unregisterTool === "function") {
+    const unregister = () => {
+      try {
+        ctx.unregisterTool?.(tool.name);
+      } catch {
+        // ignore
+      }
+    };
+    if (signal.aborted) unregister();
+    else signal.addEventListener("abort", unregister, { once: true });
+  }
+  return "registered";
 }
