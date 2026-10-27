@@ -57,11 +57,6 @@ export async function prerenderSite(input: {
         },
         async (url, renderer, timeoutMs, scripts) => (await pool.get(renderer)).render(url, timeoutMs, scripts),
       );
-      if (result.truncated) {
-        console.warn(
-          `[web-for-agents] prerender stopped at prerender.maxRoutes (${pr.maxRoutes}); raise it to include more routes`,
-        );
-      }
       if (result.failures.length > 0) throw new Error(formatFailures(result.failures, pr.fallback));
       return result;
     } finally {
