@@ -53,13 +53,41 @@ export default defineConfig({
 
 `robots.ai` is required: the plugin throws if you do not state a policy for both `training` and `search`. Files you place in `public/` (for example your own `robots.txt`) are never overwritten; the plugin logs a warning and skips generation.
 
+Use one `SeoProvider` per document. It owns the shared defaults and the base head tags; nested or multiple providers will overwrite each other.
+
+## Hooks and components
+
+`<Seo {...props} />` is a component wrapper around `useSeo(props)`. Call the hook directly when you prefer hooks or need to compute props in a component:
+
+```tsx
+import { useSeo } from "@anubhav-choubey/web-for-agents";
+
+export function Post({ title }: { title: string }) {
+  useSeo({ title, canonical: "/blog/hello", type: "article" });
+  return null;
+}
+```
+
+Nested `Seo`/`useSeo` calls merge, with the deeper one winning per tag.
+
+## Schema builders
+
+`schema` returns typed JSON-LD nodes for `<JsonLd data={...} />`:
+
+- `schema.article`
+- `schema.product`
+- `schema.faqPage`
+- `schema.breadcrumbList`
+- `schema.organization`
+- `schema.webSite`
+
 ## Plugin options
 
 | Option | Type | Description |
 | --- | --- | --- |
 | `siteUrl` | `string` | Required. Absolute http(s) URL of the deployed site. |
 | `routes` | `string[]` | Extra routes for the sitemap. `/` is always included. |
-| `exclude` | `Array<string \| RegExp>` | Routes to leave out. A string is an exact path, or a prefix when it ends in `/*`. |
+| `exclude` | `Array<string \| RegExp>` | Routes to leave out. A string is an exact path, or a prefix when it ends in `/*`. A leading slash is optional. |
 | `robots.ai.training` | `"allow" \| "block"` | Required. Policy for AI training crawlers. |
 | `robots.ai.search` | `"allow" \| "block"` | Required. Policy for AI search and user-agent fetchers. |
 | `robots.ai.overrides` | `Record<string, "allow" \| "block">` | Per-bot override, matched case-insensitively. |
