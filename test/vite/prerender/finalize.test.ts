@@ -59,4 +59,73 @@ describe("finalizeHtml", () => {
     const off = finalizeHtml(base(head, body), { route: "/blog/hello", relativeBase: false });
     expect(off).toContain('src="./assets/a.js"');
   });
+
+  it("rewrites srcset, source[src] and video[poster] for relative base", () => {
+    const body =
+      `<img src="./a.png" srcset="./a.png 1x, ./a@2x.png 2x, https://e.com/b.png 3x">` +
+      `<picture><source srcset="./p.webp" type="image/webp"></picture>` +
+      `<video poster="./poster.jpg"><source src="./v.mp4"></video>`;
+    const out = finalizeHtml(base("", body), { route: "/blog/hello", relativeBase: true });
+    expect(out).toContain('srcset="../../a.png 1x, ../../a@2x.png 2x, https://e.com/b.png 3x"');
+    expect(out).toContain('<source srcset="../../p.webp"');
+    expect(out).toContain('poster="../../poster.jpg"');
+    expect(out).toContain('<source src="../../v.mp4"');
+  });
+
+  describe("prerender server origin", () => {
+    const origin = "http://127.0.0.1:4321";
+    // What Vite's preload helper and an app leave behind: absolute URLs on the prerender server.
+    const leaked = (prefix: string) =>
+      base(
+        `<script type="module" src="${prefix}assets/index.js"></script>` +
+          `<link rel="stylesheet" href="${prefix}assets/index.css">` +
+          `<link rel="modulepreload" as="script" crossorigin="" href="${origin}/${prefix.replace(/^\.?\//, "")}assets/Post.js">` +
+          `<link rel="modulepreload" as="script" crossorigin="" href="${origin}/${prefix.replace(/^\.?\//, "")}assets/Post.js">` +
+          `<link rel="stylesheet" crossorigin="" href="${origin}/${prefix.replace(/^\.?\//, "")}assets/index.css">`,
+        `<img src="${origin}/${prefix.replace(/^\.?\//, "")}i.png?v=1#x" srcset="${origin}/${prefix.replace(/^\.?\//, "")}i.png 1x, ${origin}/${prefix.replace(/^\.?\//, "")}i2.png 2x">` +
+          `<picture><source srcset="${origin}/${prefix.replace(/^\.?\//, "")}p.webp"></picture>` +
+          `<video poster="${origin}/${prefix.replace(/^\.?\//, "")}poster.jpg"><source src="${origin}/${prefix.replace(/^\.?\//, "")}v.mp4"></video>` +
+          `<img src="http://127.0.0.1:43210/other.png">`,
+      );
+
+    it("rewrites origin URLs to site paths under the base and dedupes links", () => {
+      const out = finalizeHtml(leaked("/sub/"), { route: "/blog/hello", relativeBase: false, origin });
+      expect(out).not.toContain(`${origin}/`);
+      const { document, dispose } = parseHtml(out);
+      const hrefs = [...document.querySelectorAll("link")].map((l) => `${l.getAttribute("rel")} ${l.getAttribute("href")}`);
+      expect(hrefs).toEqual([
+        "stylesheet /sub/assets/index.css",
+        "modulepreload /sub/assets/Post.js",
+      ]);
+      dispose();
+      expect(out).toContain('src="/sub/i.png?v=1#x"');
+      expect(out).toContain('srcset="/sub/i.png 1x, /sub/i2.png 2x"');
+      expect(out).toContain('<source srcset="/sub/p.webp"');
+      expect(out).toContain('poster="/sub/poster.jpg"');
+      expect(out).toContain('<source src="/sub/v.mp4"');
+      // a different port that shares the prefix is not the prerender server
+      expect(out).toContain('src="http://127.0.0.1:43210/other.png"');
+    });
+
+    it("rewrites origin URLs relative to the route for a relative base", () => {
+      const deep = finalizeHtml(leaked("./"), { route: "/blog/hello", relativeBase: true, origin });
+      expect(deep).not.toContain(`${origin}/`);
+      expect(deep).toContain('src="../../assets/index.js"');
+      expect(deep).toContain('href="../../assets/Post.js"');
+      expect(deep).toContain('srcset="../../i.png 1x, ../../i2.png 2x"');
+      expect(deep).toContain('poster="../../poster.jpg"');
+      expect(deep.split('href="../../assets/index.css"').length - 1).toBe(1);
+      expect(deep.split('href="../../assets/Post.js"').length - 1).toBe(1);
+
+      const root = finalizeHtml(leaked("./"), { route: "/", relativeBase: true, origin });
+      expect(root).not.toContain(`${origin}/`);
+      expect(root).toContain('href="./assets/Post.js"');
+      expect(root.split('href="./assets/index.css"').length - 1).toBe(1);
+    });
+
+    it("leaves origin URLs alone when no origin is given", () => {
+      const out = finalizeHtml(leaked("/"), { route: "/a", relativeBase: false });
+      expect(out).toContain(`href="${origin}/assets/Post.js"`);
+    });
+  });
 });
