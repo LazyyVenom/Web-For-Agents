@@ -17,8 +17,11 @@ export interface SeoDefaults {
 export interface SeoProps {
   title?: string;
   description?: string;
-  /** Absolute URL or path (resolved against defaults.siteUrl). */
-  canonical?: string;
+  /**
+   * Absolute URL or path (resolved against defaults.siteUrl). When omitted and defaults.siteUrl is set,
+   * defaults to siteUrl plus the current pathname. Pass false to emit no canonical.
+   */
+  canonical?: string | false;
   image?: string;
   type?: "website" | "article" | "product";
   noindex?: boolean;

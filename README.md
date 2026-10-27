@@ -306,6 +306,10 @@ export function Post({ title }: { title: string }) {
 
 Nested `Seo`/`useSeo` calls merge, with the deeper one winning per tag.
 
+### Canonical URL
+
+`canonical` takes an absolute URL or a path, resolved against `defaults.siteUrl`. When you don't pass one and `SeoProvider` has `defaults.siteUrl`, `<Seo>` defaults the canonical link and `og:url` to `siteUrl` plus the current pathname, with the query and hash removed. The pathname is read from `document.location` in an effect, so it follows navigation whenever a `Seo` mounts or its props change. Prerendered pages carry this canonical in their HTML. Pass `canonical={false}` to emit neither tag, or an explicit value to override the default. Without `siteUrl`, no canonical is emitted. The default comes from `Seo`, not from `SeoProvider` alone, so a page with no `Seo` gets no canonical.
+
 ## Schema builders
 
 `schema` returns typed JSON-LD nodes for `<JsonLd data={...} />`:

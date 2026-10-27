@@ -147,3 +147,78 @@ describe("Seo prerendered head", () => {
     expect(meta('meta[property="og:title"]')).toBe("Hello");
   });
 });
+
+describe("default canonical", () => {
+  const setPath = (path: string) => (window as unknown as { happyDOM: { setURL(u: string): void } }).happyDOM.setURL(`https://example.com${path}`);
+  const canonical = () => document.head.querySelector('link[rel="canonical"]')?.getAttribute("href");
+  const ogUrl = () => meta('meta[property="og:url"]');
+  const defaults = { siteUrl: "https://site.test/" };
+
+  it("defaults canonical and og:url to siteUrl plus the current path, without query or hash", () => {
+    setPath("/blog/post?x=1#top");
+    render(
+      <SeoProvider defaults={defaults}>
+        <Seo title="Post" />
+      </SeoProvider>,
+    );
+    expect(canonical()).toBe("https://site.test/blog/post");
+    expect(ogUrl()).toBe("https://site.test/blog/post");
+  });
+
+  it("lets an explicit canonical win", () => {
+    setPath("/blog/post");
+    render(
+      <SeoProvider defaults={defaults}>
+        <Seo title="Post" canonical="/elsewhere" />
+      </SeoProvider>,
+    );
+    expect(canonical()).toBe("https://site.test/elsewhere");
+    expect(ogUrl()).toBe("https://site.test/elsewhere");
+  });
+
+  it("omits canonical and og:url when canonical is false", () => {
+    setPath("/blog/post");
+    render(
+      <SeoProvider defaults={defaults}>
+        <Seo title="Post" canonical={false} />
+      </SeoProvider>,
+    );
+    expect(canonical()).toBeUndefined();
+    expect(ogUrl()).toBeUndefined();
+  });
+
+  it("emits nothing without a siteUrl", () => {
+    setPath("/blog/post");
+    render(
+      <SeoProvider defaults={{ siteName: "Acme" }}>
+        <Seo title="Post" />
+      </SeoProvider>,
+    );
+    expect(canonical()).toBeUndefined();
+    expect(ogUrl()).toBeUndefined();
+  });
+
+  it("updates after navigation on a remount or prop change", () => {
+    setPath("/a");
+    const { rerender } = render(
+      <SeoProvider defaults={defaults}>
+        <Seo title="A" />
+      </SeoProvider>,
+    );
+    expect(canonical()).toBe("https://site.test/a");
+    setPath("/b");
+    rerender(
+      <SeoProvider defaults={defaults}>
+        <Seo title="B" />
+      </SeoProvider>,
+    );
+    expect(canonical()).toBe("https://site.test/b");
+    setPath("/c");
+    rerender(
+      <SeoProvider defaults={defaults}>
+        <Seo key="remount" title="B" />
+      </SeoProvider>,
+    );
+    expect(canonical()).toBe("https://site.test/c");
+  });
+});

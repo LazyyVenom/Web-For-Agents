@@ -53,6 +53,9 @@ function flush(doc: Document): void {
 
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
+/** Read at flush time, in effects only, so render stays free of document access. */
+const currentPath = (): string => document.location?.pathname ?? "";
+
 const DefaultsContext = createContext<SeoDefaults>({});
 
 export interface SeoProviderProps {
@@ -66,6 +69,7 @@ export function SeoProvider(props: SeoProviderProps) {
   useIsoLayoutEffect(() => {
     const store = getStore(document);
     store.base = buildHeadTags({}, defaults);
+    // No default canonical here: it comes from each Seo, so canonical={false} can opt a page out.
     flush(document);
     return () => {
       store.base = [];
@@ -80,12 +84,11 @@ export function useSeo(props: SeoProps): void {
   const defaults = useContext(DefaultsContext);
   const [order] = useState(() => ++seq);
   const entryRef = useRef<Entry | null>(null);
-  const tags = buildHeadTags(props, defaults);
-  const key = JSON.stringify(tags);
+  const key = JSON.stringify([props, defaults]);
 
   useIsoLayoutEffect(() => {
     const store = getStore(document);
-    const entry: Entry = { order, tags };
+    const entry: Entry = { order, tags: buildHeadTags(props, defaults, currentPath()) };
     entryRef.current = entry;
     store.stack.push(entry);
     flush(document);
@@ -99,7 +102,7 @@ export function useSeo(props: SeoProps): void {
 
   useIsoLayoutEffect(() => {
     if (entryRef.current) {
-      entryRef.current.tags = tags;
+      entryRef.current.tags = buildHeadTags(props, defaults, currentPath());
       flush(document);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

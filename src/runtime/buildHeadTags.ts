@@ -1,10 +1,19 @@
-import { resolveUrl } from "../shared/url";
+import { resolveUrl, trimTrailingSlash } from "../shared/url";
 import type { HeadTag, SeoDefaults, SeoProps } from "./types";
 
 const absolute = (value: string | undefined, siteUrl: string | undefined): string | undefined =>
   value === undefined ? undefined : resolveUrl(value, siteUrl);
 
-export function buildHeadTags(props: SeoProps, defaults: SeoDefaults = {}): HeadTag[] {
+/** siteUrl plus the path, without query or hash; undefined without a siteUrl or a usable path. */
+function defaultCanonical(siteUrl: string | undefined, pathname: string | undefined): string | undefined {
+  if (!siteUrl || !pathname) return undefined;
+  const path = pathname.split(/[?#]/)[0] ?? "";
+  if (!path.startsWith("/")) return undefined;
+  return trimTrailingSlash(siteUrl) + path;
+}
+
+/** `pathname` is the current page path, read by the caller at flush time; it feeds the default canonical. */
+export function buildHeadTags(props: SeoProps, defaults: SeoDefaults = {}, pathname?: string): HeadTag[] {
   const byKey = new Map<string, HeadTag>();
 
   const meta = (kind: "name" | "property", id: string, value: string | undefined) => {
@@ -23,7 +32,12 @@ export function buildHeadTags(props: SeoProps, defaults: SeoDefaults = {}): Head
 
   const description = props.description ?? defaults.description;
   const image = absolute(props.image ?? defaults.image, defaults.siteUrl);
-  const canonical = absolute(props.canonical, defaults.siteUrl);
+  const canonical =
+    props.canonical === false
+      ? undefined
+      : props.canonical === undefined
+        ? defaultCanonical(defaults.siteUrl, pathname)
+        : absolute(props.canonical, defaults.siteUrl);
 
   meta("name", "description", description);
   if (canonical !== undefined) {

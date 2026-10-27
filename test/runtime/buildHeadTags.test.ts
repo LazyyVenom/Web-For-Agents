@@ -71,3 +71,13 @@ describe("buildHeadTags", () => {
     expect(find(t, "title")).toMatchObject({ text: "Save $$ $& | Acme" });
   });
 });
+
+describe("buildHeadTags default canonical", () => {
+  const href = (tags: ReturnType<typeof buildHeadTags>) => tags.find((t) => t.key === "rel:canonical");
+  it("needs both a siteUrl and a pathname, and honours false", () => {
+    expect(href(buildHeadTags({}, { siteUrl: "https://a.com" }))).toBeUndefined();
+    expect(href(buildHeadTags({}, {}, "/x"))).toBeUndefined();
+    expect(href(buildHeadTags({ canonical: false }, { siteUrl: "https://a.com" }, "/x"))).toBeUndefined();
+    expect(href(buildHeadTags({}, { siteUrl: "https://a.com/" }, "/x"))).toMatchObject({ attrs: { href: "https://a.com/x" } });
+  });
+});
