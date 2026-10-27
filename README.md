@@ -459,6 +459,19 @@ if (import.meta.env.DEV) {
 }
 ```
 
+## Upgrading
+
+### Breaking: `webForAgents()` returns `Plugin[]`
+
+Since stage 4, `webForAgents()` returns an array of plugins (the build plugin and the dev overlay) instead of a single `Plugin`. Putting it in `plugins: [react(), webForAgents({...})]` still works, because Vite flattens nested arrays. Code that treats the result as one plugin needs a change. That includes reading `.name` or `.apply`, wrapping it in a helper typed `Plugin`, or passing it to an API that expects one plugin:
+
+```ts
+// before
+const wfa: Plugin = webForAgents(options);
+// after
+const wfa: Plugin[] = webForAgents(options);
+```
+
 ## Roadmap
 
 - Stage 1 (done): head metadata, JSON-LD, sitemap.xml, robots.txt.
