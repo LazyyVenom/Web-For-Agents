@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { normalizeInputUrl, parseCliArgs } from "../../src/cli/args.js"
+import { describe, expect, it } from "vitest";
+import { normalizeInputUrl, parseCliArgs } from "../../src/cli/args";
 
 describe("parseCliArgs", () => {
   it("parses audit with flags", () => {
@@ -9,13 +9,13 @@ describe("parseCliArgs", () => {
       json: true,
       minScore: 80,
       timeoutMs: 500,
-    })
-  })
+    });
+  });
 
   it("gives help for no args and --help", () => {
-    expect(parseCliArgs([]).command).toBe("help")
-    expect(parseCliArgs(["--help"]).command).toBe("help")
-  })
+    expect(parseCliArgs([]).command).toBe("help");
+    expect(parseCliArgs(["--help"]).command).toBe("help");
+  });
 
   it("throws on bad input", () => {
     for (const argv of [
@@ -31,12 +31,12 @@ describe("parseCliArgs", () => {
       ["audit", "u", "--min-score", "-1"],
       ["audit", "u", "--timeout", "0"],
     ]) {
-      expect(() => parseCliArgs(argv), argv.join(" ")).toThrow(/\[web-for-agents\]/)
+      expect(() => parseCliArgs(argv), argv.join(" ")).toThrow(/\[web-for-agents\]/);
     }
-  })
+  });
 
   it("normalizes urls", () => {
-    expect(normalizeInputUrl("http://a.test")).toBe("http://a.test/")
-    expect(() => normalizeInputUrl("")).toThrow()
-  })
-})
+    expect(normalizeInputUrl("http://a.test")).toBe("http://a.test/");
+    expect(() => normalizeInputUrl("")).toThrow();
+  });
+});

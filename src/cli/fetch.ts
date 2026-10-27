@@ -1,109 +1,115 @@
-export const DEFAULT_TIMEOUT_MS = 10_000
-export const MAX_BODY_BYTES = 5 * 1024 * 1024
-export const USER_AGENT =
-  'web-for-agents-audit (+https://www.npmjs.com/package/@anubhav-choubey/web-for-agents)'
+export const DEFAULT_TIMEOUT_MS = 10_000;
+export const MAX_BODY_BYTES = 5 * 1024 * 1024;
+export const USER_AGENT = "web-for-agents-audit (+https://www.npmjs.com/package/@anubhav-choubey/web-for-agents)";
 
 export interface FetchResult {
-  url: string
-  finalUrl: string
-  redirected: boolean
+  url: string;
+  finalUrl: string;
+  redirected: boolean;
   /** 0 when no response */
-  status: number
+  status: number;
   /** lowercased, "" when absent */
-  contentType: string
-  body: string
-  truncated: boolean
-  error?: string
+  contentType: string;
+  body: string;
+  truncated: boolean;
+  error?: string;
 }
 
 export interface FetchOptions {
-  timeoutMs: number
-  maxBytes?: number
-  userAgent?: string
-  accept?: string
+  timeoutMs: number;
+  maxBytes?: number;
+  userAgent?: string;
+  accept?: string;
 }
 
 function decode(bytes: Uint8Array, contentType: string): string {
-  const label = /charset\s*=\s*"?([^;"\s]+)/i.exec(contentType)?.[1] ?? 'utf-8'
-  let decoder: TextDecoder
+  const label = /charset\s*=\s*"?([^;"\s]+)/i.exec(contentType)?.[1] ?? "utf-8";
+  let decoder: TextDecoder;
   try {
-    decoder = new TextDecoder(label)
+    decoder = new TextDecoder(label);
   } catch (e) {
-    if (!(e instanceof RangeError)) throw e
-    decoder = new TextDecoder('utf-8')
+    if (!(e instanceof RangeError)) throw e;
+    decoder = new TextDecoder("utf-8");
   }
-  return decoder.decode(bytes)
+  return decoder.decode(bytes);
 }
 
 function concat(chunks: Uint8Array[], total: number): Uint8Array {
-  const out = new Uint8Array(total)
-  let off = 0
+  const out = new Uint8Array(total);
+  let off = 0;
   for (const c of chunks) {
-    out.set(c, off)
-    off += c.length
+    out.set(c, off);
+    off += c.length;
   }
-  return out
+  return out;
 }
 
 export async function fetchText(url: string, opts: FetchOptions): Promise<FetchResult> {
-  const maxBytes = opts.maxBytes ?? MAX_BODY_BYTES
+  const maxBytes = opts.maxBytes ?? MAX_BODY_BYTES;
   const result: FetchResult = {
     url,
     finalUrl: url,
     redirected: false,
     status: 0,
-    contentType: '',
-    body: '',
+    contentType: "",
+    body: "",
     truncated: false,
-  }
-  const chunks: Uint8Array[] = []
-  let total = 0
+  };
+  const chunks: Uint8Array[] = [];
+  let total = 0;
   try {
     const res = await fetch(url, {
-      redirect: 'follow',
+      redirect: "follow",
       signal: AbortSignal.timeout(opts.timeoutMs),
       headers: {
-        'user-agent': opts.userAgent ?? USER_AGENT,
-        accept: opts.accept ?? '*/*',
+        "user-agent": opts.userAgent ?? USER_AGENT,
+        accept: opts.accept ?? "*/*",
       },
-    })
-    result.status = res.status
-    result.finalUrl = res.url || url
-    result.redirected = res.redirected
-    result.contentType = (res.headers.get('content-type') ?? '').toLowerCase()
+    });
+    result.status = res.status;
+    result.finalUrl = res.url || url;
+    result.redirected = res.redirected;
+    result.contentType = (res.headers.get("content-type") ?? "").toLowerCase();
     if (res.body) {
-      const reader = res.body.getReader()
+      const reader = res.body.getReader();
       for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
+        const { done, value } = await reader.read();
+        if (done) break;
         if (total + value.length > maxBytes) {
-          const keep = maxBytes - total
-          if (keep > 0) chunks.push(value.subarray(0, keep))
-          total = maxBytes
-          result.truncated = true
-          await reader.cancel().catch(() => {})
-          break
+          const keep = maxBytes - total;
+          if (keep > 0) chunks.push(value.subarray(0, keep));
+          total = maxBytes;
+          result.truncated = true;
+          await reader.cancel().catch(() => {});
+          break;
         }
-        chunks.push(value)
-        total += value.length
+        chunks.push(value);
+        total += value.length;
       }
     }
   } catch (e) {
-    const err = e as { name?: string; message?: string; cause?: { message?: string; code?: string; errors?: Array<{ message?: string }> } }
-    if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
-      result.error = `timed out after ${opts.timeoutMs}ms`
+    const err = e as {
+      name?: string;
+      message?: string;
+      cause?: { message?: string; code?: string; errors?: Array<{ message?: string }> };
+    };
+    if (err?.name === "TimeoutError" || err?.name === "AbortError") {
+      result.error = `timed out after ${opts.timeoutMs}ms`;
     } else {
-      const c = err?.cause
-      const cause = c?.message || c?.code || c?.errors?.[0]?.message
-      result.error = `network error: ${err?.message ?? String(e)}${cause ? `: ${cause}` : ''}`
+      const c = err?.cause;
+      const cause = c?.message || c?.code || c?.errors?.[0]?.message;
+      result.error = `network error: ${err?.message ?? String(e)}${cause ? `: ${cause}` : ""}`;
     }
   }
-  result.body = decode(concat(chunks, total), result.contentType)
-  return result
+  result.body = decode(concat(chunks, total), result.contentType);
+  return result;
 }
 
 export function looksLikeHtml(r: FetchResult): boolean {
-  if (r.contentType.includes('text/html')) return true
-  const head = r.body.replace(/^[\s﻿]+/, '').slice(0, 15).toLowerCase()
-  return head.startsWith('<!doctype html') || head.startsWith('<html')
+  if (r.contentType.includes("text/html")) return true;
+  const head = r.body
+    .replace(/^[\s﻿]+/, "")
+    .slice(0, 15)
+    .toLowerCase();
+  return head.startsWith("<!doctype html") || head.startsWith("<html");
 }
