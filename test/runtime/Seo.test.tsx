@@ -323,7 +323,6 @@ describe("navigation watching", () => {
     expect(canonical()).toBe("https://site.test/back");
   });
 
-  // Last on purpose: it leaves our wrapper under a foreign one, which is the case being tested.
   it("reuses its wrapper when a foreign patch sits on top at unmount", () => {
     happy.setURL("https://site.test/a");
     const tree = (
@@ -331,22 +330,34 @@ describe("navigation watching", () => {
         <Seo title="Layout" />
       </SeoProvider>
     );
+    const original = history.pushState;
     const first = render(tree);
     const ours = history.pushState;
     const foreign = function (this: History, ...args: Parameters<History["pushState"]>) {
       return ours.apply(this, args);
     };
     history.pushState = foreign;
-    first.unmount();
-    expect(history.pushState).toBe(foreign);
-    render(tree);
-    expect(history.pushState).toBe(foreign);
-    let dispatched = 0;
-    const count = () => dispatched++;
-    window.addEventListener("wfa:navigate", count);
-    history.pushState({}, "", "/b");
-    window.removeEventListener("wfa:navigate", count);
-    expect(dispatched).toBe(1);
-    expect(canonical()).toBe("https://site.test/b");
+    try {
+      first.unmount();
+      expect(history.pushState).toBe(foreign);
+      const second = render(tree);
+      expect(history.pushState).toBe(foreign);
+      let dispatched = 0;
+      const count = () => dispatched++;
+      window.addEventListener("wfa:navigate", count);
+      history.pushState({}, "", "/b");
+      window.removeEventListener("wfa:navigate", count);
+      expect(dispatched).toBe(1);
+      expect(canonical()).toBe("https://site.test/b");
+      // Take the foreign patch off so our wrapper is on top again; unmounting then fully unpatches.
+      history.pushState = ours;
+      second.unmount();
+    } finally {
+      // On an early failure, still leave history as later tests expect it.
+      if (history.pushState === foreign) history.pushState = ours;
+      cleanup();
+    }
+    // Later tests (in any order) see an unpatched history and no recorded wrapper.
+    expect(history.pushState).toBe(original);
   });
 });
