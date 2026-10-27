@@ -39,6 +39,13 @@ function opts(over: Partial<CrawlOptions> = {}): CrawlOptions {
 }
 
 describe("crawlRoutes", () => {
+  it("strips the prerender server origin from output", async () => {
+    const head = `<link rel="modulepreload" href="${ORIGIN}/assets/chunk.js">`;
+    const r = await crawlRoutes(opts({ crawl: false }), fakeRender({ "/": page("Home", head) }));
+    expect(r.pages[0]!.html).toContain('href="/assets/chunk.js"');
+    expect(r.pages[0]!.html).not.toContain(ORIGIN);
+  });
+
   it("mounts full-URL and relative bases at the origin root", async () => {
     for (const base of ["https://cdn.example.com/app/", "//cdn.example.com/", "./", ""]) {
       const urls: string[] = [];

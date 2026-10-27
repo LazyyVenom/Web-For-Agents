@@ -96,6 +96,7 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
     const html = finalizeHtml(result.html, {
       route,
       relativeBase: opts.relativeBase,
+      origin: opts.origin,
       ...(markdownUrl !== undefined ? { markdownUrl } : {}),
     });
     const info = analyzePage(html, { pageUrl: url, contentSelector: opts.contentSelector, route });
