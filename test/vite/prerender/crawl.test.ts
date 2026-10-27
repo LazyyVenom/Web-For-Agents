@@ -215,4 +215,52 @@ describe("crawlRoutes", () => {
     );
     expect(r.bodyFallbackRoutes).toEqual(["/"]);
   });
+
+  it("keeps the same routes under truncation regardless of timing", async () => {
+    const links = Array.from({ length: 12 }, (_, i) => a(`/r${String(i).padStart(2, "0")}`)).join("");
+    const runs: string[] = [];
+    for (let k = 0; k < 5; k++) {
+      const render: RenderFn = async (url) => {
+        const path = new URL(url).pathname;
+        const n = Number(path.slice(2)) || 0;
+        await new Promise((r) => setTimeout(r, ((n * 7 + k * 3) % 5) * 4));
+        return { html: page(path === "/" ? links : "x"), finalPath: path, inPage: {} };
+      };
+      const r = await crawlRoutes(opts({ maxRoutes: 6, concurrency: 4 }), render);
+      expect(r.truncated).toBe(true);
+      runs.push(r.pages.map((p) => p.route).join(","));
+    }
+    expect(new Set(runs).size).toBe(1);
+    expect(runs[0]).toBe("/,/r00,/r01,/r02,/r03,/r04");
+  });
+
+  it("records a throwing rendererFor as a failure", async () => {
+    const render = fakeRender({ "/": page(a("/bad") + a("/ok")), "/ok": page("ok") });
+    const r = await crawlRoutes(
+      opts({
+        rendererFor: (route) => {
+          if (route === "/bad") throw new Error("nope");
+          return "happy-dom";
+        },
+      }),
+      render,
+    );
+    expect(r.pages.map((p) => p.route)).toEqual(["/", "/ok"]);
+    expect(r.failures).toHaveLength(1);
+    expect(r.failures[0]!.route).toBe("/bad");
+    expect(r.failures[0]!.message).toContain("nope");
+  });
+
+  it("does not follow redirect targets when crawl is false", async () => {
+    const calls: string[] = [];
+    const render: RenderFn = async (url) => {
+      const path = new URL(url).pathname;
+      calls.push(path);
+      return { html: page("x"), finalPath: "/home", inPage: {} };
+    };
+    const r = await crawlRoutes(opts({ crawl: false }), render);
+    expect(calls).toEqual(["/"]);
+    expect(r.pages.map((p) => p.route)).toEqual(["/"]);
+    expect(r.pages[0]!.listed).toBe(false);
+  });
 });

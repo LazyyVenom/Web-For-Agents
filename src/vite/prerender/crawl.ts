@@ -74,16 +74,12 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
     seen.add(route);
     queue.push(route);
   };
-  for (const s of opts.seeds) {
-    const route = normalizeRoute(s);
-    if (isSafeRoute(route) && !skip(route)) enqueue(route);
+  for (const s of [...new Set(opts.seeds.map(normalizeRoute))].sort()) {
+    if (isSafeRoute(s) && !skip(s)) enqueue(s);
   }
 
-  const enqueueLink = (href: string) => {
-    const route = linkToRoute(href, opts.origin, opts.base);
-    if (route === null || isExcluded(route, opts.exclude) || skip(route)) return;
-    enqueue(route);
-  };
+  const candidate = (route: string | null): route is string =>
+    route !== null && !isExcluded(route, opts.exclude) && !skip(route);
 
   const pages: PrerenderedPage[] = [];
   const failures: CrawlFailure[] = [];
@@ -103,8 +99,15 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
     return { result, html, info, url };
   };
 
-  const processRoute = async (route: string) => {
-    const primary = opts.rendererFor(route);
+  /** Returns newly discovered routes; the caller orders them deterministically. */
+  const processRoute = async (route: string): Promise<string[]> => {
+    let primary: RendererName;
+    try {
+      primary = opts.rendererFor(route);
+    } catch (e) {
+      failures.push({ route, renderer: "happy-dom", message: `rendererFor threw: ${errorMessage(e)}` });
+      return [];
+    }
     let used = primary;
     let out: Awaited<ReturnType<typeof attempt>>;
     try {
@@ -113,7 +116,7 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
       const fb = opts.fallback;
       if (fb === false || fb === primary) {
         failures.push({ route, renderer: primary, message: errorMessage(e) });
-        return;
+        return [];
       }
       try {
         out = await attempt(route, fb);
@@ -124,19 +127,18 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
           renderer: primary,
           message: `${errorMessage(e)}; fallback ${fb} also failed: ${errorMessage(e2)}`,
         });
-        return;
+        return [];
       }
     }
 
     const { result, html, info, url } = out;
+    const found: string[] = [];
     let redirected = false;
     if (result.finalPath) {
       const finalRoute = linkToRoute(new URL(result.finalPath, url).href, opts.origin, opts.base);
       if (finalRoute !== route) {
         redirected = true;
-        if (finalRoute !== null && !isExcluded(finalRoute, opts.exclude) && !skip(finalRoute)) {
-          enqueue(finalRoute);
-        }
+        if (opts.crawl && candidate(finalRoute)) found.push(finalRoute);
       }
     }
     pages.push({
@@ -148,26 +150,31 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
       inPage: result.inPage,
     });
     if (info.contentSource === "body") bodyFallbackRoutes.push(route);
-    if (opts.crawl) for (const link of info.links) enqueueLink(link);
+    if (opts.crawl) {
+      for (const link of info.links) {
+        const r = linkToRoute(link, opts.origin, opts.base);
+        if (candidate(r)) found.push(r);
+      }
+    }
+    return found;
   };
 
-  let active = 0;
-  await new Promise<void>((resolve) => {
-    const pump = () => {
-      while (active < opts.concurrency && queue.length > 0) {
-        const route = queue.shift()!;
-        active++;
-        processRoute(route)
-          .catch((e) => failures.push({ route, renderer: opts.rendererFor(route), message: errorMessage(e) }))
-          .finally(() => {
-            active--;
-            pump();
-          });
+  // Breadth-first by level: render a level, then enqueue newly found routes in sorted order,
+  // so the set kept under maxRoutes does not depend on timing.
+  while (queue.length > 0) {
+    const level = queue.splice(0);
+    const found: string[][] = new Array(level.length);
+    let next = 0;
+    const worker = async () => {
+      while (next < level.length) {
+        const i = next++;
+        const route = level[i]!;
+        found[i] = await processRoute(route);
       }
-      if (active === 0 && queue.length === 0) resolve();
     };
-    pump();
-  });
+    await Promise.all(Array.from({ length: Math.min(opts.concurrency, level.length) }, worker));
+    for (const r of [...new Set(found.flat())].sort()) enqueue(r);
+  }
 
   pages.sort((a, b) => (a.route < b.route ? -1 : a.route > b.route ? 1 : 0));
   failures.sort((a, b) => (a.route < b.route ? -1 : a.route > b.route ? 1 : 0));

@@ -31,43 +31,43 @@ export async function prerenderSite(input: {
   const mount = relativeBase ? "/" : input.base;
   const markdown = options.markdown;
 
+  const shell = prepareShell(input.shell, { relativeBase });
   const pool = createRendererPool(pr.executablePath !== undefined ? { executablePath: pr.executablePath } : {});
-  const server = await startStaticServer({
-    dir: input.outDir,
-    base: input.base,
-    shell: prepareShell(input.shell, { relativeBase }),
-  });
   try {
-    const result = await crawlRoutes(
-      {
-        seeds: options.routes,
-        crawl: pr.crawl,
-        exclude: options.exclude,
-        maxRoutes: pr.maxRoutes,
-        concurrency: pr.concurrency,
-        timeoutMs: pr.timeoutMs,
-        rendererFor: (route) =>
-          pr.routeRenderers.find((rr) => isExcluded(route, [rr.match]))?.renderer ?? pr.renderer,
-        fallback: pr.fallback,
-        origin: server.origin,
-        base: mount,
-        relativeBase,
-        contentSelector: markdown ? markdown.contentSelector : "main",
-        ...(markdown ? { markdownUrl: (route: string) => publicMdUrl(options.siteUrl, route) } : {}),
-        inPage,
-        skipRoute: input.skipRoute,
-      },
-      async (url, renderer, timeoutMs, scripts) => (await pool.get(renderer)).render(url, timeoutMs, scripts),
-    );
-    if (result.truncated) {
-      console.warn(
-        `[web-for-agents] prerender stopped at prerender.maxRoutes (${pr.maxRoutes}); raise it to include more routes`,
+    const server = await startStaticServer({ dir: input.outDir, base: input.base, shell });
+    try {
+      const result = await crawlRoutes(
+        {
+          seeds: options.routes,
+          crawl: pr.crawl,
+          exclude: options.exclude,
+          maxRoutes: pr.maxRoutes,
+          concurrency: pr.concurrency,
+          timeoutMs: pr.timeoutMs,
+          rendererFor: (route) =>
+            pr.routeRenderers.find((rr) => isExcluded(route, [rr.match]))?.renderer ?? pr.renderer,
+          fallback: pr.fallback,
+          origin: server.origin,
+          base: mount,
+          relativeBase,
+          contentSelector: markdown ? markdown.contentSelector : "main",
+          ...(markdown ? { markdownUrl: (route: string) => publicMdUrl(options.siteUrl, route) } : {}),
+          inPage,
+          skipRoute: input.skipRoute,
+        },
+        async (url, renderer, timeoutMs, scripts) => (await pool.get(renderer)).render(url, timeoutMs, scripts),
       );
+      if (result.truncated) {
+        console.warn(
+          `[web-for-agents] prerender stopped at prerender.maxRoutes (${pr.maxRoutes}); raise it to include more routes`,
+        );
+      }
+      if (result.failures.length > 0) throw new Error(formatFailures(result.failures, pr.fallback));
+      return result;
+    } finally {
+      await server.close();
     }
-    if (result.failures.length > 0) throw new Error(formatFailures(result.failures, pr.fallback));
-    return result;
   } finally {
     await pool.closeAll();
-    await server.close();
   }
 }
