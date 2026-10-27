@@ -13,9 +13,9 @@ describe("collapseWhitespace", () => {
 
 describe("stripBom", () => {
   it("removes one leading BOM only", () => {
-    expect(stripBom("﻿a")).toBe("a");
-    expect(stripBom("﻿﻿a")).toBe("﻿a");
-    expect(stripBom("a﻿")).toBe("a﻿");
+    expect(stripBom("\uFEFFa")).toBe("a");
+    expect(stripBom("\uFEFF\uFEFFa")).toBe("\uFEFFa");
+    expect(stripBom("a\uFEFF")).toBe("a\uFEFF");
     expect(stripBom("")).toBe("");
   });
 });
