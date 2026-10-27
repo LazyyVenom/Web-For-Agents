@@ -5,7 +5,7 @@ import {
   ACTION_DESTRUCTIVE_ATTR,
   ACTION_PARAM_ATTR,
 } from "../../shared/conventions";
-import { assertValidActionName, registerAgentAction } from "./registry";
+import { assertValidActionName, refreshAgentActions, registerAgentAction } from "./registry";
 import type { AgentActionSpec } from "./types";
 
 export type AgentHintProps = {
@@ -28,14 +28,15 @@ export function useAgentAction<I = Record<string, unknown>, R = unknown>(
 
   const { name, title, description, destructive, readOnly } = spec;
   const schemaKey = JSON.stringify(spec.inputSchema ?? null);
-  useEffect(
-    () =>
-      registerAgentAction(
-        () => specRef.current as unknown as AgentActionSpec,
-        () => elRef.current,
-      ),
-    [name, title, description, destructive, readOnly, schemaKey],
-  );
+  useEffect(() => {
+    const unregister = registerAgentAction(
+      () => specRef.current as unknown as AgentActionSpec,
+      () => elRef.current,
+    );
+    // The ref has attached by now; make sure element-backed actions are exposed.
+    refreshAgentActions();
+    return unregister;
+  }, [name, title, description, destructive, readOnly, schemaKey]);
 
   const hintProps: AgentHintProps = {
     [ACTION_ATTR]: name,
