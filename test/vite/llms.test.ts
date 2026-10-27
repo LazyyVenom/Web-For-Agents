@@ -40,4 +40,7 @@ describe("buildLlmsFullTxt", () => {
       "# Acme\n\n> Tools for people\n\nSource: https://a.com/\n\n# Home\n\n---\n\nSource: https://a.com/about\n\n# About\n\nUs\n",
     );
   });
+  it("ends with a single newline when no page has markdown", () => {
+    expect(buildLlmsFullTxt(site, [{ route: "/z", title: "Z", url: "https://a.com/z" }])).toBe("# Acme\n\n> Tools for people\n");
+  });
 });

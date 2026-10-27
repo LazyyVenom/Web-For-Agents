@@ -48,5 +48,5 @@ export function buildLlmsFullTxt(site: Site, pages: LlmsPage[]): string {
   const blocks = sortPages(pages)
     .filter((p) => p.markdown !== undefined)
     .map((p) => `Source: ${p.url}\n\n${p.markdown!.trim()}`);
-  return head + "\n\n" + blocks.join("\n\n---\n\n") + "\n";
+  return [head, blocks.join("\n\n---\n\n")].filter(Boolean).join("\n\n") + "\n";
 }
