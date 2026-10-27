@@ -56,12 +56,22 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "happy-dom": "^21.0.4",
+    "turndown": "^7",
+    "turndown-plugin-gfm": "^1"
+  },
   "peerDependencies": {
     "react": ">=18",
-    "vite": ">=5"
+    "vite": ">=5",
+    "react-dom": ">=18",
+    "playwright-core": ">=1.40"
   },
   "peerDependenciesMeta": {
     "vite": {
+      "optional": true
+    },
+    "playwright-core": {
       "optional": true
     }
   },
@@ -71,12 +81,14 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
-    "happy-dom": "^21.0.4",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tsup": "^9.0.0",
     "typescript": "^6.0.3",
     "vite": "^8.3.5",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "@types/turndown": "^5.0.6",
+    "playwright-core": "^1.64.1",
+    "react-router": "^7"
   }
 }

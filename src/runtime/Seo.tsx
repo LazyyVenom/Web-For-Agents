@@ -1,6 +1,7 @@
 import { createContext, createElement, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { buildHeadTags } from "./buildHeadTags";
+import { HEAD_OWNED_ATTR } from "../shared/conventions";
 import { applyHeadTags, removeHeadTag } from "./headManager";
 import type { HeadTag, SeoDefaults, SeoProps } from "./types";
 
@@ -15,6 +16,7 @@ interface Store {
   base: HeadTag[];
   stack: Entry[];
   applied: Set<string>;
+  seeded: boolean;
 }
 
 let seq = 0;
@@ -24,7 +26,7 @@ const stores = new WeakMap<Document, Store>();
 function getStore(doc: Document): Store {
   let s = stores.get(doc);
   if (!s) {
-    s = { base: [], stack: [], applied: new Set() };
+    s = { base: [], stack: [], applied: new Set(), seeded: false };
     stores.set(doc, s);
   }
   return s;
@@ -32,12 +34,21 @@ function getStore(doc: Document): Store {
 
 function flush(doc: Document): void {
   const store = getStore(doc);
+  if (!store.seeded) {
+    // Adopt tags left by a prerender so ones the client never produces get removed.
+    store.seeded = true;
+    for (const el of doc.head.querySelectorAll(`[${HEAD_OWNED_ATTR}]`)) {
+      const key = el.getAttribute(HEAD_OWNED_ATTR);
+      if (key) store.applied.add(key);
+    }
+  }
   const merged = new Map<string, HeadTag>();
   for (const tag of store.base) merged.set(tag.key, tag);
   for (const entry of [...store.stack].sort((a, b) => a.order - b.order)) for (const tag of entry.tags) merged.set(tag.key, tag);
   for (const key of store.applied) if (!merged.has(key)) removeHeadTag(key, doc);
   applyHeadTags([...merged.values()], doc);
   store.applied = new Set(merged.keys());
+  if (merged.size === 0) store.seeded = false;
 }
 
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;

@@ -1,25 +1,8 @@
+import { AI_BOTS } from "../shared/bots";
+import { SITEMAP_PATH } from "../shared/conventions";
 import type { ResolvedOptions } from "./options";
 
-export const AI_BOTS: { training: readonly string[]; search: readonly string[] } = {
-  training: [
-    "GPTBot",
-    "ClaudeBot",
-    "CCBot",
-    "Google-Extended",
-    "Applebot-Extended",
-    "Meta-ExternalAgent",
-    "Bytespider",
-    "cohere-training-data-crawler",
-  ],
-  search: [
-    "OAI-SearchBot",
-    "ChatGPT-User",
-    "Claude-SearchBot",
-    "Claude-User",
-    "PerplexityBot",
-    "Perplexity-User",
-  ],
-};
+export { AI_BOTS };
 
 export function buildRobots(opts: ResolvedOptions): string {
   const { ai, disallow = [] } = opts.robots;
@@ -45,7 +28,7 @@ export function buildRobots(opts: ResolvedOptions): string {
   if (blocked.length) {
     blocks.push([...blocked.map((b) => `User-agent: ${b}`), "Disallow: /"].join("\n"));
   }
-  if (opts.sitemap) blocks.push(`Sitemap: ${opts.siteUrl}/sitemap.xml`);
+  if (opts.sitemap) blocks.push(`Sitemap: ${opts.siteUrl}${SITEMAP_PATH}`);
 
   return blocks.join("\n\n") + "\n";
 }

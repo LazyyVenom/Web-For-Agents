@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { normalizeRoute, resolveOptions } from "../../src/vite/options";
+import { normalizeRoute as sharedNormalizeRoute } from "../../src/shared/conventions";
+import { agentOutputs, isExcluded, normalizeRoute, resolveOptions } from "../../src/vite/options";
 
 const robots = { ai: { training: "block", search: "allow" } } as const;
 
@@ -88,6 +89,9 @@ describe("option edge cases", () => {
 });
 
 describe("normalizeRoute", () => {
+  it("is re-exported from shared/conventions", () => {
+    expect(normalizeRoute).toBe(sharedNormalizeRoute);
+  });
   it("normalizes", () => {
     expect(normalizeRoute("")).toBe("/");
     expect(normalizeRoute("about/")).toBe("/about");
@@ -104,5 +108,85 @@ describe("normalizeRoute", () => {
     expect(() =>
       resolveOptions({ siteUrl: "https://a.com", robots: { ai, disallow: ["/a\r\nAllow: /"] } }),
     ).toThrow(/\[web-for-agents\]/);
+  });
+});
+
+describe("stage 2 options", () => {
+  const base = { siteUrl: "https://a.com", robots } as const;
+
+  it("prerender defaults", () => {
+    const r = resolveOptions({ ...base, robots: { ai: { training: "allow", search: "allow" } } });
+    expect(r.prerender).toEqual({
+      crawl: true,
+      renderer: "happy-dom",
+      fallback: false,
+      routeRenderers: [],
+      timeoutMs: 15000,
+      concurrency: 4,
+      maxRoutes: 500,
+    });
+    expect(r.markdown).toEqual({ contentSelector: "main" });
+    expect(r.llms).toEqual({});
+    expect(r.warnings).toEqual([]);
+    expect(r.exclude).toEqual([]);
+    const ex = ["/admin/*"];
+    expect(resolveOptions({ ...base, exclude: ex }).exclude).toEqual(ex);
+  });
+
+  it("prerender: false disables markdown and llms", () => {
+    const r = resolveOptions({ ...base, prerender: false });
+    expect(r.prerender).toBe(false);
+    expect(r.markdown).toBe(false);
+    expect(r.llms).toBe(false);
+    expect(r.warnings).toEqual([]);
+    const w = resolveOptions({ ...base, prerender: false, markdown: {}, llms: {} });
+    expect(w.warnings.filter((m) => m.includes("require prerender"))).toHaveLength(1);
+  });
+
+  it("rejects bad prerender values", () => {
+    const bad = (p: object, field: string) =>
+      expect(() => resolveOptions({ ...base, prerender: p } as never)).toThrow(
+        `[web-for-agents] prerender.${field}`,
+      );
+    bad({ renderer: "firefox" }, "renderer");
+    bad({ fallback: "safari" }, "fallback");
+    bad({ timeoutMs: 0 }, "timeoutMs");
+    bad({ concurrency: 1.5 }, "concurrency");
+    bad({ maxRoutes: -1 }, "maxRoutes");
+  });
+
+  it("warns when AI crawlers are blocked but agent files are on", () => {
+    const warn = (ai: object, extra: object = {}) =>
+      resolveOptions({ ...base, robots: { ai }, ...extra } as never).warnings;
+    const t = warn({ training: "block", search: "allow" });
+    expect(t).toHaveLength(1);
+    expect(t[0]).toBe(
+      "[web-for-agents] robots.ai blocks AI training crawlers, but llms.txt, llms-full.txt, .md files are still generated and publicly fetchable",
+    );
+    for (const s of ["blocks AI training crawlers", "llms.txt", "llms-full.txt", ".md files"]) {
+      expect(t[0]).toContain(s);
+    }
+    expect(warn({ training: "allow", search: "block" })[0]).toContain("blocks AI search crawlers");
+    expect(warn({ training: "block", search: "block" })[0]).toContain(
+      "blocks AI training and search crawlers",
+    );
+    expect(warn({ training: "allow", search: "allow", overrides: { GPTBot: "block" } })).toEqual([]);
+    const nm = warn({ training: "block", search: "allow" }, { markdown: false })[0]!;
+    expect(nm).toContain("llms.txt");
+    expect(nm).not.toContain(".md files");
+    expect(nm).not.toContain("llms-full.txt");
+    expect(warn({ training: "block", search: "allow" }, { prerender: false })).toEqual([]);
+  });
+});
+
+describe("agentOutputs and isExcluded", () => {
+  it("lists enabled agent files", () => {
+    const o = { siteUrl: "https://a.com", robots } as const;
+    expect(agentOutputs(resolveOptions(o))).toEqual(["llms.txt", "llms-full.txt", ".md files"]);
+    expect(agentOutputs(resolveOptions({ ...o, prerender: false }))).toEqual([]);
+  });
+  it("isExcluded is exported", () => {
+    expect(isExcluded("/a/b", ["/a/*"])).toBe(true);
+    expect(isExcluded("/c", ["/a/*"])).toBe(false);
   });
 });

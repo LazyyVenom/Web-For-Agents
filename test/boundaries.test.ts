@@ -1,0 +1,79 @@
+import { describe, it, expect } from "vitest";
+import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
+
+const SRC = resolve(__dirname, "../src");
+
+function walk(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).flatMap((n) => {
+    const p = join(dir, n);
+    return statSync(p).isDirectory() ? walk(p) : /\.tsx?$/.test(n) && !n.endsWith(".d.ts") ? [p] : [];
+  });
+}
+
+function specifiers(src: string): string[] {
+  const out: string[] = [];
+  const re = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)["']([^"']+)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(src))) out.push(m[1]!);
+  return out;
+}
+
+const inDir = (file: string, dir: string) => file === dir || file.startsWith(dir + sep);
+const stripExt = (p: string) => p.replace(/\.(tsx?|js)$/, "");
+
+const runtimeFiles = [...walk(join(SRC, "runtime")), join(SRC, "index.ts")];
+const sharedFiles = walk(join(SRC, "shared"));
+const markdownFile = join(SRC, "shared", "markdown");
+const vite = join(SRC, "vite");
+
+function resolved(file: string, spec: string): string {
+  return stripExt(resolve(dirname(file), spec));
+}
+
+describe("import boundaries", () => {
+  it("scans files", () => {
+    expect(runtimeFiles.length).toBeGreaterThan(1);
+    expect(sharedFiles.length).toBeGreaterThan(0);
+  });
+
+  it("runtime, shared and index never reach src/vite or import vite", () => {
+    for (const file of [...runtimeFiles, ...sharedFiles]) {
+      for (const spec of specifiers(readFileSync(file, "utf8"))) {
+        const where = `${relative(SRC, file)} -> ${spec}`;
+        expect(spec === "vite" || spec.startsWith("vite/"), where).toBe(false);
+        if (spec.startsWith(".")) expect(inDir(resolved(file, spec), vite), where).toBe(false);
+      }
+    }
+  });
+
+  it("shared stays self-contained", () => {
+    for (const file of sharedFiles) {
+      const isMarkdown = stripExt(file) === markdownFile;
+      for (const spec of specifiers(readFileSync(file, "utf8"))) {
+        const where = `${relative(SRC, file)} -> ${spec}`;
+        expect(spec.startsWith("node:"), where).toBe(false);
+        if (spec.startsWith(".")) {
+          expect(inDir(resolved(file, spec), join(SRC, "shared")), where).toBe(true);
+        } else {
+          expect(isMarkdown && (spec === "turndown" || spec === "turndown-plugin-gfm"), where).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("runtime and index never import shared/markdown", () => {
+    for (const file of runtimeFiles) {
+      for (const spec of specifiers(readFileSync(file, "utf8"))) {
+        if (spec.startsWith(".")) expect(resolved(file, spec), `${relative(SRC, file)} -> ${spec}`).not.toBe(markdownFile);
+      }
+    }
+  });
+  it("leaf shared modules import nothing", () => {
+    for (const name of ["errors", "url", "bots", "conventions"]) {
+      const file = join(SRC, "shared", `${name}.ts`);
+      expect(specifiers(readFileSync(file, "utf8")), relative(SRC, file)).toEqual([]);
+    }
+  });
+});

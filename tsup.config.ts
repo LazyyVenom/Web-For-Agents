@@ -5,5 +5,5 @@ export default defineConfig({
   format: ["esm"],
   dts: true,
   clean: true,
-  external: ["react", "vite"],
+  external: ["react", "react-dom", "react-dom/client", "vite", "happy-dom", "turndown", "turndown-plugin-gfm", "playwright-core"],
 });
