@@ -3,7 +3,7 @@ import type { Root } from "react-dom/client";
 import type { ReactNode } from "react";
 import { PRERENDERED_ATTR } from "../shared/conventions";
 
-/** Hydrates `container` when the page was prerendered, otherwise renders `app` into it with `createRoot`. */
+/** Hydrates `container` when the page was prerendered and the container has content, otherwise renders `app` into it with `createRoot`. */
 export function hydrateApp(
   container: Element,
   app: ReactNode,

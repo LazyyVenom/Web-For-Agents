@@ -108,7 +108,7 @@ useEffect(() => {
 }, []);
 ```
 
-`holdPrerender()` returns an idempotent release function and does nothing in a normal browser session. A route that is not ready after `prerender.timeoutMs` (default 15000) fails the build.
+`holdPrerender()` returns an idempotent release function. It sets `window.__WFA_READY__`, which only the prerenderer reads, so it is harmless in a normal browser session. A route that is not ready after `prerender.timeoutMs` (default 15000) fails the build.
 
 Pages that never go idle (polling requests, a long-lived `fetch` stream, a DOM that keeps changing) time out the same way. Hold and release around the work the page actually needs, so the renderer captures it once that is done, or raise `prerender.timeoutMs` for slow routes.
 

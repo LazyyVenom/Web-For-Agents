@@ -14,7 +14,9 @@ import { extractHtmlFacts, markdownAlternate } from "./html";
 import { parseRobots } from "./robots";
 
 export interface AuditOptions {
+  /** Per-request timeout in milliseconds. Default 10000. */
   timeoutMs?: number;
+  /** User-Agent header sent with every request. Default: a web-for-agents-audit identifier. */
   userAgent?: string;
   /**
    * Agent map location. A bare file name ("agent-map.json") is probed like agents.json; a path starting

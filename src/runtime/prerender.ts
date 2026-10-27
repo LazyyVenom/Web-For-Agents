@@ -14,7 +14,8 @@ function sync(): void {
 
 /**
  * Delays the prerender capture until the returned function is called. The release function is
- * idempotent. Does nothing outside a browser.
+ * idempotent. Only the prerenderer reads the flag it sets, so it is harmless in normal sessions;
+ * outside a browser it does nothing.
  */
 export function holdPrerender(): () => void {
   if (typeof window === "undefined") return () => {};
