@@ -7,11 +7,11 @@ const run = (html: string, route = "/about", pageUrl = "http://h/about") =>
 
 describe("analyzePage", () => {
   it("content precedence: marker", () => {
-    const r = run(page(`<main>M</main><div data-wfa-content>A<div data-wfa-content>NESTED</div></div><div data-wfa-content>B</div>`));
+    const r = run(page(`<main>MAINTXT</main><div data-wfa-content>A<div data-wfa-content>NESTED</div></div><div data-wfa-content>B</div>`));
     expect(r.contentSource).toBe("marker");
     expect(r.contentHtml.match(/NESTED/g)?.length).toBe(1);
     expect(r.contentHtml).toContain("B");
-    expect(r.contentHtml).not.toContain("M</main>");
+    expect(r.contentHtml).not.toContain("MAINTXT");
   });
 
   it("content precedence: selector then body", () => {
@@ -55,6 +55,7 @@ describe("analyzePage", () => {
 
   it("hasText", () => {
     expect(run(page(`<div id="root"></div><script>x</script>`)).hasText).toBe(false);
+    expect(run(page(`<noscript>enable js</noscript><template>t</template>`)).hasText).toBe(false);
     expect(run(page(`<p>hi</p>`)).hasText).toBe(true);
   });
 });

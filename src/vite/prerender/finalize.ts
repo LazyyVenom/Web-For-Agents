@@ -1,10 +1,8 @@
 import { PRERENDERED_ATTR, MARKDOWN_MIME } from "../../shared/conventions";
 import { parseHtml } from "./dom";
 import { routeDepth } from "./paths";
+import { PROBE_ATTR, TEMP_BASE_ATTR } from "./probe";
 
-// Must match PROBE_ATTR / TEMP_BASE_ATTR in the prerender server (Task 3).
-const PROBE_ATTR = "data-wfa-probe";
-const TEMP_BASE_ATTR = "data-wfa-temp-base";
 
 export function finalizeHtml(
   html: string,
@@ -29,11 +27,14 @@ export function finalizeHtml(
     }
 
     if (opts.markdownUrl) {
-      const link = document.createElement("link");
-      link.setAttribute("rel", "alternate");
-      link.setAttribute("type", MARKDOWN_MIME);
+      let link = document.head.querySelector(`link[rel="alternate"][type="${MARKDOWN_MIME}"]`);
+      if (!link) {
+        link = document.createElement("link");
+        link.setAttribute("rel", "alternate");
+        link.setAttribute("type", MARKDOWN_MIME);
+        document.head.appendChild(link);
+      }
       link.setAttribute("href", opts.markdownUrl);
-      document.head.appendChild(link);
     }
 
     return "<!DOCTYPE html>" + document.documentElement.outerHTML;

@@ -44,7 +44,7 @@ export function analyzePage(
     let hasText = false;
     if (document.body) {
       const body = document.body.cloneNode(true) as Element;
-      body.querySelectorAll("script, style").forEach((el) => el.remove());
+      body.querySelectorAll("script, style, noscript, template").forEach((el) => el.remove());
       hasText = (body.textContent ?? "").trim() !== "";
     }
 

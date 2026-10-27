@@ -34,6 +34,16 @@ describe("finalizeHtml", () => {
     expect(none).not.toContain("text/markdown");
   });
 
+  it("markdown link is idempotent", () => {
+    const head = `<link rel="alternate" type="text/markdown" href="/old.md">`;
+    const out = finalizeHtml(base(head), { route: "/a", relativeBase: false, markdownUrl: "https://a.com/a.md" });
+    const { document, dispose } = parseHtml(out);
+    const l = document.head.querySelectorAll('link[type="text/markdown"]');
+    expect(l.length).toBe(1);
+    expect(l[0]!.getAttribute("href")).toBe("https://a.com/a.md");
+    dispose();
+  });
+
   it("rewrites relative assets", () => {
     const head = `<script type="module" src="./assets/a.js"></script><link rel="stylesheet" href="./assets/a.css">`;
     const body = `<img src="./img.png"><a href="#a"></a><img src="/x"><img src="https://e.com/y.png">`;
