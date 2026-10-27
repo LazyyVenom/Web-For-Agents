@@ -20,19 +20,11 @@ import { Window } from "happy-dom";
 import { formatFailures } from "../../../src/vite/prerender/crawl";
 import { startStaticServer, type StaticServer } from "../../../src/vite/prerender/server";
 import type { RendererName } from "../../../src/vite/options";
+import { probeChrome } from "../../helpers/chrome";
 
 const dir = fileURLToPath(new URL("../../fixtures/static-app/", import.meta.url));
 const shell = prepareShell(readFileSync(dir + "index.html", "utf8"), { relativeBase: false });
 
-async function probeChrome(): Promise<boolean> {
-  try {
-    const r = await createChromeRenderer("chrome");
-    await r.close();
-    return true;
-  } catch {
-    return false;
-  }
-}
 const chromeAvailable = await probeChrome();
 
 let server: StaticServer;

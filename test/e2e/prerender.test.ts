@@ -8,21 +8,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { build } from "vite";
 import { webForAgents } from "../../src/vite/index";
 import type { WebForAgentsOptions } from "../../src/vite/options";
-import { createChromeRenderer } from "../../src/vite/prerender/renderers";
 import { startStaticServer } from "../../src/vite/prerender/server";
+import { probeChrome } from "../helpers/chrome";
 import { copyFixture, distFiles, jsBundle, makeTempDir, removeFixtureCopies } from "./helpers";
 
 afterAll(removeFixtureCopies);
 
-async function chromeWorks(): Promise<boolean> {
-  try {
-    await (await createChromeRenderer("chrome")).close();
-    return true;
-  } catch {
-    return false;
-  }
-}
-const chromeAvailable = await chromeWorks();
+const chromeAvailable = await probeChrome();
 
 interface Built {
   dist: string;

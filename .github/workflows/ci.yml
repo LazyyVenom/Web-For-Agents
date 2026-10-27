@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # ubuntu runners ship Google Chrome: fail if it cannot launch instead of skipping the Chrome tests.
+  WFA_CHROME: require
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Vite 8 and plugin-react 6 need Node ^20.19 || >=22.12, so 20 is pinned to 20.19.
+        node: ["20.19", "22", "24"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm pack --dry-run
+      - run: npm run demo:build
+
+  vite-compat:
+    name: Vite ${{ matrix.vite }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        vite: ["5", "6", "7", "8"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      # Installs vite@<major> and the matching @vitejs/plugin-react with --no-save.
+      - run: node scripts/install-vite.mjs ${{ matrix.vite }}
+      - run: npx vitest run test/vite test/e2e test/cli/audit.e2e.test.ts
+        env:
+          # test/vite/viteVersion.test.ts fails if the tests did not get this Vite major.
+          WFA_EXPECT_VITE: ${{ matrix.vite }}
+      - run: npm run demo:build
+
+  pack:
+    name: Packed package (Vite ${{ matrix.vite }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        vite: ["5", "6", "7", "8"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run test:pack
+        env:
+          PACK_VITE: ${{ matrix.vite }}

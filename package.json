@@ -5,8 +5,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/LazyyVenom/web-for-agents.git"
+    "url": "git+https://github.com/LazyyVenom/Web-For-Agents.git"
   },
+  "bugs": {
+    "url": "https://github.com/LazyyVenom/Web-For-Agents/issues"
+  },
+  "homepage": "https://github.com/LazyyVenom/Web-For-Agents#readme",
   "keywords": [
     "seo",
     "llm",
@@ -73,6 +77,7 @@
     "demo:build": "vite build examples/demo --outDir dist-demo --emptyOutDir",
     "prepublishOnly": "npm run build && npm test && npm run typecheck",
     "test": "vitest run",
+    "test:pack": "npm run build && vitest run --config vitest.pack.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
