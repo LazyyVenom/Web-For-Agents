@@ -8,7 +8,7 @@ export function hydrateApp(
   app: ReactNode,
   options?: { onRecoverableError?: (error: unknown) => void },
 ): Root {
-  if (document.documentElement.hasAttribute(PRERENDERED_ATTR)) {
+  if (document.documentElement.hasAttribute(PRERENDERED_ATTR) && container.hasChildNodes()) {
     return hydrateRoot(container, app, options?.onRecoverableError ? { onRecoverableError: options.onRecoverableError } : undefined);
   }
   const root = createRoot(container);
