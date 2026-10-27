@@ -1,7 +1,6 @@
 import type { Plugin } from "vite";
 import { agentMapExtension } from "./agentMap";
 import { createBuildPlugin } from "./buildPlugin";
-import type { LlmsSection } from "./llms";
 import {
   resolveOptions,
   type AgentMapOptions,
@@ -13,7 +12,6 @@ import {
   type Rule,
   type WebForAgentsOptions,
 } from "./options";
-import type { ExtensionContext, ExtensionPage, PrerenderExtension } from "./prerender/extensions";
 import { overlayPlugin } from "./overlay";
 import { AI_BOTS } from "./robots";
 
@@ -41,8 +39,4 @@ export type {
   AgentMapOptions,
   OverlayPluginOptions,
   RendererName,
-  PrerenderExtension,
-  ExtensionContext,
-  ExtensionPage,
-  LlmsSection,
 };

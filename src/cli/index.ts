@@ -5,8 +5,6 @@ import { formatText } from "./report";
 
 export { audit } from "./audit";
 export type { AuditOptions, AuditReport } from "./audit";
-export { parseCliArgs, normalizeInputUrl } from "./args";
-export type { CliArgs } from "./args";
 export { formatText } from "./report";
 export type { CheckId, CheckResult, CheckStatus } from "./checks";
 
