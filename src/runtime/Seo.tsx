@@ -1,7 +1,8 @@
 import { createContext, createElement, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { buildHeadTags } from "./buildHeadTags";
-import { applyHeadTags, OWNED_ATTR, removeHeadTag } from "./headManager";
+import { HEAD_OWNED_ATTR } from "../shared/conventions";
+import { applyHeadTags, removeHeadTag } from "./headManager";
 import type { HeadTag, SeoDefaults, SeoProps } from "./types";
 
 export type { HeadTag, SeoDefaults, SeoProps };
@@ -36,8 +37,8 @@ function flush(doc: Document): void {
   if (!store.seeded) {
     // Adopt tags left by a prerender so ones the client never produces get removed.
     store.seeded = true;
-    for (const el of doc.head.querySelectorAll(`[${OWNED_ATTR}]`)) {
-      const key = el.getAttribute(OWNED_ATTR);
+    for (const el of doc.head.querySelectorAll(`[${HEAD_OWNED_ATTR}]`)) {
+      const key = el.getAttribute(HEAD_OWNED_ATTR);
       if (key) store.applied.add(key);
     }
   }

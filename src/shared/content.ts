@@ -1,8 +1,11 @@
-import { CONTENT_ATTR } from "./conventions";
+import { CONTENT_ATTR, EXCLUDE_ATTR } from "./conventions";
 
 export type ContentSource = "marker" | "selector" | "body";
 
-const STRIP = `script, style, noscript, template, nav, [data-wfa-exclude], [hidden], [aria-hidden="true"]`;
+/** Default for `markdown.contentSelector`. */
+export const DEFAULT_CONTENT_SELECTOR = "main";
+
+const STRIP = `script, style, noscript, template, nav, [${EXCLUDE_ATTR}], [hidden], [aria-hidden="true"]`;
 const BODY_STRIP = "header, nav, footer, aside";
 
 /**
@@ -26,7 +29,7 @@ export function selectContentRegion(
     for (const m of markers) element.appendChild(m.cloneNode(true));
   } else {
     try {
-      selected = doc.querySelector(opts.contentSelector ?? "main");
+      selected = doc.querySelector(opts.contentSelector ?? DEFAULT_CONTENT_SELECTOR);
     } catch {
       selected = null;
     }

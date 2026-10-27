@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  byRoute,
+  isRelativeBase,
   isSafeRoute,
   linkToRoute,
   publicMdUrl,
@@ -7,6 +9,7 @@ import {
   routeDepth,
   routeHtmlFile,
   routeMdFile,
+  trimTrailingSlash,
 } from "../../src/vite/prerender/paths";
 
 describe("route file helpers", () => {
@@ -33,6 +36,23 @@ describe("route file helpers", () => {
     expect(publicUrl("https://a.com", "/x")).toBe("https://a.com/x");
     expect(publicMdUrl("https://a.com/sub", "/about")).toBe("https://a.com/sub/about.md");
     expect(publicMdUrl("https://a.com", "/")).toBe("https://a.com/index.md");
+    expect(publicMdUrl("https://a.com/", "/caf%C3%A9")).toBe("https://a.com/caf%C3%A9.md");
+    expect(routeMdFile("/caf%C3%A9")).toBe("café.md");
+  });
+  it("trimTrailingSlash", () => {
+    expect(trimTrailingSlash("https://a.com//")).toBe("https://a.com");
+    expect(trimTrailingSlash("/sub/")).toBe("/sub");
+    expect(trimTrailingSlash("/")).toBe("");
+  });
+  it("byRoute", () => {
+    const sorted = [{ route: "/b" }, { route: "/" }, { route: "/a/b" }, { route: "/a" }].sort(byRoute);
+    expect(sorted.map((r) => r.route)).toEqual(["/", "/a", "/a/b", "/b"]);
+  });
+  it("isRelativeBase", () => {
+    for (const b of ["", "./", "./x/", "https://cdn.com/x/", "http://cdn.com/", "//cdn.com/x/"]) {
+      expect(isRelativeBase(b), b).toBe(true);
+    }
+    for (const b of ["/", "/sub/"]) expect(isRelativeBase(b), b).toBe(false);
   });
 });
 

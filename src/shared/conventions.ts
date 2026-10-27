@@ -9,11 +9,19 @@ export const CONTENT_ATTR = "data-wfa-content";
 export const EXCLUDE_ATTR = "data-wfa-exclude";
 export const PRERENDERED_ATTR = "data-wfa-prerendered";
 export const READY_GLOBAL = "__WFA_READY__";
+/** Marks head tags managed by <Seo>; the value is the tag key. */
+export const HEAD_OWNED_ATTR = "data-wfa";
+
+/** "" -> "/", "about/" -> "/about", "/a?x=1#h" -> "/a". Query/hash stripped; stays URL-encoded. */
+export function normalizeRoute(path: string): string {
+  let p = path.split("#")[0]!.split("?")[0]!;
+  if (!p.startsWith("/")) p = "/" + p;
+  if (p.length > 1) p = p.replace(/\/+$/, "");
+  return p === "" ? "/" : p;
+}
 
 /** "/" -> "/index.md", "/about/" -> "/about.md". Query/hash stripped; stays URL-encoded. */
 export function markdownPathFor(pathname: string): string {
-  let p = pathname.split("#")[0]!.split("?")[0]!;
-  if (!p.startsWith("/")) p = "/" + p;
-  p = p.replace(/\/+$/, "");
-  return p === "" ? "/index.md" : p + ".md";
+  const p = normalizeRoute(pathname);
+  return p === "/" ? "/index.md" : p + ".md";
 }

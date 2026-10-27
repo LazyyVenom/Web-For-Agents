@@ -1,14 +1,8 @@
+import { resolveUrl } from "../shared/url";
 import type { HeadTag, SeoDefaults, SeoProps } from "./types";
 
-function resolveUrl(value: string | undefined, siteUrl: string | undefined): string | undefined {
-  if (value === undefined) return undefined;
-  if (!siteUrl) return value;
-  try {
-    return new URL(value, siteUrl).toString();
-  } catch {
-    return value;
-  }
-}
+const absolute = (value: string | undefined, siteUrl: string | undefined): string | undefined =>
+  value === undefined ? undefined : resolveUrl(value, siteUrl);
 
 export function buildHeadTags(props: SeoProps, defaults: SeoDefaults = {}): HeadTag[] {
   const byKey = new Map<string, HeadTag>();
@@ -28,8 +22,8 @@ export function buildHeadTags(props: SeoProps, defaults: SeoDefaults = {}): Head
   if (title !== undefined) byKey.set("title", { kind: "title", key: "title", text: title });
 
   const description = props.description ?? defaults.description;
-  const image = resolveUrl(props.image ?? defaults.image, defaults.siteUrl);
-  const canonical = resolveUrl(props.canonical, defaults.siteUrl);
+  const image = absolute(props.image ?? defaults.image, defaults.siteUrl);
+  const canonical = absolute(props.canonical, defaults.siteUrl);
 
   meta("name", "description", description);
   if (canonical !== undefined) {

@@ -1,5 +1,21 @@
-import { markdownPathFor } from "../../shared/conventions";
-import { normalizeRoute } from "../options";
+import { markdownPathFor, normalizeRoute } from "../../shared/conventions";
+
+export function trimTrailingSlash(s: string): string {
+  return s.replace(/\/+$/, "");
+}
+
+/** Orders anything with a `route` by route ("/" first, then code-unit order). */
+export function byRoute(a: { route: string }, b: { route: string }): number {
+  return a.route < b.route ? -1 : a.route > b.route ? 1 : 0;
+}
+
+/**
+ * True for Vite bases that are not an absolute path on the site's own origin: "" and "./…"
+ * (relative), and full URLs ("https://cdn…", "//cdn…"). The app is then mounted at "/" for prerendering.
+ */
+export function isRelativeBase(base: string): boolean {
+  return base === "" || base.startsWith(".") || base.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(base);
+}
 
 function segments(route: string): string[] {
   return route.split("/").filter((s) => s !== "");
@@ -27,11 +43,12 @@ export function routeDepth(route: string): number {
 }
 
 export function publicUrl(siteUrl: string, route: string): string {
-  return siteUrl.replace(/\/+$/, "") + normalizeRoute(route);
+  return trimTrailingSlash(siteUrl) + normalizeRoute(route);
 }
 
+/** Public .md URL; stays URL-encoded (routeMdFile decodes, for file paths only). */
 export function publicMdUrl(siteUrl: string, route: string): string {
-  return siteUrl.replace(/\/+$/, "") + "/" + routeMdFile(route);
+  return trimTrailingSlash(siteUrl) + markdownPathFor(route);
 }
 
 export function isSafeRoute(route: string): boolean {
@@ -60,7 +77,7 @@ export function linkToRoute(href: string, origin: string, base: string): string 
   if (u.protocol !== "http:" && u.protocol !== "https:") return null;
   if (u.origin !== new URL(origin).origin) return null;
 
-  const b = base.replace(/\/+$/, "");
+  const b = trimTrailingSlash(base);
   let path = u.pathname;
   if (b !== "") {
     if (path !== b && !path.startsWith(b + "/")) return null;

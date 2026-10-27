@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from "vitest";
-import { selectContentRegion } from "../../src/shared/content";
+import { DEFAULT_CONTENT_SELECTOR, selectContentRegion } from "../../src/shared/content";
 
 function setBody(html: string) {
   document.body.innerHTML = html;
@@ -55,5 +55,11 @@ describe("selectContentRegion", () => {
     expect(document.body.innerHTML).toBe(before);
     expect(element.tagName).toBe("DIV");
     expect(element.parentNode).toBeNull();
+  });
+});
+
+describe("DEFAULT_CONTENT_SELECTOR", () => {
+  it("is main", () => {
+    expect(DEFAULT_CONTENT_SELECTOR).toBe("main");
   });
 });

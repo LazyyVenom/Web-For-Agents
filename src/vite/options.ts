@@ -1,3 +1,10 @@
+import { DEFAULT_CONTENT_SELECTOR } from "../shared/content";
+import { normalizeRoute } from "../shared/conventions";
+import { LOG_PREFIX } from "../shared/errors";
+import { trimTrailingSlash } from "./prerender/paths";
+
+export { normalizeRoute };
+
 export type Rule = "allow" | "block";
 
 export interface WebForAgentsOptions {
@@ -66,17 +73,8 @@ export interface ResolvedOptions {
   warnings: string[];
 }
 
-const PREFIX = "[web-for-agents]";
-
 const POLICY_EXAMPLE =
   'robots: { ai: { training: "block", search: "allow" } }';
-
-export function normalizeRoute(path: string): string {
-  let p = path.split("#")[0]!.split("?")[0]!;
-  if (!p.startsWith("/")) p = "/" + p;
-  if (p.length > 1) p = p.replace(/\/+$/, "");
-  return p === "" ? "/" : p;
-}
 
 function isRule(v: unknown): v is Rule {
   return v === "allow" || v === "block";
@@ -100,7 +98,7 @@ const RENDERERS: readonly string[] = ["happy-dom", "chrome", "msedge"];
 
 function resolvePrerender(input: PrerenderOptions): ResolvedPrerender {
   const bad = (field: string, expected: string): never => {
-    throw new Error(`${PREFIX} prerender.${field} must be ${expected}`);
+    throw new Error(`${LOG_PREFIX} prerender.${field} must be ${expected}`);
   };
   const posInt = (field: string, v: unknown, d: number): number => {
     if (v === undefined) return d;
@@ -154,38 +152,38 @@ export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
     url = undefined;
   }
   if (!url || (url.protocol !== "http:" && url.protocol !== "https:")) {
-    throw new Error(`${PREFIX} siteUrl must be an absolute http(s) URL`);
+    throw new Error(`${LOG_PREFIX} siteUrl must be an absolute http(s) URL`);
   }
 
   if (url.search || url.hash) {
-    throw new Error(`${PREFIX} siteUrl must not contain a query or hash`);
+    throw new Error(`${LOG_PREFIX} siteUrl must not contain a query or hash`);
   }
 
   const ai = input.robots?.ai;
   if (!ai || ai.training === undefined || ai.search === undefined) {
     throw new Error(
-      `${PREFIX} robots.ai.training and robots.ai.search are required, e.g. ${POLICY_EXAMPLE}`,
+      `${LOG_PREFIX} robots.ai.training and robots.ai.search are required, e.g. ${POLICY_EXAMPLE}`,
     );
   }
   if (!isRule(ai.training) || !isRule(ai.search)) {
-    throw new Error(`${PREFIX} robots.ai.training and robots.ai.search must be "allow" or "block"`);
+    throw new Error(`${LOG_PREFIX} robots.ai.training and robots.ai.search must be "allow" or "block"`);
   }
   for (const [bot, rule] of Object.entries(ai.overrides ?? {})) {
     if (/[\r\n]/.test(bot)) {
-      throw new Error(`${PREFIX} robots.ai.overrides bot names must not contain line breaks`);
+      throw new Error(`${LOG_PREFIX} robots.ai.overrides bot names must not contain line breaks`);
     }
     if (!isRule(rule)) {
-      throw new Error(`${PREFIX} robots.ai.overrides.${bot} must be "allow" or "block"`);
+      throw new Error(`${LOG_PREFIX} robots.ai.overrides.${bot} must be "allow" or "block"`);
     }
   }
 
   for (const path of input.robots.disallow ?? []) {
     if (/[\r\n]/.test(path)) {
-      throw new Error(`${PREFIX} robots.disallow paths must not contain line breaks`);
+      throw new Error(`${LOG_PREFIX} robots.disallow paths must not contain line breaks`);
     }
   }
 
-  const siteUrl = input.siteUrl.replace(/\/+$/, "");
+  const siteUrl = trimTrailingSlash(input.siteUrl);
   const exclude = input.exclude ?? [];
   const routes = [...new Set(["/", ...(input.routes ?? []).map(normalizeRoute)])]
     .filter((r) => r === "/" || !isExcluded(r, exclude))
@@ -197,15 +195,15 @@ export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
   let llms: ResolvedOptions["llms"] = false;
   if (prerender === false) {
     if (input.markdown || input.llms) {
-      warnings.push(`${PREFIX} markdown and llms require prerender; they are disabled because prerender is false`);
+      warnings.push(`${LOG_PREFIX} markdown and llms require prerender; they are disabled because prerender is false`);
     }
   } else {
     if (input.markdown !== false) {
       const sel = input.markdown?.contentSelector;
       if (sel !== undefined && (typeof sel !== "string" || sel === "")) {
-        throw new Error(`${PREFIX} markdown.contentSelector must be a non-empty string`);
+        throw new Error(`${LOG_PREFIX} markdown.contentSelector must be a non-empty string`);
       }
-      markdown = { contentSelector: sel ?? "main" };
+      markdown = { contentSelector: sel ?? DEFAULT_CONTENT_SELECTOR };
     }
     if (input.llms !== false) llms = { ...input.llms };
   }
@@ -228,7 +226,7 @@ export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
   const files = agentOutputs(resolved);
   if (blocked.length > 0 && files.length > 0) {
     warnings.push(
-      `${PREFIX} robots.ai blocks AI ${blocked.join(" and ")} crawlers, but ${files.join(", ")} are still generated and publicly fetchable`,
+      `${LOG_PREFIX} robots.ai blocks AI ${blocked.join(" and ")} crawlers, but ${files.join(", ")} are still generated and publicly fetchable`,
     );
   }
   return resolved;

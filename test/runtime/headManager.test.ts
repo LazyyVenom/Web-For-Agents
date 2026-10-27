@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from "vitest";
-import { applyHeadTags, removeHeadTag, OWNED_ATTR } from "../../src/runtime/headManager";
+import { applyHeadTags, removeHeadTag } from "../../src/runtime/headManager";
+import { HEAD_OWNED_ATTR } from "../../src/shared/conventions";
 import type { HeadTag } from "../../src/runtime/types";
 
 const ogTitle = (content: string): HeadTag => ({
@@ -19,7 +20,7 @@ describe("headManager", () => {
     applyHeadTags([ogTitle("Hi")]);
     const els = document.head.querySelectorAll('meta[property="og:title"]');
     expect(els).toHaveLength(1);
-    expect(els[0].getAttribute(OWNED_ATTR)).toBe("property:og:title");
+    expect(els[0].getAttribute(HEAD_OWNED_ATTR)).toBe("property:og:title");
     expect(els[0].getAttribute("content")).toBe("Hi");
     expect(document.head.querySelectorAll('[data-wfa="property:og:title"]')).toHaveLength(1);
   });
@@ -30,7 +31,7 @@ describe("headManager", () => {
     const els = document.head.querySelectorAll('meta[property="og:title"]');
     expect(els).toHaveLength(1);
     expect(els[0].getAttribute("content")).toBe("new");
-    expect(els[0].hasAttribute(OWNED_ATTR)).toBe(true);
+    expect(els[0].hasAttribute(HEAD_OWNED_ATTR)).toBe(true);
     expect(document.title).toBe("New");
     expect(document.querySelectorAll("title")).toHaveLength(1);
   });

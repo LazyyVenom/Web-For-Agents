@@ -1,13 +1,11 @@
 import TurndownService from "turndown";
 import { gfm } from "turndown-plugin-gfm";
+import { resolveUrl } from "./url";
 
-function resolveUrl(value: string, pageUrl?: string): string {
-  if (!pageUrl || !value) return value;
-  try {
-    return new URL(value, pageUrl).href;
-  } catch {
-    return value;
-  }
+/** ` "title"` for a markdown link/image, or "" when there is no title attribute. */
+function titleSuffix(el: Element): string {
+  const title = el.getAttribute("title");
+  return title ? ` "${title.replace(/"/g, '\\"')}"` : "";
 }
 
 function escapeLinkTarget(url: string): string {
@@ -45,9 +43,7 @@ function createService(pageUrl?: string): TurndownService {
     filter: (node) => node.nodeName === "A" && !!node.getAttribute("href"),
     replacement: (content, node) => {
       const href = escapeLinkTarget(resolveUrl((node as Element).getAttribute("href") ?? "", pageUrl));
-      const title = (node as Element).getAttribute("title");
-      const t = title ? ` "${title.replace(/"/g, '\\"')}"` : "";
-      return `[${content}](${href}${t})`;
+      return `[${content}](${href}${titleSuffix(node as Element)})`;
     },
   });
   service.addRule("wfaImage", {
@@ -57,9 +53,7 @@ function createService(pageUrl?: string): TurndownService {
       const src = el.getAttribute("src");
       if (!src) return "";
       const alt = (el.getAttribute("alt") ?? "").replace(/\s*\n+\s*/g, " ");
-      const title = el.getAttribute("title");
-      const t = title ? ` "${title.replace(/"/g, '\\"')}"` : "";
-      return `![${alt}](${escapeLinkTarget(resolveUrl(src, pageUrl))}${t})`;
+      return `![${alt}](${escapeLinkTarget(resolveUrl(src, pageUrl))}${titleSuffix(el)})`;
     },
   });
   return service;

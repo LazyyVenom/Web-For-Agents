@@ -1,6 +1,5 @@
+import { HEAD_OWNED_ATTR } from "../shared/conventions";
 import type { HeadTag } from "./types";
-
-export const OWNED_ATTR = "data-wfa";
 
 function esc(value: string): string {
   return typeof CSS !== "undefined" && typeof CSS.escape === "function"
@@ -34,7 +33,7 @@ export function applyHeadTags(tags: HeadTag[], doc: Document | undefined = defau
       el = doc.createElement(tag.kind === "title" ? "title" : tag.kind === "meta" ? "meta" : "link");
       doc.head.appendChild(el);
     }
-    el.setAttribute(OWNED_ATTR, tag.key);
+    el.setAttribute(HEAD_OWNED_ATTR, tag.key);
     if (tag.kind === "title") {
       if (el.textContent !== tag.text) el.textContent = tag.text;
     } else {
@@ -50,5 +49,5 @@ export function removeHeadTag(key: string, doc: Document | undefined = defaultDo
   const selector = selectorFor(key);
   if (!selector) return;
   const el = doc.head.querySelector(selector);
-  if (el && el.getAttribute(OWNED_ATTR) === key) el.remove();
+  if (el && el.getAttribute(HEAD_OWNED_ATTR) === key) el.remove();
 }

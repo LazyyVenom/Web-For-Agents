@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveOptions, type WebForAgentsOptions } from "../../src/vite/options";
+import { AI_BOTS as SHARED_BOTS } from "../../src/shared/bots";
 import { AI_BOTS, buildRobots } from "../../src/vite/robots";
 
 function build(
@@ -87,5 +88,8 @@ describe("buildRobots", () => {
     expect(txt).toContain("User-agent: ClaudeBot");
     const txt2 = build({ training: "block", search: "allow", overrides: { gptbot: "block" } });
     expect(txt2.match(/GPTBot/gi)).toHaveLength(1);
+  });
+  it("re-exports AI_BOTS from shared", () => {
+    expect(AI_BOTS).toBe(SHARED_BOTS);
   });
 });
