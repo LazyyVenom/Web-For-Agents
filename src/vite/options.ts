@@ -1,6 +1,7 @@
 import { DEFAULT_CONTENT_SELECTOR } from "../shared/content";
 import { AGENT_MAP_PATH, normalizeRoute } from "../shared/conventions";
 import { LOG_PREFIX, withPrefix } from "../shared/errors";
+import { DEFAULT_SHORTCUT, parseShortcut } from "../shared/shortcut";
 import { trimTrailingSlash } from "./prerender/paths";
 
 export { normalizeRoute };
@@ -24,6 +25,15 @@ export interface WebForAgentsOptions {
   llms?: LlmsOptions | false;
   /** Default true: writes agents.json (needs prerender). */
   agentMap?: boolean | AgentMapOptions;
+  /** Dev-only overlay, injected by `vite` serve and never by `vite build`. Default true. */
+  overlay?: boolean | OverlayPluginOptions;
+}
+
+export interface OverlayPluginOptions {
+  /** Default "alt+shift+a". */
+  shortcut?: string;
+  /** Default: the resolved markdown.contentSelector, else "main". */
+  contentSelector?: string;
 }
 
 export interface AgentMapOptions {
@@ -78,6 +88,7 @@ export interface ResolvedOptions {
   markdown: { contentSelector: string } | false;
   llms: LlmsOptions | false;
   agentMap: { fileName: string } | false;
+  overlay: { enabled: boolean; shortcut: string; contentSelector: string };
   warnings: string[];
 }
 
@@ -167,6 +178,28 @@ function resolveAgentMap(input: WebForAgentsOptions["agentMap"]): { fileName: st
   return { fileName };
 }
 
+function resolveOverlay(
+  input: WebForAgentsOptions["overlay"],
+  markdown: ResolvedOptions["markdown"],
+): ResolvedOptions["overlay"] {
+  if (input !== undefined && typeof input !== "boolean" && (typeof input !== "object" || input === null)) {
+    throw new Error(withPrefix("overlay must be a boolean or { shortcut, contentSelector }"));
+  }
+  const opts = typeof input === "object" ? input : {};
+  const shortcut = opts.shortcut ?? DEFAULT_SHORTCUT;
+  if (typeof shortcut !== "string") throw new Error(withPrefix("overlay.shortcut must be a string"));
+  parseShortcut(shortcut); // throws an already-prefixed error
+  const sel = opts.contentSelector;
+  if (sel !== undefined && (typeof sel !== "string" || sel === "")) {
+    throw new Error(withPrefix("overlay.contentSelector must be a non-empty string"));
+  }
+  return {
+    enabled: input !== false,
+    shortcut,
+    contentSelector: sel ?? (markdown ? markdown.contentSelector : DEFAULT_CONTENT_SELECTOR),
+  };
+}
+
 export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
   let url: URL | undefined;
   try {
@@ -248,6 +281,7 @@ export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
     markdown,
     llms,
     agentMap,
+    overlay: resolveOverlay(input.overlay, markdown),
     warnings,
   };
 

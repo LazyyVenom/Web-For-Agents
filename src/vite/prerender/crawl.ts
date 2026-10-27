@@ -3,7 +3,8 @@ import { errorMessage, LOG_PREFIX } from "../../shared/errors";
 import { isExcluded, type RendererName } from "../options";
 import { analyzePage, type PageInfo } from "./analyze";
 import { finalizeHtml } from "./finalize";
-import { byRoute, isSafeRoute, linkToRoute, trimTrailingSlash } from "./paths";
+import { mountPath } from "../../shared/url";
+import { byRoute, isSafeRoute, linkToRoute } from "./paths";
 import type { InPageScripts, RenderResult } from "./renderCore";
 
 export interface PrerenderedPage {
@@ -63,7 +64,7 @@ export type RenderFn = (
 ) => Promise<RenderResult>;
 
 export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise<CrawlResult> {
-  const mount = opts.base.startsWith("/") && !opts.base.startsWith("//") ? trimTrailingSlash(opts.base) : "";
+  const mount = mountPath(opts.base);
   const linkBase = mount + "/";
   const skip = (route: string) => opts.skipRoute?.(route) === true;
   const seen = new Set<string>();

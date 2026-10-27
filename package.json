@@ -26,6 +26,9 @@
   "files": [
     "dist"
   ],
+  "bin": {
+    "web-for-agents": "./dist/bin.js"
+  },
   "engines": {
     "node": ">=20"
   },
@@ -36,6 +39,12 @@
     "*": {
       "vite": [
         "dist/vite.d.ts"
+      ],
+      "cli": [
+        "dist/cli.d.ts"
+      ],
+      "overlay": [
+        "dist/overlay.d.ts"
       ]
     }
   },
@@ -48,10 +57,20 @@
       "types": "./dist/vite.d.ts",
       "import": "./dist/vite.js"
     },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
+    },
+    "./overlay": {
+      "types": "./dist/overlay.d.ts",
+      "import": "./dist/overlay.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
     "build": "tsup",
+    "demo:dev": "vite examples/demo",
+    "demo:build": "vite build examples/demo --outDir dist-demo --emptyOutDir",
     "prepublishOnly": "npm run build && npm test && npm run typecheck",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

@@ -8,9 +8,9 @@ const robots = { ai: { training: "block", search: "allow" } } as const;
 
 describe("webForAgents plugin", () => {
   it("is a build-only named plugin", () => {
-    const p = webForAgents({ siteUrl: "https://a.com", robots });
-    expect(p.name).toBe("web-for-agents");
-    expect(p.apply).toBe("build");
+    const [main] = webForAgents({ siteUrl: "https://a.com", robots });
+    expect(main!.name).toBe("web-for-agents");
+    expect(main!.apply).toBe("build");
   });
   it("fails fast on invalid options", () => {
     expect(() => webForAgents({ siteUrl: "nope", robots })).toThrow(/\[web-for-agents\]/);
@@ -18,7 +18,7 @@ describe("webForAgents plugin", () => {
   it("emits nothing for SSR builds", async () => {
     const outDir = mkdtempSync(path.join(os.tmpdir(), "wfa-plugin-"));
     try {
-      const p: any = webForAgents({ siteUrl: "https://a.com", robots, prerender: false });
+      const [p]: any[] = webForAgents({ siteUrl: "https://a.com", robots, prerender: false });
       const run = async (ssr: boolean) => {
         p.configResolved({ root: outDir, base: "/", build: { outDir, ssr }, publicDir: "", logger: { warn() {}, info() {} } });
         await p.writeBundle();

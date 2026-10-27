@@ -51,6 +51,8 @@ export default defineConfig({
 });
 ```
 
+`webForAgents()` returns an array of plugins (the build plugin and the dev-only overlay); put it in `plugins` as shown, and Vite flattens it.
+
 `robots.ai` is required: the plugin throws if you do not state a policy for both `training` and `search`. Files you place in `public/` (for example your own `robots.txt`) are never overwritten; the plugin logs a warning and skips generation.
 
 Use one `SeoProvider` per document. It owns the shared defaults and the base head tags; nested or multiple providers will overwrite each other.
@@ -339,6 +341,7 @@ Nested `Seo`/`useSeo` calls merge, with the deeper one winning per tag.
 | `markdown` | `{ contentSelector?: string } \| false` | Write `.md` files. `false` disables them and `llms-full.txt`. Default `{ contentSelector: "main" }`. |
 | `llms` | `{ title?: string; description?: string } \| false` | Write `llms.txt` and `llms-full.txt`. Default on. |
 | `agentMap` | `boolean \| { fileName?: string }` | Write `agents.json` and link it from `llms.txt`. Needs prerender. Default `{ fileName: "agents.json" }`. |
+| `overlay` | `boolean \| { shortcut?: string; contentSelector?: string }` | Dev overlay, injected by `vite` (serve) only, under any `base` (e.g. `"/sub/"`), and skipped when Vitest runs. `false` disables it. Default on, shortcut `"alt+shift+a"`, `contentSelector` from `markdown.contentSelector` (else `"main"`). |
 
 ## AI crawlers
 
@@ -364,12 +367,123 @@ Search bots (`robots.ai.search`):
 
 The list is exported as `AI_BOTS` from `@anubhav-choubey/web-for-agents/vite`.
 
+## CLI
+
+Audit any URL for AI-agent readiness. Nothing is installed in the target site.
+
+```sh
+npx @anubhav-choubey/web-for-agents audit example.com
+npx @anubhav-choubey/web-for-agents audit https://example.com/docs --json --min-score 80
+```
+
+Flags:
+
+- `--json` prints the report as one JSON document on stdout.
+- `--min-score <0-100>` exits with code 1 when the score is lower.
+- `--timeout <ms>` sets the per-request timeout (default 10000).
+- `--agent-map <path>` sets where the agent map lives. A file name (`map.json`) is looked for in the same places as `agents.json`. A path starting with `/` or a full URL is fetched as given.
+- `-h`, `--help` prints usage.
+
+A URL without a scheme gets `http://` for `localhost`, `127.0.0.1` and `[::1]`, and `https://` for every other host.
+
+`robots.txt` is read from the site root. The sitemap URL comes from its `Sitemap:` line, or `/sitemap.xml` if there is none. `llms.txt` and `agents.json` are looked for at the root and in each parent directory of the page and of its markdown alternate link. For example, auditing `https://example.com/sub/` also tries `/sub/llms.txt` and `/sub/agents.json`, which covers sites deployed under a subpath. If more than one copy exists, the deepest one is used. A missing file's message lists every URL tried.
+
+Checks and weights (total 100):
+
+| Check | Weight |
+| --- | --- |
+| Content without JavaScript | 25 |
+| JSON-LD | 12 |
+| robots.txt | 10 |
+| Title | 8 |
+| Meta description | 8 |
+| Sitemap | 8 |
+| Open Graph | 7 |
+| llms.txt | 7 |
+| Markdown copy | 6 |
+| Canonical URL | 5 |
+| Agent map | 4 |
+
+A passing check earns its full weight, a warning half, a failure none. Each non-passing check prints a `Fix:` line.
+
+Exit codes: `0` ok, `1` score below `--min-score`, `2` usage error or fatal error (unreachable page, non-2xx status, not HTML, timeout).
+
+The programmatic API is available from `@anubhav-choubey/web-for-agents/cli` (`audit`, `runCli`, `formatText`, and the `CheckResult`, `CheckId` and `CheckStatus` types).
+
+### Auditing a local preview
+
+You can audit a build locally with `vite preview`:
+
+```sh
+npx vite build && npx vite preview --port 4173
+npx @anubhav-choubey/web-for-agents audit localhost:4173
+```
+
+The build writes absolute URLs from `siteUrl` into the canonical link, the sitemap, the markdown alternate link and the `Sitemap:` line in `robots.txt`. If `siteUrl` is your production origin, those URLs point away from the preview. The audit does not fetch them, so a local run never calls production. Instead it warns and names the other origin. For example:
+
+```
+WARN  Canonical URL                 2.5/5  Canonical https://example.com/ points to https://example.com (different origin than the audited page)
+      Fix: Audit the deployed site, or build with siteUrl set to http://localhost:4173 to audit this preview.
+```
+
+To get a clean local score, build with `siteUrl` set to the preview origin, for example `siteUrl: process.env.SITE_URL ?? "https://example.com"` with `SITE_URL=http://localhost:4173 npx vite build`. Otherwise, audit the deployed site.
+
+## Dev overlay
+
+While `vite` (the dev server) runs, the plugin adds a small "WFA" button to every page. Click it or press `Alt+Shift+A` to open a panel showing what an agent sees on the current page:
+
+- title (and whether it came from `<title>` or the first `<h1>`), description, canonical, robots, Open Graph and Twitter tags
+- each JSON-LD block, with its `@type`s and any parse error
+- the markdown generated from the content region (the same code that writes the `.md` files), with a warning when there is no `<main>`
+- agent actions: registered handlers, `data-agent-action` markup and WebMCP declarative tools
+
+The panel lives in a shadow root, so it does not pick up or leak styles, and it refreshes as the page changes.
+
+The overlay is dev-only. The plugin injects it only in serve mode, so `vite build` never includes it and no overlay code ships in production. It is also skipped when `VITEST` is set, so Vitest browser mode and test servers don't get a panel. It works with any Vite `base`: with `base: "/sub/"` the script loads from `/sub/@id/…`, and the panel strips the base from the URL to find the route.
+
+The markdown in the panel matches the generated `.md` file. Links resolve against `siteUrl` plus the route, and a page with no `<title>` or `<h1>` is titled with its route. When neither `[data-wfa-content]` nor your `contentSelector` matches, the panel names the selector it looked for.
+
+```ts
+webForAgents({
+  siteUrl: "https://example.com",
+  robots: { ai: { training: "block", search: "allow" } },
+  overlay: { shortcut: "ctrl+shift+k", contentSelector: "#content" },
+});
+```
+
+A shortcut is any of `alt`, `shift`, `ctrl`, `meta` plus one letter, digit or `/`; an invalid one throws when the config loads. Set `overlay: false` to turn it off.
+
+Prefer the Vite plugin: it never injects the overlay into `vite build`, whatever the environment or `--mode`. If you mount it yourself, don't guard on `import.meta.env.DEV`, `PROD` or `MODE`: `DEV` is true whenever `NODE_ENV` is not `production`, and `vite build --mode development` still passes a `MODE === "development"` check, so both can ship the overlay. Guard on `import.meta.hot` instead. Only the dev server defines it, and Vite replaces it with a statically false value in builds, so the whole block (including the dynamic import) is removed:
+
+```ts
+if (import.meta.hot) {
+  import("@anubhav-choubey/web-for-agents/overlay").then((m) =>
+    m.mountOverlay({ shortcut: "alt+shift+a", siteUrl: "https://example.com", base: import.meta.env.BASE_URL }),
+  );
+}
+```
+
+Pass `siteUrl` and `base` so the panel's markdown links match the build; both are optional.
+
+## Upgrading
+
+### Breaking: `webForAgents()` returns `Plugin[]`
+
+Since stage 4, `webForAgents()` returns an array of plugins (the build plugin and the dev overlay) instead of a single `Plugin`. Putting it in `plugins: [react(), webForAgents({...})]` still works, because Vite flattens nested arrays. Code that treats the result as one plugin needs a change. That includes reading `.name` or `.apply`, wrapping it in a helper typed `Plugin`, or passing it to an API that expects one plugin:
+
+```ts
+// before
+const wfa: Plugin = webForAgents(options);
+// after
+const wfa: Plugin[] = webForAgents(options);
+```
+
 ## Roadmap
 
 - Stage 1 (done): head metadata, JSON-LD, sitemap.xml, robots.txt.
 - Stage 2 (done): prerendering, markdown versions of pages, llms.txt and llms-full.txt.
 - Stage 3 (done): agent actions, WebMCP tools and agents.json.
-- Stage 4: CLI audit and dev overlay.
+- Stage 4 (done): CLI audit and dev overlay.
 
 ## License
 

@@ -1,9 +1,8 @@
 import { markdownPathFor, normalizeRoute } from "../../shared/conventions";
 import { compareStrings } from "../../shared/sort";
+import { hasScheme, trimTrailingSlash } from "../../shared/url";
 
-export function trimTrailingSlash(s: string): string {
-  return s.replace(/\/+$/, "");
-}
+export { trimTrailingSlash };
 
 /** Orders anything with a `route` by route ("/" first, then code-unit order). */
 export function byRoute(a: { route: string }, b: { route: string }): number {
@@ -20,7 +19,7 @@ export function isRelativeBase(base: string): boolean {
 
 /** True for "https://cdn…/" and "//cdn…/" bases. */
 export function isFullUrlBase(base: string): boolean {
-  return base.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(base);
+  return base.startsWith("//") || hasScheme(base);
 }
 
 function segments(route: string): string[] {

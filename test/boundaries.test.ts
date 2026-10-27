@@ -27,6 +27,9 @@ const runtimeFiles = [...walk(join(SRC, "runtime")), join(SRC, "index.ts")];
 const sharedFiles = walk(join(SRC, "shared"));
 const markdownFile = join(SRC, "shared", "markdown");
 const vite = join(SRC, "vite");
+const cli = join(SRC, "cli");
+const overlay = join(SRC, "overlay");
+const overlayFiles = walk(overlay);
 
 function resolved(file: string, spec: string): string {
   return stripExt(resolve(dirname(file), spec));
@@ -36,14 +39,39 @@ describe("import boundaries", () => {
   it("scans files", () => {
     expect(runtimeFiles.length).toBeGreaterThan(1);
     expect(sharedFiles.length).toBeGreaterThan(0);
+    expect(overlayFiles.length).toBeGreaterThan(0);
   });
 
-  it("runtime, shared and index never reach src/vite or import vite", () => {
+  it("runtime, shared and index never reach src/vite or src/cli or import vite", () => {
     for (const file of [...runtimeFiles, ...sharedFiles]) {
       for (const spec of specifiers(readFileSync(file, "utf8"))) {
         const where = `${relative(SRC, file)} -> ${spec}`;
         expect(spec === "vite" || spec.startsWith("vite/"), where).toBe(false);
-        if (spec.startsWith(".")) expect(inDir(resolved(file, spec), vite), where).toBe(false);
+        if (spec.startsWith(".")) {
+          expect(inDir(resolved(file, spec), vite), where).toBe(false);
+          expect(inDir(resolved(file, spec), cli), where).toBe(false);
+        }
+      }
+    }
+  });
+
+  it("runtime and index never reach src/overlay", () => {
+    for (const file of runtimeFiles) {
+      for (const spec of specifiers(readFileSync(file, "utf8"))) {
+        if (spec.startsWith(".")) expect(inDir(resolved(file, spec), overlay), `${relative(SRC, file)} -> ${spec}`).toBe(false);
+      }
+    }
+  });
+
+  it("cli never reaches src/vite, src/runtime or src/overlay, and never imports vite", () => {
+    const cliFiles = walk(cli);
+    expect(cliFiles.length).toBeGreaterThan(0);
+    for (const file of cliFiles) {
+      for (const spec of specifiers(readFileSync(file, "utf8"))) {
+        const where = `${relative(SRC, file)} -> ${spec}`;
+        expect(spec === "vite" || spec.startsWith("vite/"), where).toBe(false);
+        if (!spec.startsWith(".")) continue;
+        for (const dir of [vite, join(SRC, "runtime"), overlay]) expect(inDir(resolved(file, spec), dir), where).toBe(false);
       }
     }
   });
@@ -70,8 +98,19 @@ describe("import boundaries", () => {
       }
     }
   });
+  it("overlay never reaches src/vite, src/runtime, src/cli or node, and never imports vite", () => {
+    for (const file of overlayFiles) {
+      for (const spec of specifiers(readFileSync(file, "utf8"))) {
+        const where = `${relative(SRC, file)} -> ${spec}`;
+        expect(spec === "vite" || spec.startsWith("vite/") || spec.startsWith("node:"), where).toBe(false);
+        if (!spec.startsWith(".")) continue;
+        for (const dir of [vite, join(SRC, "runtime"), cli]) expect(inDir(resolved(file, spec), dir), where).toBe(false);
+      }
+    }
+  });
+
   it("leaf shared modules import nothing", () => {
-    for (const name of ["errors", "url", "bots", "conventions", "sort", "text"]) {
+    for (const name of ["errors", "url", "bots", "conventions", "sort", "text", "pageMeta", "shortcut", "jsonLd"]) {
       const file = join(SRC, "shared", `${name}.ts`);
       expect(specifiers(readFileSync(file, "utf8")), relative(SRC, file)).toEqual([]);
     }

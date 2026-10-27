@@ -1,4 +1,5 @@
 import { selectContentRegion, type ContentSource } from "../../shared/content";
+import { readPageMeta } from "../../shared/pageMeta";
 import { parseHtml } from "./dom";
 
 export interface PageInfo {
@@ -20,14 +21,8 @@ export function analyzePage(
 ): PageInfo {
   const { document, dispose } = parseHtml(html);
   try {
-    const docTitle = document.title.trim() || (document.querySelector("h1")?.textContent ?? "").trim();
-    const title = docTitle || opts.route;
-
-    const description =
-      document.querySelector('meta[name="description"]')?.getAttribute("content")?.trim() || undefined;
-
-    const robots = document.querySelector('meta[name="robots"]')?.getAttribute("content") ?? "";
-    const noindex = /noindex/i.test(robots);
+    const meta = readPageMeta(document);
+    const title = meta.title ?? opts.route;
 
     const links: string[] = [];
     document.querySelectorAll("a[href]").forEach((a) => {
@@ -51,9 +46,9 @@ export function analyzePage(
 
     return {
       title,
-      titleFromDocument: docTitle !== "",
-      ...(description !== undefined ? { description } : {}),
-      noindex,
+      titleFromDocument: meta.titleFromDocument,
+      ...(meta.description !== null ? { description: meta.description } : {}),
+      noindex: meta.noindex,
       links,
       contentHtml: element.innerHTML,
       contentSource: source,
