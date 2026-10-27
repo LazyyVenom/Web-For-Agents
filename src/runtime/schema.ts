@@ -12,6 +12,7 @@ const ESCAPES: Record<string, string> = {
   "\u2029": "\\u2029",
 };
 
+/** JSON-LD as a string that is safe inside a `<script>` element (`<`, `>`, `&`, U+2028 and U+2029 are escaped). */
 export function serializeJsonLd(data: JsonLdNode | JsonLdNode[]): string {
   return JSON.stringify(data).replace(/[<>&\u2028\u2029]/g, (c) => ESCAPES[c]);
 }
@@ -26,6 +27,7 @@ function node(type: string, fields: Record<string, unknown>): JsonLdNode {
   return out;
 }
 
+/** Builders for typed schema.org JSON-LD nodes. Undefined fields are omitted. */
 export const schema = {
   article(i: {
     headline: string;

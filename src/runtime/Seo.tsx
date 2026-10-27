@@ -129,6 +129,7 @@ export interface SeoProviderProps {
   children?: ReactNode;
 }
 
+/** Provides site-wide head defaults and owns the base head tags. Use one per document. */
 export function SeoProvider(props: SeoProviderProps) {
   const { defaults, children } = props;
   const key = JSON.stringify(defaults);
@@ -147,6 +148,7 @@ export function SeoProvider(props: SeoProviderProps) {
   return createElement(DefaultsContext.Provider, { value: defaults }, children);
 }
 
+/** Sets head tags for the calling component. Nested calls merge; the deeper one wins per tag. */
 export function useSeo(props: SeoProps): void {
   const defaults = useContext(DefaultsContext);
   const [order] = useState(() => ++seq);
@@ -179,6 +181,7 @@ export function useSeo(props: SeoProps): void {
   }, [key]);
 }
 
+/** Component form of `useSeo`. Renders nothing. */
 export function Seo(props: SeoProps): null {
   useSeo(props);
   return null;

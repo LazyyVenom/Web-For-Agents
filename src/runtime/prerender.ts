@@ -12,6 +12,10 @@ function sync(): void {
   window[READY_GLOBAL] = holds === 0;
 }
 
+/**
+ * Delays the prerender capture until the returned function is called. The release function is
+ * idempotent. Does nothing outside a browser.
+ */
 export function holdPrerender(): () => void {
   if (typeof window === "undefined") return () => {};
   holds++;

@@ -112,7 +112,7 @@ describe("collectPageReport", () => {
     ]);
   });
 
-  it("actions from the stage 3 registry", () => {
+  it("actions from the agent action registry", () => {
     const w = window as unknown as Record<string, unknown>;
     w[AGENT_GLOBAL] = {
       version: 1,

@@ -111,7 +111,7 @@ describe("normalizeRoute", () => {
   });
 });
 
-describe("stage 2 options", () => {
+describe("prerender and output options", () => {
   const base = { siteUrl: "https://a.com", robots } as const;
 
   it("prerender defaults", () => {

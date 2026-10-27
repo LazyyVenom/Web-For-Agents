@@ -19,6 +19,10 @@ export type AgentParamProps = { [ACTION_PARAM_ATTR]: string };
 
 const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
+/**
+ * Registers an action agents can run while the component is mounted. Attach `ref` to the element
+ * it acts on and spread `hintProps` on it.
+ */
 export function useAgentAction<I = Record<string, unknown>, R = unknown>(
   spec: AgentActionSpec<I, R>,
 ): { ref: (el: Element | null) => void; hintProps: AgentHintProps } {
@@ -56,6 +60,7 @@ export function useAgentAction<I = Record<string, unknown>, R = unknown>(
   return { ref, hintProps };
 }
 
+/** A `<form>` registered as an agent action. Without a `handler`, its fields define the input and the form is submitted. */
 export function AgentForm<I = Record<string, unknown>, R = unknown>(
   props: { agent: AgentActionSpec<I, R> } & ComponentPropsWithoutRef<"form">,
 ) {
@@ -64,6 +69,7 @@ export function AgentForm<I = Record<string, unknown>, R = unknown>(
   return <form ref={ref} {...hintProps} {...formProps} />;
 }
 
+/** Props that describe a form field to agents. */
 export function agentParam(description: string): AgentParamProps {
   return { [ACTION_PARAM_ATTR]: description };
 }

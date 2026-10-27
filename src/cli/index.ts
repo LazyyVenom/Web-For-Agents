@@ -20,7 +20,7 @@ const defaultIo: CliIo = {
   stderr: (s) => void process.stderr.write(s),
 };
 
-/** Exit code: 0 ok, 1 below --min-score, 2 usage or fatal error. */
+/** Runs the CLI with `argv` (without node and script). Resolves to the exit code: 0 ok, 1 below --min-score, 2 usage or fatal error. */
 export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<number> {
   let args;
   try {

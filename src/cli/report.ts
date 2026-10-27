@@ -1,5 +1,6 @@
 import type { AuditReport } from "./audit";
 
+/** Human-readable report, as printed by the CLI. */
 export function formatText(report: AuditReport): string {
   const lines = [
     `web-for-agents audit: ${report.finalUrl}${report.redirected ? ` (redirected from ${report.url})` : ""}`,

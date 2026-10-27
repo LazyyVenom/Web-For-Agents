@@ -9,10 +9,12 @@ function marker(attr: string, props: MarkerProps): JSX.Element {
   return createElement(as, { ...rest, [attr]: "" }, children);
 }
 
+/** Marks the region used for the page's markdown. `as` sets the element (default "div"). */
 export function ContentRegion(props: MarkerProps): JSX.Element {
   return marker(CONTENT_ATTR, props);
 }
 
+/** Keeps its children out of the page's markdown. `as` sets the element (default "div"). */
 export function ExcludeFromContent(props: MarkerProps): JSX.Element {
   return marker(EXCLUDE_ATTR, props);
 }

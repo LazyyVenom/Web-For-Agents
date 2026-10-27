@@ -42,7 +42,7 @@ function isClientEnv(env: BuildEnv | undefined): boolean {
   return env.name === undefined || env.name === "client";
 }
 
-/** Internal: stage 3 passes its extension; stage 4 wraps the result in an array. */
+/** The build plugin. `extensions` hook into prerendering (the agent map is one). */
 export function createBuildPlugin(resolved: ResolvedOptions, extensions: PrerenderExtension[]): Plugin {
   let root = process.cwd();
   let outDir = "";

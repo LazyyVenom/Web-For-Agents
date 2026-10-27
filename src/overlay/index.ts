@@ -5,14 +5,15 @@ import { DEFAULT_SHORTCUT, matchesShortcut, parseShortcut } from "../shared/shor
 export const OVERLAY_HOST_ATTR = "data-wfa-overlay";
 
 export interface OverlayOptions {
+  /** Keyboard shortcut that toggles the panel. Default "alt+shift+a". */
   shortcut?: string;
   /** Start open. Default false. */
   open?: boolean;
-  /** Passed to collectPageReport. Default "main". */
+  /** Content region shown as markdown. Default "main". */
   contentSelector?: string;
-  /** Passed to collectPageReport: markdown links resolve against siteUrl + route, as in the build. */
+  /** Public site URL; markdown links resolve against siteUrl + route, as in the build. */
   siteUrl?: string;
-  /** Passed to collectPageReport: the Vite `base`, stripped from the pathname to get the route. */
+  /** The Vite `base`, stripped from the pathname to get the route. Default "/". */
   base?: string;
 }
 
@@ -60,6 +61,7 @@ function isEditable(target: EventTarget | null): boolean {
   return ce !== null && ce.getAttribute("contenteditable")!.toLowerCase() !== "false";
 }
 
+/** Mounts the dev overlay and returns a handle. While mounted, later calls return the same handle. No-op without a DOM. */
 export function mountOverlay(options: OverlayOptions = {}): OverlayHandle {
   if (typeof document === "undefined") return NOOP;
   if (current) {
