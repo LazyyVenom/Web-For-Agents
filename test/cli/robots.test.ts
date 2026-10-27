@@ -5,7 +5,7 @@ const ok = (txt: string, ua: string, p: string) => isAllowed(parseRobots(txt), u
 
 describe('robots', () => {
   it('handles CRLF, lone CR and BOM', () => {
-    const t = '﻿User-agent: *\r\nDisallow: /private\rAllow: /private/ok\r\n'
+    const t = '\uFEFFUser-agent: *\r\nDisallow: /private\rAllow: /private/ok\r\n'
     expect(ok(t, 'x', '/private/a')).toBe(false)
     expect(ok(t, 'x', '/private/ok')).toBe(true)
     expect(ok(t, 'x', '/public')).toBe(true)
@@ -59,5 +59,27 @@ describe('robots', () => {
   })
   it('allows when no matching group and no *', () => {
     expect(ok('User-agent: a\nDisallow: /\n', 'b', '/x')).toBe(true)
+  })
+  it('matches pathological patterns in linear-ish time', () => {
+    const t = 'User-agent: *\nDisallow: /' + '*a'.repeat(50) + 'b\n'
+    const path = '/' + 'a'.repeat(10000)
+    const start = performance.now()
+    expect(ok(t, 'x', path)).toBe(true)
+    expect(ok(t, 'x', path + 'b')).toBe(false)
+    expect(performance.now() - start).toBeLessThan(200)
+  })
+  it('blank line between User-agent lines keeps one group', () => {
+    const t = 'User-agent: GPTBot\n\nUser-agent: CCBot\nDisallow: /\n'
+    expect(ok(t, 'GPTBot', '/a')).toBe(false)
+    expect(ok(t, 'CCBot', '/a')).toBe(false)
+  })
+  it('treats a mid-pattern $ as literal', () => {
+    const t = 'User-agent: *\nDisallow: /a$b\n'
+    expect(ok(t, 'x', '/a$b')).toBe(false)
+    expect(ok(t, 'x', '/ab')).toBe(true)
+  })
+  it('specific group with only empty Disallow does not fall back to *', () => {
+    const t = 'User-agent: *\nDisallow: /\n\nUser-agent: GPTBot\nDisallow:\n'
+    expect(ok(t, 'GPTBot', '/a')).toBe(true)
   })
 })

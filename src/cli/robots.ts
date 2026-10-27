@@ -17,7 +17,7 @@ export function parseRobots(text: string): ParsedRobots {
   const out: ParsedRobots = { groups: [], sitemaps: [] }
   let cur: RobotsGroup | null = null
   let inAgents = false
-  for (const raw of text.replace(/^﻿/, '').split(/\r\n|\r|\n/)) {
+  for (const raw of text.replace(/^\uFEFF/, '').split(/\r\n|\r|\n/)) {
     const line = raw.replace(/#.*$/, '').trim()
     const i = line.indexOf(':')
     if (i < 0) continue
@@ -41,11 +41,35 @@ export function parseRobots(text: string): ParsedRobots {
   return out
 }
 
-function compile(pattern: string): RegExp {
-  const end = pattern.endsWith('$')
-  const body = end ? pattern.slice(0, -1) : pattern
-  const src = body.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')
-  return new RegExp('^' + src + (end ? '$' : ''))
+// Linear-memory glob matcher (no regex): `*` matches any run, a trailing `$`
+// anchors the end, any other `$` is literal. Rules match as a prefix otherwise.
+function matches(pattern: string, text: string): boolean {
+  const anchored = pattern.endsWith('$')
+  const p = anchored ? pattern.slice(0, -1) : pattern
+  let i = 0
+  let j = 0
+  let starI = -1
+  let starJ = 0
+  for (;;) {
+    if (i === p.length) {
+      if (!anchored || j === text.length) return true
+    } else if (p[i] === '*') {
+      starI = i++
+      starJ = j
+      continue
+    } else if (j < text.length && p[i] === text[j]) {
+      i++
+      j++
+      continue
+    }
+    if (starI >= 0 && starJ < text.length) {
+      starJ++
+      j = starJ
+      i = starI + 1
+      continue
+    }
+    return false
+  }
 }
 
 export function isAllowed(robots: ParsedRobots, userAgent: string, pathAndQuery: string): boolean {
@@ -54,7 +78,7 @@ export function isAllowed(robots: ParsedRobots, userAgent: string, pathAndQuery:
   if (groups.length === 0) groups = robots.groups.filter((g) => g.agents.includes('*'))
   let best: RobotsRule | null = null
   for (const rule of groups.flatMap((g) => g.rules)) {
-    if (!compile(rule.pattern).test(pathAndQuery)) continue
+    if (!matches(rule.pattern, pathAndQuery)) continue
     if (
       !best ||
       rule.pattern.length > best.pattern.length ||
