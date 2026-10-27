@@ -34,7 +34,8 @@ export function assertValidActionName(name: string): void {
 function installGlobal(): void {
   if (typeof window === "undefined") return;
   const w = window as unknown as Record<string, unknown>;
-  if (w[AGENT_GLOBAL]) return;
+  const current = w[AGENT_GLOBAL] as { actions?: unknown } | undefined;
+  if (current && current.actions === listAgentActions) return;
   w[AGENT_GLOBAL] = { version: 1, actions: listAgentActions };
 }
 
@@ -82,9 +83,11 @@ function schemaOf(r: Resolved): JsonSchema {
   return r.spec.inputSchema ?? (r.kind === "form" ? schemaFromForm(r.el) : EMPTY_OBJECT_SCHEMA);
 }
 
-function describe(name: string, entry: Entry): AgentActionDescriptor {
+/** Null when the action has neither a handler nor an element (hidden, not exposed). */
+function describe(name: string, entry: Entry): AgentActionDescriptor | null {
   const r = resolve(entry);
-  const kind: ActionKind = r.kind ?? "click";
+  if (r.kind === null) return null;
+  const kind: ActionKind = r.kind;
   const d: AgentActionDescriptor = {
     name,
     description: r.spec.description,
@@ -98,9 +101,9 @@ function describe(name: string, entry: Entry): AgentActionDescriptor {
 }
 
 export function listAgentActions(): AgentActionDescriptor[] {
-  return Array.from(activeEntries(), ([name, [, entry]]) => describe(name, entry)).sort((a, b) =>
-    a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
-  );
+  return Array.from(activeEntries(), ([name, [, entry]]) => describe(name, entry))
+    .filter((d): d is AgentActionDescriptor => d !== null)
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
 function errorMessage(err: unknown): string {
@@ -115,8 +118,9 @@ export async function executeAgentAction(
 ): Promise<AgentActionResult> {
   const found = activeEntries().get(name);
   if (!found) return { status: "error", message: `unknown action "${name}"` };
+  const [id, entry] = found;
   try {
-    const r = resolve(found[1]);
+    const r = resolve(entry);
     const { spec } = r;
     const checked = validateInput(schemaOf(r), input);
     if (!checked.ok) return { status: "invalid", errors: checked.errors };
@@ -128,6 +132,10 @@ export async function executeAgentAction(
         `An AI agent wants to run "${spec.title ?? name}": ${spec.description}\n\nInput: ${JSON.stringify(value).slice(0, 500)}\n\nAllow?`;
       const confirm = spec.confirm ?? ((m: string) => window.confirm(m));
       if (!(await confirm(message))) return { status: "cancelled", reason: "user-declined" };
+      // The entry may have unmounted or been superseded while the dialog was open.
+      if (entries.get(id) !== entry || activeEntries().get(name)?.[0] !== id) {
+        return { status: "error", message: "action was removed" };
+      }
     }
 
     switch (r.kind) {
@@ -146,6 +154,11 @@ export async function executeAgentAction(
   }
 }
 
+/** Re-evaluate actions (e.g. after a target element/ref attaches) at the next microtask. */
+export function refreshAgentActions(): void {
+  scheduleSync();
+}
+
 function scheduleSync(): void {
   if (syncScheduled) return;
   syncScheduled = true;
@@ -155,10 +168,31 @@ function scheduleSync(): void {
 function sync(): void {
   syncScheduled = false;
   const active = activeEntries();
+  const tools = new Map<string, WebMcpTool>();
+
+  for (const [name, [, entry]] of active) {
+    let d: AgentActionDescriptor | null;
+    try {
+      d = describe(name, entry);
+    } catch (err) {
+      console.warn(`[web-for-agents] could not describe agent action "${name}": ${errorMessage(err)}`);
+      continue;
+    }
+    if (!d) continue;
+    const tool: WebMcpTool = {
+      name,
+      description: d.description,
+      inputSchema: d.inputSchema,
+      execute: (input, o) => executeAgentAction(name, input, o?.signal),
+      annotations: { readOnlyHint: d.readOnly, consequentialHint: d.destructive },
+    };
+    if (d.title !== undefined) tool.title = d.title;
+    tools.set(name, tool);
+  }
 
   for (const [name, current] of exposed) {
     const next = active.get(name);
-    if (!next || next[0] !== current.id) {
+    if (!next || next[0] !== current.id || !tools.has(name)) {
       current.controller.abort();
       exposed.delete(name);
     }
@@ -175,26 +209,21 @@ function sync(): void {
     }
   }
 
-  for (const [name, [id, entry]] of active) {
+  for (const [name, tool] of tools) {
     if (exposed.has(name)) continue;
     const controller = new AbortController();
-    exposed.set(name, { id, controller });
-    let tool: WebMcpTool;
+    let pending: Promise<unknown>;
     try {
-      const d = describe(name, entry);
-      tool = {
-        name,
-        description: d.description,
-        inputSchema: d.inputSchema,
-        execute: (input, o) => executeAgentAction(name, input, o?.signal),
-        annotations: { readOnlyHint: d.readOnly, consequentialHint: d.destructive },
-      };
-      if (d.title !== undefined) tool.title = d.title;
+      pending = exposeTool(tool, controller.signal);
     } catch (err) {
-      console.warn(`[web-for-agents] could not describe agent action "${name}": ${errorMessage(err)}`);
+      console.warn(`[web-for-agents] could not expose agent action "${name}": ${errorMessage(err)}`);
       continue;
     }
-    void exposeTool(tool, controller.signal);
+    exposed.set(name, { id: active.get(name)![0], controller });
+    void pending.catch((err) => {
+      console.warn(`[web-for-agents] could not expose agent action "${name}": ${errorMessage(err)}`);
+      if (exposed.get(name)?.controller === controller) exposed.delete(name);
+    });
   }
 }
 

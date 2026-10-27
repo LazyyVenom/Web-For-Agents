@@ -5,6 +5,7 @@ import {
   assertValidActionName,
   executeAgentAction,
   listAgentActions,
+  refreshAgentActions,
   registerAgentAction,
 } from "../../../src/runtime/agent/registry";
 import type { AgentActionSpec } from "../../../src/runtime/agent/types";
@@ -188,7 +189,6 @@ describe("registry", () => {
     expect(list.map((d) => [d.name, d.kind])).toEqual([
       ["contact", "form"],
       ["go", "click"],
-      ["none", "click"],
     ]);
     expect(list[0].inputSchema.required).toEqual(["email"]);
 
@@ -200,10 +200,83 @@ describe("registry", () => {
     expect(await executeAgentAction("go", {})).toEqual({ status: "clicked" });
     expect(clicked).toHaveBeenCalledTimes(1);
 
+    await flush();
+    expect(calls.map((c) => c.tool.name).sort()).toEqual(["contact", "go"]);
     expect(await executeAgentAction("none", {})).toEqual({
       status: "error",
       message: "action has no handler and no element",
     });
+  });
+
+  it("action without handler or element is hidden until its target appears", async () => {
+    let el: Element | null = null;
+    reg({ name: "later", description: "l" }, () => el);
+    await flush();
+    expect(listAgentActions()).toEqual([]);
+    expect(registerTool).not.toHaveBeenCalled();
+
+    el = document.createElement("button");
+    expect(listAgentActions().map((d) => d.kind)).toEqual(["click"]);
+    refreshAgentActions();
+    await flush();
+    expect(registerTool).toHaveBeenCalledTimes(1);
+    expect(calls[0].tool.name).toBe("later");
+
+    el = null;
+    refreshAgentActions();
+    await flush();
+    expect(calls[0].signal.aborted).toBe(true);
+    expect(listAgentActions()).toEqual([]);
+    expect(await executeAgentAction("later", {})).toEqual({
+      status: "error",
+      message: "action has no handler and no element",
+    });
+  });
+
+  it("action removed while confirm is pending → error", async () => {
+    const handler = vi.fn(() => 1);
+    let answer!: (v: boolean) => void;
+    const confirm = () => new Promise<boolean>((r) => (answer = r));
+    const off = reg({ name: "wipe", description: "w", destructive: true, confirm, handler });
+    const pending = executeAgentAction("wipe", {});
+    await flush();
+    off();
+    answer(true);
+    expect(await pending).toEqual({ status: "error", message: "action was removed" });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("action replaced by a duplicate while confirm is pending → error", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const handler = vi.fn(() => 1);
+    let answer!: (v: boolean) => void;
+    const confirm = () => new Promise<boolean>((r) => (answer = r));
+    const off = reg({ name: "wipe", description: "w", destructive: true, confirm, handler });
+    reg({ name: "wipe", description: "w2", handler: () => 2 });
+    const pending = executeAgentAction("wipe", {});
+    await flush();
+    off();
+    answer(true);
+    expect(await pending).toEqual({ status: "error", message: "action was removed" });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("a sync that fails to describe an action retries on the next sync", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const form = document.createElement("form");
+    let fail = true;
+    reg({ name: "f", description: "f" }, () => {
+      if (fail) throw new Error("not ready");
+      return form;
+    });
+    await flush();
+    expect(registerTool).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalled();
+    fail = false;
+    refreshAgentActions();
+    await flush();
+    expect(registerTool).toHaveBeenCalledTimes(1);
+    expect(calls[0].tool.name).toBe("f");
   });
 
   it("handler throw → status error", async () => {
@@ -240,6 +313,14 @@ describe("registry", () => {
     expect(g.version).toBe(1);
     expect(g.actions()).toEqual(listAgentActions());
     expect(g.actions().map((d: { name: string }) => d.name)).toEqual(["a", "b"]);
+  });
+
+  it("replaces a foreign window global", async () => {
+    (window as any).__WEB_FOR_AGENTS__ = { version: 1, actions: () => [] };
+    reg({ name: "a", description: "a", handler: () => 1 });
+    const g = (window as any).__WEB_FOR_AGENTS__;
+    expect(g.actions).toBe(listAgentActions);
+    expect(g.actions().map((d: { name: string }) => d.name)).toEqual(["a"]);
   });
 
   it("no WebMCP → still listable", async () => {
