@@ -341,7 +341,7 @@ Nested `Seo`/`useSeo` calls merge, with the deeper one winning per tag.
 | `markdown` | `{ contentSelector?: string } \| false` | Write `.md` files. `false` disables them and `llms-full.txt`. Default `{ contentSelector: "main" }`. |
 | `llms` | `{ title?: string; description?: string } \| false` | Write `llms.txt` and `llms-full.txt`. Default on. |
 | `agentMap` | `boolean \| { fileName?: string }` | Write `agents.json` and link it from `llms.txt`. Needs prerender. Default `{ fileName: "agents.json" }`. |
-| `overlay` | `boolean \| { shortcut?: string; contentSelector?: string }` | Dev overlay, injected by `vite` (serve) only. `false` disables it. Default on, shortcut `"alt+shift+a"`, `contentSelector` from `markdown.contentSelector` (else `"main"`). |
+| `overlay` | `boolean \| { shortcut?: string; contentSelector?: string }` | Dev overlay, injected by `vite` (serve) only, under any `base` (e.g. `"/sub/"`), and skipped when Vitest runs. `false` disables it. Default on, shortcut `"alt+shift+a"`, `contentSelector` from `markdown.contentSelector` (else `"main"`). |
 
 ## AI crawlers
 
@@ -439,7 +439,9 @@ While `vite` (the dev server) runs, the plugin adds a small "WFA" button to ever
 
 The panel lives in a shadow root, so it does not pick up or leak styles, and it refreshes as the page changes.
 
-The overlay is dev-only. The plugin injects it only in serve mode, so `vite build` never includes it and no overlay code ships in production.
+The overlay is dev-only. The plugin injects it only in serve mode, so `vite build` never includes it and no overlay code ships in production. It is also skipped when `VITEST` is set, so Vitest browser mode and test servers don't get a panel. It works with any Vite `base`: with `base: "/sub/"` the script loads from `/sub/@id/…`, and the panel strips the base from the URL to find the route.
+
+The markdown in the panel matches the generated `.md` file. Links resolve against `siteUrl` plus the route, and a page with no `<title>` or `<h1>` is titled with its route. When neither `[data-wfa-content]` nor your `contentSelector` matches, the panel names the selector it looked for.
 
 ```ts
 webForAgents({
@@ -451,13 +453,17 @@ webForAgents({
 
 A shortcut is any of `alt`, `shift`, `ctrl`, `meta` plus one letter, digit or `/`; an invalid one throws when the config loads. Set `overlay: false` to turn it off.
 
-Without the Vite plugin, mount it yourself behind a dev check so bundlers drop it from production builds:
+Prefer the Vite plugin: it never injects the overlay into `vite build`, whatever the environment. If you mount it yourself, don't guard on `import.meta.env.DEV` alone. `DEV` is true whenever `NODE_ENV` is not `production`, so a `vite build` run with `NODE_ENV=test` or `NODE_ENV=development` (common in CI and test runners) ships the overlay. Guard on the mode instead:
 
 ```ts
-if (import.meta.env.DEV) {
-  import("@anubhav-choubey/web-for-agents/overlay").then((m) => m.mountOverlay({ shortcut: "alt+shift+a" }));
+if (import.meta.env.PROD === false && import.meta.env.MODE === "development") {
+  import("@anubhav-choubey/web-for-agents/overlay").then((m) =>
+    m.mountOverlay({ shortcut: "alt+shift+a", siteUrl: "https://example.com", base: import.meta.env.BASE_URL }),
+  );
 }
 ```
+
+Pass `siteUrl` and `base` so the panel's markdown links match the build; both are optional.
 
 ## Upgrading
 
