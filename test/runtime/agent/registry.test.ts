@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  __resetForTests,
   assertValidActionName,
   executeAgentAction,
   listAgentActions,
@@ -9,21 +8,15 @@ import {
   registerAgentAction,
 } from "../../../src/runtime/agent/registry";
 import type { AgentActionSpec } from "../../../src/runtime/agent/types";
-import type { WebMcpTool } from "../../../src/runtime/agent/webmcp";
+import { installFakeModelContext, resetAgentRuntime, type FakeModelContext, type ToolCall } from "../../helpers/agent";
 
-type Call = { tool: WebMcpTool; signal: AbortSignal };
-
-let calls: Call[];
-let registerTool: ReturnType<typeof vi.fn>;
+let calls: ToolCall[];
+let registerTool: FakeModelContext["registerTool"];
 
 const flush = () => Promise.resolve();
 
-function installModelContext() {
-  calls = [];
-  registerTool = vi.fn((tool: WebMcpTool, opts?: { signal?: AbortSignal }) => {
-    calls.push({ tool, signal: opts!.signal! });
-  });
-  (document as any).modelContext = { registerTool };
+function installModelContext(impl?: Parameters<typeof installFakeModelContext>[0]) {
+  ({ calls, registerTool } = installFakeModelContext(impl));
 }
 
 function reg(spec: AgentActionSpec<any, any>, target?: () => Element | null) {
@@ -31,14 +24,12 @@ function reg(spec: AgentActionSpec<any, any>, target?: () => Element | null) {
 }
 
 beforeEach(() => {
-  __resetForTests();
+  resetAgentRuntime();
   installModelContext();
 });
 
 afterEach(() => {
-  __resetForTests();
-  delete (document as any).modelContext;
-  delete (window as any).__WEB_FOR_AGENTS__;
+  resetAgentRuntime();
   delete (window as any).confirm;
   document.body.innerHTML = "";
   vi.restoreAllMocks();
@@ -149,8 +140,24 @@ describe("registry", () => {
     expect(msg).toContain("Wipe all");
     expect(msg).toContain(JSON.stringify({ really: "yes" }));
     expect(msg).toBe(
-      `An AI agent wants to run "Wipe all": wipes\n\nInput: ${JSON.stringify({ really: "yes" })}\n\nAllow?`,
+      `An AI agent wants to run "Wipe all": wipes\n\nAgent-provided input: ${JSON.stringify({ really: "yes" })}\n\nAllow?`,
     );
+  });
+
+  it("confirm message caps the agent-provided input at 500 characters", async () => {
+    const confirm = vi.fn(() => false);
+    reg({
+      name: "wipe",
+      description: "wipes",
+      inputSchema: { type: "object", properties: { note: { type: "string" } } },
+      destructive: true,
+      confirm,
+      handler: () => 1,
+    });
+    await executeAgentAction("wipe", { note: "x".repeat(2000) });
+    const msg = String((confirm.mock.calls[0] as unknown[])[0]);
+    const input = msg.split("Agent-provided input: ")[1]!.split("\n\nAllow?")[0]!;
+    expect(input).toHaveLength(500);
   });
 
   it("destructive uses confirmMessage when given", async () => {
@@ -206,6 +213,88 @@ describe("registry", () => {
       status: "error",
       message: "action has no handler and no element",
     });
+  });
+
+  it("clicking a disabled element returns an error and does not click", async () => {
+    document.body.innerHTML = `<button id="b" disabled>Go</button><fieldset disabled><button id="c">C</button></fieldset>`;
+    const clicked = vi.fn();
+    for (const id of ["b", "c"]) {
+      const el = document.getElementById(id)!;
+      el.addEventListener("click", clicked);
+      reg({ name: id, description: id }, () => el);
+    }
+    expect(await executeAgentAction("b", {})).toEqual({ status: "error", message: "element is disabled" });
+    expect(await executeAgentAction("c", {})).toEqual({ status: "error", message: "element is disabled" });
+    expect(clicked).not.toHaveBeenCalled();
+  });
+
+  it("form action without a handler: form schema only, author inputSchema ignored with one warning", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    document.body.innerHTML = `<form id="f"><input name="email" required></form>`;
+    const form = document.getElementById("f") as HTMLFormElement;
+    form.addEventListener("submit", (e) => e.preventDefault());
+    reg(
+      {
+        name: "contact",
+        description: "c",
+        submitSettleMs: 0,
+        inputSchema: { type: "object", properties: { other: { type: "string" } }, required: ["other"] },
+      },
+      () => form,
+    );
+    const [d] = listAgentActions();
+    expect(Object.keys(d!.inputSchema.properties!)).toEqual(["email"]);
+    expect(d!.inputSchema.required).toEqual(["email"]);
+    listAgentActions();
+    await flush();
+    expect(calls[0]!.tool.inputSchema).toEqual(d!.inputSchema);
+
+    // Enforced once, against the form: one error per problem, the author schema plays no part.
+    expect(await executeAgentAction("contact", { other: "x" })).toEqual({
+      status: "invalid",
+      errors: [
+        { field: "email", message: "is required" },
+        { field: "other", message: "is not an allowed field" },
+      ],
+    });
+    expect((await executeAgentAction("contact", { email: "a@b.c" })).status).toBe("submitted");
+
+    const ignored = warn.mock.calls.filter((c) => String(c[0]).includes("inputSchema is ignored"));
+    expect(ignored).toHaveLength(1);
+    expect(String(ignored[0]![0])).toMatch(/^\[web-for-agents\] agent action "contact"/);
+  });
+
+  it("form action validates against the fields present at execution time", async () => {
+    document.body.innerHTML = `<form id="f"><input name="a"></form>`;
+    const form = document.getElementById("f") as HTMLFormElement;
+    form.addEventListener("submit", (e) => e.preventDefault());
+    reg({ name: "f", description: "f", submitSettleMs: 0 }, () => form);
+    await flush();
+    form.insertAdjacentHTML("beforeend", `<input name="b" required>`);
+    expect(await executeAgentAction("f", { a: "1" })).toEqual({
+      status: "invalid",
+      errors: [{ field: "b", message: "is required" }],
+    });
+  });
+
+  it("a failed WebMCP registration is retried on the next sync", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    let fail = true;
+    installModelContext(() => (fail ? Promise.reject(new Error("busy")) : undefined));
+    reg({ name: "a", description: "a", handler: () => 1 });
+    await flush();
+    await flush();
+    await flush();
+    expect(registerTool).toHaveBeenCalledTimes(1);
+    fail = false;
+    refreshAgentActions();
+    await flush();
+    expect(registerTool).toHaveBeenCalledTimes(2);
+    await flush();
+    await flush();
+    refreshAgentActions();
+    await flush();
+    expect(registerTool).toHaveBeenCalledTimes(2);
   });
 
   it("action without handler or element is hidden until its target appears", async () => {

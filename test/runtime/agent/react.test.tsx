@@ -4,27 +4,25 @@ import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentAction, AgentForm, agentParam, executeAgentAction, listAgentActions } from "../../../src/index";
-import { __resetForTests } from "../../../src/runtime/agent/registry";
-import type { WebMcpTool } from "../../../src/runtime/agent/webmcp";
+import {
+  installFakeModelContext,
+  resetAgentRuntime,
+  setupReactAct,
+  type FakeModelContext,
+  type ToolCall,
+} from "../../helpers/agent";
 
-(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
-
-type Call = { tool: WebMcpTool; signal: AbortSignal };
-let calls: Call[];
-let registerTool: ReturnType<typeof vi.fn>;
+let calls: ToolCall[];
+let registerTool: FakeModelContext["registerTool"];
 let container: HTMLElement;
 let root: Root;
 
-const flush = () => act(async () => { await Promise.resolve(); await Promise.resolve(); });
+const flush = setupReactAct(act);
 const render = async (ui: React.ReactElement) => { await act(async () => { root.render(ui); }); await flush(); };
 
 beforeEach(() => {
-  __resetForTests();
-  calls = [];
-  registerTool = vi.fn((tool: WebMcpTool, opts?: { signal?: AbortSignal }) => {
-    calls.push({ tool, signal: opts!.signal! });
-  });
-  (document as any).modelContext = { registerTool };
+  resetAgentRuntime();
+  ({ calls, registerTool } = installFakeModelContext());
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -33,8 +31,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
-  delete (document as any).modelContext;
-  __resetForTests();
+  resetAgentRuntime();
 });
 
 describe("React API", () => {

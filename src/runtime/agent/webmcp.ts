@@ -1,3 +1,4 @@
+import { errorMessage, withPrefix } from "../../shared/errors";
 import type { JsonSchema } from "./types";
 
 export interface WebMcpTool {
@@ -35,10 +36,6 @@ function detect(): Found | null {
   return null;
 }
 
-export function getModelContext(): ModelContextLike | null {
-  return detect()?.ctx ?? null;
-}
-
 export async function exposeTool(
   tool: WebMcpTool,
   signal: AbortSignal,
@@ -50,8 +47,7 @@ export async function exposeTool(
   try {
     await Promise.resolve(ctx.registerTool(tool, { signal }));
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[web-for-agents] WebMCP registerTool failed for "${tool.name}": ${message}`);
+    console.warn(withPrefix(`WebMCP registerTool failed for "${tool.name}": ${errorMessage(err)}`));
     return "failed";
   }
   if (legacy && typeof ctx.unregisterTool === "function") {
