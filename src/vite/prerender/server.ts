@@ -47,16 +47,18 @@ export function fixImportMeta(code: string): string {
 
 /**
  * Wraps every regex literal in parentheses: `/re/i` -> `(/re/i)`. happy-dom 21's module compiler
- * decides whether a "/" starts a regex from the preceding token, and it does not know `return`,
- * `typeof`, `!`, `?` or `|`, so minified code like `return/^[a-z]+:/i.test(e)` fails to load as a
- * module. A "(" in front is a token it knows, and the parentheses do not change the value.
- * Literals are found with Vite's parser; code it cannot parse is returned unchanged.
+ * decides whether a "/" starts a regex from the character before it, and only a narrow list of
+ * punctuation counts. Anything else, such as `return`, `!`, `typeof`, `-`, whitespace or `)`, makes
+ * it misread the regex (minified `return/^[a-z]+:/i.test(e)`, for example), and the module fails to
+ * load. "(" is on the list, and the parentheses do not change the value. Literals are found with
+ * Vite's parser; code it cannot parse is returned unchanged.
  */
 export function parenthesizeRegExps(code: string): string {
   if (!code.includes("/")) return code;
   let ast: unknown;
   try {
-    ast = parseAst(code);
+    // sourceType is read by Vite 8's parser (rolldown) and ignored by Rollup's, which always parses modules.
+    ast = parseAst(code, { sourceType: "module" });
   } catch {
     return code;
   }
@@ -90,6 +92,11 @@ export function parenthesizeRegExps(code: string): string {
   return parts.reverse().join("");
 }
 
+/** Everything the served JS needs to load in happy-dom. Harmless for Chrome, which may get it too when renderers are mixed. */
+export function happyDomCompat(code: string): string {
+  return fixImportMeta(parenthesizeRegExps(code));
+}
+
 export interface StaticServerOptions {
   dir: string;
   base: string;
@@ -97,8 +104,8 @@ export interface StaticServerOptions {
   shell: string;
   /** Mount at "/" and resolve nested asset requests against the root. Default: isRelativeBase(base). */
   relativeBase?: boolean;
-  /** Apply parenthesizeRegExps and fixImportMeta to served JS. Needed only by the happy-dom renderer. Default false. */
-  rewriteImportMeta?: boolean;
+  /** Rewrite served JS with happyDomCompat. Needed when any route may render under happy-dom. Default false. */
+  happyDomCompat?: boolean;
   /**
    * Full-URL Vite base ("https://cdn…/app/"). In the shell, JS and CSS it serves, the base is replaced by
    * this server's origin so the renderer never contacts the real host; finalizeHtml maps the origin back.
@@ -117,13 +124,14 @@ async function isFile(p: string): Promise<boolean> {
 export function startStaticServer(opts: StaticServerOptions): Promise<StaticServer> {
   const root = resolve(opts.dir);
   const relative = opts.relativeBase ?? isRelativeBase(opts.base);
-  const rewrite = opts.rewriteImportMeta === true;
+  const compat = opts.happyDomCompat === true;
   let origin = "";
   const baseUrl = opts.fullBase === undefined ? undefined : trimTrailingSlash(opts.fullBase) + "/";
   const local = (code: string) => (baseUrl === undefined ? code : code.split(baseUrl).join(origin + "/"));
   const mount = relative ? "" : trimTrailingSlash(opts.base);
-  // Built assets do not change while the server runs; parse each file once, not once per page.
-  const rewritten = new Map<string, string>();
+  // Built assets do not change while the server runs. Caching the promise parses each file once,
+  // even when several pages request it before the first parse finishes.
+  const compatJs = new Map<string, Promise<string>>();
 
   const server = createServer(async (req, res) => {
     const send = (status: number, type: string, body: string | Buffer) => {
@@ -150,13 +158,14 @@ export function startStaticServer(opts: StaticServerOptions): Promise<StaticServ
       const serve = async (file: string) => {
         const ext = extname(file).toLowerCase();
         const type = TYPES[ext] ?? "application/octet-stream";
-        if (rewrite && (ext === ".js" || ext === ".mjs")) {
-          let code = rewritten.get(file);
+        if (compat && (ext === ".js" || ext === ".mjs")) {
+          let code = compatJs.get(file);
           if (code === undefined) {
-            code = fixImportMeta(parenthesizeRegExps(await readFile(file, "utf8")));
-            rewritten.set(file, code);
+            code = readFile(file, "utf8").then(happyDomCompat);
+            compatJs.set(file, code);
+            code.catch(() => compatJs.delete(file));
           }
-          return send(200, type, local(code));
+          return send(200, type, local(await code));
         }
         if (baseUrl !== undefined && (ext === ".js" || ext === ".mjs" || ext === ".css")) {
           return send(200, type, local(await readFile(file, "utf8")));

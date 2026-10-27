@@ -152,7 +152,7 @@ describe("default build", () => {
       dir: copy,
       base: "/",
       shell: read(copy, "index.html"),
-      rewriteImportMeta: true,
+      happyDomCompat: true,
     });
     const browser = new Browser({
       settings: {

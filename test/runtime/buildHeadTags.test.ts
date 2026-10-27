@@ -111,4 +111,8 @@ describe("buildHeadTags canonical", () => {
     expect(href(buildHeadTags({ canonical: "/list?page=2" }, d))).toBe("https://x.com/sub/list?page=2");
     expect(href(buildHeadTags({ canonical: "https://o.com/z" }, d))).toBe("https://o.com/z");
   });
+
+  it("treats a value with a scheme as a URL even when it does not parse", () => {
+    expect(href(buildHeadTags({ canonical: "https://a b.com" }, { siteUrl: "https://x.com/sub" }))).toBe("https://a b.com");
+  });
 });

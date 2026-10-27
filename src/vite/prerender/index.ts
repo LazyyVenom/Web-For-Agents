@@ -11,7 +11,7 @@ import { startStaticServer } from "./server";
 
 export type { CrawlFailure, CrawlResult, PrerenderedPage } from "./crawl";
 
-/** True when any route may render under happy-dom (the fallback is never happy-dom), which needs the server's import.meta rewrite. */
+/** True when any route may render under happy-dom (the fallback is never happy-dom), which needs the server's happyDomCompat rewrite. */
 export function mayUseHappyDom(pr: ResolvedPrerender): boolean {
   return pr.renderer === "happy-dom" || pr.routeRenderers.some((rr) => rr.renderer === "happy-dom");
 }
@@ -48,7 +48,7 @@ export async function prerenderSite(input: {
       shell,
       relativeBase,
       ...(fullBase !== undefined ? { fullBase } : {}),
-      rewriteImportMeta: mayUseHappyDom(pr),
+      happyDomCompat: mayUseHappyDom(pr),
     });
     try {
       const result = await crawlRoutes(
