@@ -10,7 +10,6 @@ import {
   ACTION_DESCRIPTION_ATTR,
   ACTION_DESTRUCTIVE_ATTR,
   AGENT_GLOBAL,
-  normalizeRoute,
   WEBMCP_TOOLDESCRIPTION_ATTR,
   WEBMCP_TOOLNAME_ATTR,
 } from "../shared/conventions";
