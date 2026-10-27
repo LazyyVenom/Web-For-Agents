@@ -70,4 +70,10 @@ describe("import boundaries", () => {
       }
     }
   });
+  it("leaf shared modules import nothing", () => {
+    for (const name of ["errors", "url", "bots", "conventions"]) {
+      const file = join(SRC, "shared", `${name}.ts`);
+      expect(specifiers(readFileSync(file, "utf8")), relative(SRC, file)).toEqual([]);
+    }
+  });
 });

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { normalizeRoute as sharedNormalizeRoute } from "../../src/shared/conventions";
 import { agentOutputs, isExcluded, normalizeRoute, resolveOptions } from "../../src/vite/options";
 
 const robots = { ai: { training: "block", search: "allow" } } as const;
@@ -88,6 +89,9 @@ describe("option edge cases", () => {
 });
 
 describe("normalizeRoute", () => {
+  it("is re-exported from shared/conventions", () => {
+    expect(normalizeRoute).toBe(sharedNormalizeRoute);
+  });
   it("normalizes", () => {
     expect(normalizeRoute("")).toBe("/");
     expect(normalizeRoute("about/")).toBe("/about");
