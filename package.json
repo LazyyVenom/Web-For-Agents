@@ -69,6 +69,8 @@
   },
   "scripts": {
     "build": "tsup",
+    "demo:dev": "vite examples/demo",
+    "demo:build": "vite build examples/demo --outDir dist-demo --emptyOutDir",
     "prepublishOnly": "npm run build && npm test && npm run typecheck",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

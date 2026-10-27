@@ -3,3 +3,4 @@ dist
 test/fixtures/*/dist
 test/fixtures/tmp-*
 .superpowers/
+dist-demo
