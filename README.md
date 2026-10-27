@@ -310,6 +310,32 @@ export function Post({ title }: { title: string }) {
 
 Nested `Seo`/`useSeo` calls merge, with the deeper one winning per tag.
 
+### Props
+
+`SeoProvider` `defaults`:
+
+| Field | Description |
+| --- | --- |
+| `siteName` | `og:site_name`, and the title when a page sets none. |
+| `siteUrl` | Absolute site URL. Paths in `canonical` and `image` resolve against it; enables the default canonical. |
+| `titleTemplate` | Title format, `%s` is replaced by the page title, e.g. `"%s \| My Site"`. |
+| `description` | Default description. |
+| `image` | Default Open Graph and Twitter image. |
+| `twitterSite` | `twitter:site` handle. |
+| `locale` | `og:locale`. |
+
+`Seo` / `useSeo`:
+
+| Prop | Description |
+| --- | --- |
+| `title` | Page title, formatted with `titleTemplate`. Also used for `og:title` and `twitter:title`. |
+| `description` | Meta, Open Graph and Twitter description. |
+| `canonical` | Absolute URL or path, or `false` for none. See [Canonical URL](#canonical-url). |
+| `image` | Open Graph and Twitter image; a large Twitter card is used when set. |
+| `type` | `og:type`: `"website"` (default), `"article"` or `"product"`. |
+| `noindex` | Emits `robots: noindex, nofollow`; prerendered but left out of the sitemap and `llms.txt`. |
+| `meta` | Extra `{ name, content }` or `{ property, content }` tags. |
+
 ### Canonical URL
 
 `canonical` takes an absolute URL or a path. A path, with or without a leading slash, resolves under `defaults.siteUrl`, including its path, the same way sitemap URLs do: with `siteUrl: "https://example.com/sub"`, `canonical="/about"` and `canonical="about"` both become `https://example.com/sub/about`.
@@ -422,7 +448,7 @@ A passing check earns its full weight, a warning half, a failure none. Each non-
 
 Exit codes: `0` ok, `1` score below `--min-score`, `2` usage error or fatal error (unreachable page, non-2xx status, not HTML, timeout).
 
-The programmatic API is available from `@anubhav-choubey/web-for-agents/cli` (`audit`, `runCli`, `formatText`, and the `CheckResult`, `CheckId` and `CheckStatus` types).
+The programmatic API is available from `@anubhav-choubey/web-for-agents/cli` (`audit`, `runCli`, `formatText`, and the `AuditOptions`, `AuditReport`, `CheckResult`, `CheckId` and `CheckStatus` types).
 
 ### Auditing a local preview
 
@@ -483,9 +509,12 @@ Pass `siteUrl` and `base` so the panel's markdown links match the build; both ar
 
 ```sh
 npm ci
-npm run typecheck
-npm test            # unit, Vite and e2e tests
+npm run typecheck   # tsc --noEmit
+npm test            # unit, Vite and e2e tests (vitest)
+npm run build       # tsup into dist/
 npm run test:pack   # packs the package, installs the tarball into a fresh Vite app, builds it and audits it
+npm run demo:dev    # demo site with the dev overlay
+npm run demo:build  # prerender the demo into dist-demo/
 ```
 
 `npm run test:pack` is kept out of `npm test`: it builds `dist`, runs `npm pack`, and installs the tarball with `vite`, `react`, `react-dom` and `react-router` from the npm registry into a temp app copied from `test/fixtures/pack-app`, so it needs the network (or a warm npm cache). Set `PACK_VITE=5|6|7|8` to pick the app's Vite major (default 8).
@@ -499,6 +528,8 @@ node scripts/install-vite.mjs 5
 npx vitest run test/vite test/e2e test/cli/audit.e2e.test.ts
 npm ci   # back to the locked versions
 ```
+
+The demo in `examples/demo` uses every feature; its README lists what each page shows.
 
 ## License
 
