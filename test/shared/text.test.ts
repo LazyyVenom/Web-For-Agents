@@ -1,0 +1,12 @@
+import { describe, it, expect } from "vitest";
+import { collapseWhitespace } from "../../src/shared/text";
+
+describe("collapseWhitespace", () => {
+  it("collapses runs and trims", () => {
+    expect(collapseWhitespace("  a \n\t b  ")).toBe("a b");
+  });
+  it("maps null and undefined to an empty string", () => {
+    expect(collapseWhitespace(null)).toBe("");
+    expect(collapseWhitespace(undefined)).toBe("");
+  });
+});

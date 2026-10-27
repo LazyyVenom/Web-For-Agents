@@ -1,6 +1,6 @@
 import { DEFAULT_CONTENT_SELECTOR } from "../shared/content";
-import { normalizeRoute } from "../shared/conventions";
-import { LOG_PREFIX } from "../shared/errors";
+import { AGENT_MAP_PATH, normalizeRoute } from "../shared/conventions";
+import { LOG_PREFIX, withPrefix } from "../shared/errors";
 import { trimTrailingSlash } from "./prerender/paths";
 
 export { normalizeRoute };
@@ -22,6 +22,13 @@ export interface WebForAgentsOptions {
   prerender?: PrerenderOptions | false;
   markdown?: MarkdownOptions | false;
   llms?: LlmsOptions | false;
+  /** Default true: writes agents.json (needs prerender). */
+  agentMap?: boolean | AgentMapOptions;
+}
+
+export interface AgentMapOptions {
+  /** Plain file name in outDir. Default "agents.json". */
+  fileName?: string;
 }
 
 export type RendererName = "happy-dom" | "chrome" | "msedge";
@@ -70,6 +77,7 @@ export interface ResolvedOptions {
   prerender: ResolvedPrerender | false;
   markdown: { contentSelector: string } | false;
   llms: LlmsOptions | false;
+  agentMap: { fileName: string } | false;
   warnings: string[];
 }
 
@@ -141,7 +149,22 @@ export function agentOutputs(r: ResolvedOptions): string[] {
   if (r.llms) out.push("llms.txt");
   if (r.llms && r.markdown) out.push("llms-full.txt");
   if (r.markdown) out.push(".md files");
+  if (r.agentMap) out.push(r.agentMap.fileName);
   return out;
+}
+
+const AGENT_MAP_FILE = /^[A-Za-z0-9_.-]+\.json$/;
+
+function resolveAgentMap(input: WebForAgentsOptions["agentMap"]): { fileName: string } | false {
+  if (input === false) return false;
+  if (input !== true && input !== undefined && (typeof input !== "object" || input === null)) {
+    throw new Error(withPrefix("agentMap must be a boolean or { fileName }"));
+  }
+  const fileName = (input === true || input === undefined ? undefined : input.fileName) ?? AGENT_MAP_PATH.slice(1);
+  if (typeof fileName !== "string" || !AGENT_MAP_FILE.test(fileName)) {
+    throw new Error(`${LOG_PREFIX} agentMap.fileName must be a plain .json file name`);
+  }
+  return { fileName };
 }
 
 export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
@@ -193,9 +216,15 @@ export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
   const prerender = input.prerender === false ? false : resolvePrerender(input.prerender ?? {});
   let markdown: ResolvedOptions["markdown"] = false;
   let llms: ResolvedOptions["llms"] = false;
+  // Validated even when prerender is off, so a bad fileName fails fast.
+  const requestedAgentMap = resolveAgentMap(input.agentMap);
+  let agentMap: ResolvedOptions["agentMap"] = false;
   if (prerender === false) {
-    if (input.markdown || input.llms) {
-      warnings.push(`${LOG_PREFIX} markdown and llms require prerender; they are disabled because prerender is false`);
+    const set = (["markdown", "llms", "agentMap"] as const).filter((k) => input[k]);
+    if (set.length > 0) {
+      const names = set.length === 1 ? set[0] : `${set.slice(0, -1).join(", ")} and ${set[set.length - 1]}`;
+      const verb = set.length === 1 ? "requires prerender; it is" : "require prerender; they are";
+      warnings.push(withPrefix(`${names} ${verb} disabled because prerender is false`));
     }
   } else {
     if (input.markdown !== false) {
@@ -206,6 +235,7 @@ export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
       markdown = { contentSelector: sel ?? DEFAULT_CONTENT_SELECTOR };
     }
     if (input.llms !== false) llms = { ...input.llms };
+    agentMap = requestedAgentMap;
   }
 
   const resolved: ResolvedOptions = {
@@ -217,6 +247,7 @@ export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
     prerender,
     markdown,
     llms,
+    agentMap,
     warnings,
   };
 

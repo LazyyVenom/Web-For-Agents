@@ -1,3 +1,4 @@
+import { collapseWhitespace } from "../shared/text";
 import { byRoute } from "./prerender/paths";
 
 export interface LlmsSection {
@@ -16,12 +17,9 @@ export interface LlmsPage {
 
 type Site = { title: string; description?: string };
 
-/** Collapses whitespace runs (including newlines) to single spaces and trims. */
-const oneLine = (s = ""): string => s.replace(/\s+/g, " ").trim();
-
 function header(site: Site): string[] {
   const blocks = [`# ${site.title}`];
-  const desc = oneLine(site.description);
+  const desc = collapseWhitespace(site.description);
   if (desc) blocks.push(`> ${desc}`);
   return blocks;
 }
@@ -29,8 +27,8 @@ function header(site: Site): string[] {
 export function buildLlmsTxt(site: Site, pages: LlmsPage[], sections: LlmsSection[] = []): string {
   const blocks = header(site);
   const lines = [...pages].sort(byRoute).map((p) => {
-    const title = oneLine(p.title).replace(/[[\]]/g, "\\$&");
-    const desc = oneLine(p.description);
+    const title = collapseWhitespace(p.title).replace(/[[\]]/g, "\\$&");
+    const desc = collapseWhitespace(p.description);
     return `- [${title}](${p.mdUrl ?? p.url})${desc ? `: ${desc}` : ""}`;
   });
   blocks.push(["## Pages", ...(lines.length ? ["", ...lines] : [])].join("\n"));

@@ -71,9 +71,34 @@ describe("import boundaries", () => {
     }
   });
   it("leaf shared modules import nothing", () => {
-    for (const name of ["errors", "url", "bots", "conventions"]) {
+    for (const name of ["errors", "url", "bots", "conventions", "sort", "text"]) {
       const file = join(SRC, "shared", `${name}.ts`);
       expect(specifiers(readFileSync(file, "utf8")), relative(SRC, file)).toEqual([]);
+    }
+  });
+
+  it("shared/agent imports only shared/conventions, as types or values", () => {
+    const file = join(SRC, "shared", "agent.ts");
+    for (const spec of specifiers(readFileSync(file, "utf8"))) {
+      expect(resolved(file, spec), `shared/agent.ts -> ${spec}`).toBe(join(SRC, "shared", "conventions"));
+    }
+  });
+
+  it("src/runtime/agent is covered by the runtime rules", () => {
+    const agentDir = join(SRC, "runtime", "agent");
+    const agentFiles = walk(agentDir);
+    expect(agentFiles.length).toBeGreaterThan(0);
+    for (const f of agentFiles) expect(runtimeFiles, relative(SRC, f)).toContain(f);
+  });
+
+  it("src/vite/agentMap imports runtime, if at all, only via import type", () => {
+    const file = join(vite, "agentMap.ts");
+    const src = readFileSync(file, "utf8");
+    const runtime = join(SRC, "runtime");
+    for (const line of src.split("\n")) {
+      const spec = specifiers(line)[0];
+      if (!spec || !spec.startsWith(".") || !inDir(resolved(file, spec), runtime)) continue;
+      expect(line, line).toMatch(/^\s*import\s+type\s/);
     }
   });
 });

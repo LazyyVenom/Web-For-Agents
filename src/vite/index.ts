@@ -1,8 +1,10 @@
 import type { Plugin } from "vite";
+import { agentMapExtension } from "./agentMap";
 import { createBuildPlugin } from "./buildPlugin";
 import type { LlmsSection } from "./llms";
 import {
   resolveOptions,
+  type AgentMapOptions,
   type LlmsOptions,
   type MarkdownOptions,
   type PrerenderOptions,
@@ -14,7 +16,11 @@ import type { ExtensionContext, ExtensionPage, PrerenderExtension } from "./prer
 import { AI_BOTS } from "./robots";
 
 export function webForAgents(options: WebForAgentsOptions): Plugin {
-  return createBuildPlugin(resolveOptions(options), []);
+  const resolved = resolveOptions(options);
+  const extensions = resolved.agentMap
+    ? [agentMapExtension({ siteUrl: resolved.siteUrl, fileName: resolved.agentMap.fileName })]
+    : [];
+  return createBuildPlugin(resolved, extensions);
 }
 
 export { AI_BOTS };
@@ -24,6 +30,7 @@ export type {
   PrerenderOptions,
   MarkdownOptions,
   LlmsOptions,
+  AgentMapOptions,
   RendererName,
   PrerenderExtension,
   ExtensionContext,
