@@ -1,25 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { CHECK_WEIGHTS, runChecks, scoreOf, type AuditInputs } from "../../src/cli/checks";
 import { extractHtmlFacts } from "../../src/cli/html";
-import type { FetchResult } from "../../src/cli/fetch";
+import { MAX_BODY_BYTES, notFetched, type FetchResult } from "../../src/cli/fetch";
+import { wellFormedPage } from "../helpers/page";
 
 const URL_ = "http://h/x";
 
 function ok(body: string, contentType = "text/plain", url = URL_): FetchResult {
   return { url, finalUrl: url, redirected: false, status: 200, contentType, body, truncated: false };
 }
+const SITEMAP_XML = (...locs: string[]) =>
+  `<?xml version="1.0"?><urlset>${locs.map((l) => `<url><loc>${l}</loc></url>`).join("")}</urlset>`;
+const AGENT_MAP = '{"version":1,"pages":[]}';
 const spa = (): FetchResult => ok("<!doctype html><div id=root></div>", "text/html");
 
 function pageHtml(over: { head?: string; text?: string } = {}): string {
-  const text = over.text ?? "a".repeat(300);
-  const head =
-    over.head ??
-    `<title>${"t".repeat(30)}</title>
-<meta name="description" content="${"d".repeat(100)}">
-<meta property="og:title" content="t"><meta property="og:description" content="d"><meta property="og:image" content="http://h/i.png">
-<link rel="canonical" href="http://h/x">
-<script type="application/ld+json">{"@type":"Organization","name":"x"}</script>`;
-  return `<!doctype html><html><head>${head}</head><body><main>${text}</main></body></html>`;
+  return wellFormedPage({ base: "http://h", path: "/x", markdown: null, ...over });
 }
 
 function inputs(over: Partial<Omit<AuditInputs, "html">> & { src?: string } = {}): AuditInputs {
@@ -28,11 +24,11 @@ function inputs(over: Partial<Omit<AuditInputs, "html">> & { src?: string } = {}
   return {
     page: ok(html, "text/html"),
     html: extractHtmlFacts(html),
-    robots: ok("User-agent: *\nAllow: /\n"),
-    sitemap: ok('<?xml version="1.0"?><urlset><url><loc>http://h/x</loc></url></urlset>', "application/xml"),
+    robots: ok("User-agent: *\nAllow: /\n", "text/plain", "http://h/robots.txt"),
+    sitemap: ok(SITEMAP_XML("http://h/x"), "application/xml", "http://h/sitemap.xml"),
     markdown: ok("# x", "text/markdown", "http://h/x.md"),
-    llmsTxt: ok("# Site\n"),
-    agentMap: ok('{"pages":[]}', "application/json"),
+    llmsTxt: ok("# Site\n", "text/plain", "http://h/llms.txt"),
+    agentMap: ok(AGENT_MAP, "application/json", "http://h/agents.json"),
     ...rest,
   };
 }
@@ -77,7 +73,7 @@ describe("checks", () => {
     expect(e503.status).toBe("fail");
     const net = byId(inputs({ robots: { ...ok(""), status: 0, error: "network error: x" } }), "robots");
     expect(net.status).toBe("fail");
-    expect(net.message).toBe("robots.txt unreachable (network error: x)");
+    expect(net.message).toBe("/robots.txt unreachable (network error: x)");
     const nf = byId(inputs({ robots: { ...ok("nope"), status: 404 } }), "robots");
     expect(nf.status).toBe("warn");
     expect(nf.message).toContain("not found");
@@ -92,7 +88,7 @@ describe("checks", () => {
 
   it("agent-map without pages warns; BOM tolerated", () => {
     expect(byId(inputs({ agentMap: ok("{}", "application/json") }), "agent-map").status).toBe("warn");
-    expect(byId(inputs({ agentMap: ok('\uFEFF{"pages":[]}', "application/json") }), "agent-map").status).toBe("pass");
+    expect(byId(inputs({ agentMap: ok("\uFEFF" + AGENT_MAP, "application/json") }), "agent-map").status).toBe("pass");
   });
 
   it("llms-txt without H1 warns", () => {
@@ -123,7 +119,7 @@ describe("checks", () => {
     expect(c(49).status).toBe("fail");
     const i = inputs({ src: pageHtml({ text: "a".repeat(10) }) });
     i.page.truncated = true;
-    expect(byId(i, "content").message.endsWith(" (page truncated at 5 MiB)")).toBe(true);
+    expect(byId(i, "content").message.endsWith(` (page truncated at ${MAX_BODY_BYTES / 1024 / 1024} MiB)`)).toBe(true);
   });
 
   it("sitemap variants", () => {
@@ -132,5 +128,107 @@ describe("checks", () => {
     expect(byId(inputs({ sitemap: ok("<sitemapindex></sitemapindex>", "application/xml") }), "sitemap").status).toBe(
       "pass",
     );
+  });
+
+  it("canonical on another origin names it and gives the preview fix", () => {
+    const html = pageHtml({ head: '<link rel="canonical" href="https://prod.example/x">' });
+    const c = byId(inputs({ src: html }), "canonical");
+    expect(c.status).toBe("warn");
+    expect(c.message).toBe(
+      "Canonical https://prod.example/x points to https://prod.example (different origin than the audited page)",
+    );
+    expect(c.fix).toBe("Audit the deployed site, or build with siteUrl set to http://h to audit this preview.");
+  });
+
+  it("sitemap messages name the URL fetched", () => {
+    const at = (sitemap: FetchResult) => byId(inputs({ sitemap }), "sitemap");
+    expect(at(ok(SITEMAP_XML("http://h/x"), "application/xml", "http://h/s.xml")).message).toBe(
+      "Sitemap http://h/s.xml lists this page",
+    );
+    expect(at(ok(SITEMAP_XML("http://h/y"), "application/xml", "http://h/s.xml")).message).toBe(
+      "Sitemap http://h/s.xml does not list this page",
+    );
+    expect(at({ ...ok("nope", "text/plain", "http://h/s.xml"), status: 404 }).message).toBe(
+      "Sitemap not found at http://h/s.xml",
+    );
+    expect(at(ok("<x/>", "application/xml", "http://h/s.xml")).message).toBe("http://h/s.xml is not sitemap XML");
+    expect(at(ok("<sitemapindex></sitemapindex>", "application/xml", "http://h/s.xml")).message).toBe(
+      "Sitemap index found at http://h/s.xml",
+    );
+  });
+
+  it("sitemap on another origin is named, not reported missing", () => {
+    const c = byId(inputs({ sitemap: notFetched("https://prod.example/sitemap.xml") }), "sitemap");
+    expect(c.status).toBe("warn");
+    expect(c.message).toBe(
+      "Sitemap https://prod.example/sitemap.xml points to https://prod.example (different origin than the audited page)",
+    );
+    expect(c.fix).toBe("Audit the deployed site, or build with siteUrl set to http://h to audit this preview.");
+  });
+
+  it("sitemap listing this path on another origin says so", () => {
+    const sitemap = ok(
+      SITEMAP_XML("https://prod.example/", "https://prod.example/x"),
+      "application/xml",
+      "http://h/sitemap.xml",
+    );
+    const c = byId(inputs({ sitemap }), "sitemap");
+    expect(c.status).toBe("warn");
+    expect(c.message).toBe(
+      "Sitemap http://h/sitemap.xml lists https://prod.example/x, which points to https://prod.example (different origin than the audited page)",
+    );
+    expect(c.fix).toBe("Audit the deployed site, or build with siteUrl set to http://h to audit this preview.");
+  });
+
+  it("markdown alternate on another origin says so", () => {
+    const c = byId(inputs({ markdown: notFetched("https://prod.example/x.md") }), "markdown");
+    expect(c.status).toBe("warn");
+    expect(c.message).toBe(
+      "Markdown alternate https://prod.example/x.md points to https://prod.example (different origin than the audited page)",
+    );
+    expect(c.fix).toBe("Audit the deployed site, or build with siteUrl set to http://h to audit this preview.");
+  });
+
+  it("llms.txt and agent map messages name every probed URL", () => {
+    const missing = (url: string): FetchResult => ({ ...ok("x", "text/plain", url), status: 404 });
+    const i = inputs({
+      llmsTxt: missing("http://h/llms.txt"),
+      agentMap: missing("http://h/agents.json"),
+      tried: {
+        llmsTxt: ["http://h/llms.txt", "http://h/sub/llms.txt"],
+        agentMap: ["http://h/agents.json", "http://h/sub/agents.json"],
+      },
+    });
+    expect(byId(i, "llms-txt").message).toBe("/llms.txt not found at http://h/llms.txt or http://h/sub/llms.txt");
+    expect(byId(i, "agent-map").message).toBe(
+      "/agents.json not found at http://h/agents.json or http://h/sub/agents.json",
+    );
+    const custom = byId(inputs({ agentMap: missing("http://h/map.json"), agentMapPath: "map.json" }), "agent-map");
+    expect(custom.message).toBe("map.json not found at http://h/map.json");
+    expect(custom.fix).toBe("Serve map.json; webForAgents() generates /agents.json from your marked agent actions.");
+    expect(byId(inputs(), "llms-txt").message).toBe("/llms.txt found at http://h/llms.txt");
+    expect(byId(inputs(), "agent-map").message).toBe("Agent map found at http://h/agents.json");
+  });
+
+  it("agent map with another version warns", () => {
+    const at = (body: string) =>
+      byId(inputs({ agentMap: ok(body, "application/json", "http://h/agents.json") }), "agent-map");
+    const v2 = at('{"version":2,"pages":[]}');
+    expect(v2.status).toBe("warn");
+    expect(v2.message).toBe("http://h/agents.json has version 2; expected 1");
+    expect(v2.fix).toBe("Regenerate /agents.json with the current webForAgents().");
+    expect(at('{"pages":[]}').message).toBe("http://h/agents.json has version (none); expected 1");
+  });
+
+  it("json-ld with only non-string @type warns", () => {
+    const ld = '<script type="application/ld+json">{"@type":1}</script>';
+    expect(byId(inputs({ src: pageHtml({ head: ld }) }), "json-ld").status).toBe("warn");
+  });
+
+  it("title limit is inclusive", () => {
+    const t = (n: number) => byId(inputs({ src: pageHtml({ head: `<title>${"t".repeat(n)}</title>` }) }), "title");
+    expect(t(70).status).toBe("pass");
+    expect(t(71).message).toBe("Title is 71 characters (over 70)");
+    expect(t(71).fix).toBe('Set a page title with <Seo title="..." /> (at most 70 characters).');
   });
 });

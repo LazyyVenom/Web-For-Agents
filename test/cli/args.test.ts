@@ -30,6 +30,8 @@ describe("parseCliArgs", () => {
       ["audit", "u", "--min-score", " 5"],
       ["audit", "u", "--min-score", "-1"],
       ["audit", "u", "--timeout", "0"],
+      ["audit", "u", "--agent-map", ""],
+      ["audit", "u", "--agent-map", "ftp://a/agents.json"],
     ]) {
       expect(() => parseCliArgs(argv), argv.join(" ")).toThrow(/\[web-for-agents\]/);
     }
@@ -38,5 +40,22 @@ describe("parseCliArgs", () => {
   it("normalizes urls", () => {
     expect(normalizeInputUrl("http://a.test")).toBe("http://a.test/");
     expect(() => normalizeInputUrl("")).toThrow();
+  });
+
+  it("defaults schemeless local hosts to http and everything else to https", () => {
+    expect(normalizeInputUrl("localhost:4173/x")).toBe("http://localhost:4173/x");
+    expect(normalizeInputUrl("LOCALHOST")).toBe("http://localhost/");
+    expect(normalizeInputUrl("127.0.0.1:8080")).toBe("http://127.0.0.1:8080/");
+    expect(normalizeInputUrl("[::1]:3000/a")).toBe("http://[::1]:3000/a");
+    expect(normalizeInputUrl("example.com")).toBe("https://example.com/");
+    expect(normalizeInputUrl("localhost.example.com")).toBe("https://localhost.example.com/");
+    expect(normalizeInputUrl("127.0.0.2")).toBe("https://127.0.0.2/");
+    expect(normalizeInputUrl("https://localhost/")).toBe("https://localhost/");
+  });
+
+  it("parses --agent-map", () => {
+    expect(parseCliArgs(["audit", "a.com", "--agent-map", "map.json"]).agentMap).toBe("map.json");
+    expect(parseCliArgs(["audit", "a.com", "--agent-map", "/x/agents.json"]).agentMap).toBe("/x/agents.json");
+    expect(parseCliArgs(["audit", "a.com"]).agentMap).toBeUndefined();
   });
 });

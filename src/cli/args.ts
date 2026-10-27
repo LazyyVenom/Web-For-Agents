@@ -1,4 +1,6 @@
 import { parseArgs } from "node:util";
+import { errorMessage, withPrefix } from "../shared/errors";
+import { hasScheme } from "../shared/url";
 import { DEFAULT_TIMEOUT_MS } from "./fetch";
 
 export interface CliArgs {
@@ -7,16 +9,27 @@ export interface CliArgs {
   json: boolean;
   minScore?: number;
   timeoutMs: number;
+  /** --agent-map: file name probed like agents.json, or a "/"-path or URL fetched as is. */
+  agentMap?: string;
 }
 
 const fail = (msg: string): never => {
-  throw new Error(`[web-for-agents] ${msg}`);
+  throw new Error(withPrefix(msg));
 };
+
+/** Hosts that get http:// when the input has no scheme; everything else gets https://. */
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+function defaultScheme(schemeless: string): "http" | "https" {
+  const authority = schemeless.split(/[/?#]/, 1)[0]!.replace(/^.*@/, "");
+  const host = authority.startsWith("[") ? authority.slice(0, authority.indexOf("]") + 1) : authority.split(":")[0]!;
+  return LOCAL_HOSTS.has(host.toLowerCase()) ? "http" : "https";
+}
 
 export function normalizeInputUrl(input: string): string {
   const s = input.trim();
   if (s === "") return fail("a URL is required");
-  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : `https://${s}`;
+  const withScheme = hasScheme(s) && /^[^:]*:\/\//.test(s) ? s : `${defaultScheme(s)}://${s}`;
   let u: URL;
   try {
     u = new URL(withScheme);
@@ -36,6 +49,7 @@ Options:
   --json               print the report as JSON
   --min-score <0-100>  exit with code 1 if the score is lower
   --timeout <ms>       per-request timeout (default ${DEFAULT_TIMEOUT_MS})
+  --agent-map <path>   agent map file name (probed like agents.json), or a /path or URL
   -h, --help           show this help
 
 Exit codes: 0 ok, 1 score below --min-score, 2 usage error or fatal error
@@ -51,11 +65,12 @@ export function parseCliArgs(argv: string[]): CliArgs {
         json: { type: "boolean" },
         "min-score": { type: "string" },
         timeout: { type: "string" },
+        "agent-map": { type: "string" },
         help: { type: "boolean", short: "h" },
       },
     });
   } catch (e) {
-    return fail((e as Error).message);
+    return fail(errorMessage(e));
   }
   const { values, positionals } = parsed;
   if (values.help || positionals.length === 0) return { command: "help", json: false, timeoutMs: DEFAULT_TIMEOUT_MS };
@@ -82,6 +97,18 @@ export function parseCliArgs(argv: string[]): CliArgs {
     if (!Number.isInteger(n) || n <= 0)
       return fail(`--timeout must be a positive integer (ms), got "${values.timeout}"`);
     args.timeoutMs = n;
+  }
+  if (values["agent-map"] !== undefined) {
+    const v = values["agent-map"].trim();
+    let ok = v !== "";
+    try {
+      const u = new URL(v, "http://localhost/");
+      ok &&= u.protocol === "http:" || u.protocol === "https:";
+    } catch {
+      ok = false;
+    }
+    if (!ok) return fail(`--agent-map must be a file name, a /path or an http(s) URL, got "${values["agent-map"]}"`);
+    args.agentMap = v;
   }
   return args;
 }

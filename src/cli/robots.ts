@@ -1,3 +1,5 @@
+import { stripBom } from "../shared/text";
+
 export interface RobotsRule {
   allow: boolean;
   pattern: string;
@@ -17,7 +19,7 @@ export function parseRobots(text: string): ParsedRobots {
   const out: ParsedRobots = { groups: [], sitemaps: [] };
   let cur: RobotsGroup | null = null;
   let inAgents = false;
-  for (const raw of text.replace(/^\uFEFF/, "").split(/\r\n|\r|\n/)) {
+  for (const raw of stripBom(text).split(/\r\n|\r|\n/)) {
     const line = raw.replace(/#.*$/, "").trim();
     const i = line.indexOf(":");
     if (i < 0) continue;

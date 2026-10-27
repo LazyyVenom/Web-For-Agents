@@ -1,7 +1,12 @@
-import { AI_BOTS } from "../vite/robots";
+import { AGENT_MAP_VERSION, type AgentMap } from "../shared/agent";
+import { AI_BOTS } from "../shared/bots";
 import { AGENT_MAP_PATH, LLMS_TXT_PATH, MARKDOWN_MIME, ROBOTS_PATH, SITEMAP_PATH } from "../shared/conventions";
+import { errorMessage } from "../shared/errors";
+import { jsonLdTypes } from "../shared/jsonLd";
+import { stripBom } from "../shared/text";
+import { hasScheme, trimTrailingSlash, tryResolveUrl } from "../shared/url";
+import { isOk, looksLikeHtml, MAX_BODY_BYTES, type FetchResult } from "./fetch";
 import { getLinks, getMeta, type HtmlFacts } from "./html";
-import { looksLikeHtml, type FetchResult } from "./fetch";
 import { isAllowed, parseRobots } from "./robots";
 
 export type CheckId =
@@ -32,10 +37,16 @@ export interface AuditInputs {
   page: FetchResult;
   html: HtmlFacts;
   robots: FetchResult;
+  /** Not fetched (status 0, no error) when on another origin than the page. */
   sitemap: FetchResult;
+  /** Not fetched (status 0, no error) when on another origin than the page. */
   markdown: FetchResult;
   llmsTxt: FetchResult;
   agentMap: FetchResult;
+  /** Every URL probed per file, in order; defaults to the result's own URL. */
+  tried?: { llmsTxt?: string[]; agentMap?: string[] };
+  /** Agent map path as given to --agent-map; defaults to AGENT_MAP_PATH. */
+  agentMapPath?: string;
 }
 
 export const CHECK_WEIGHTS: Record<CheckId, number> = {
@@ -52,7 +63,12 @@ export const CHECK_WEIGHTS: Record<CheckId, number> = {
   "agent-map": 4,
 };
 
-export const CONTENT_MIN_CHARS = 200;
+const CONTENT_MIN_CHARS = 200;
+const CONTENT_WARN_CHARS = 50;
+const TITLE_MAX_CHARS = 70;
+const DESCRIPTION_MIN_CHARS = 50;
+const DESCRIPTION_MAX_CHARS = 160;
+const MAX_BODY_LABEL = `${MAX_BODY_BYTES / (1024 * 1024)} MiB`;
 
 type Outcome = Omit<CheckResult, "id" | "title" | "weight" | "points">;
 
@@ -75,12 +91,30 @@ const warn = (message: string, fix: string): Outcome => ({ status: "warn", messa
 const fail = (message: string, fix: string): Outcome => ({ status: "fail", message, fix });
 
 /** A file counts as missing on error, non-2xx, an HTML (SPA fallback) body, or an empty body. */
-function isMissing(r: FetchResult): boolean {
-  return r.error !== undefined || r.status < 200 || r.status >= 300 || looksLikeHtml(r) || r.body.trim() === "";
+export function isMissing(r: FetchResult): boolean {
+  return !isOk(r) || looksLikeHtml(r) || r.body.trim() === "";
 }
 
 /** " (<error>)" when the fetch itself failed (timeout, network), else "". */
 const why = (r: FetchResult): string => (r.error !== undefined ? ` (${r.error})` : "");
+
+const originOf = (url: string): string => {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return "";
+  }
+};
+
+/** The `subject` (a URL found on the page or in a site file) points away from the audited origin. */
+function crossOrigin(subject: string, url: string, pageUrl: string): Outcome {
+  return warn(
+    `${subject} points to ${originOf(url)} (different origin than the audited page)`,
+    `Audit the deployed site, or build with siteUrl set to ${originOf(pageUrl)} to audit this preview.`,
+  );
+}
+
+const isCrossOrigin = (url: string, pageUrl: string): boolean => originOf(url) !== originOf(pageUrl);
 
 function pathAndQuery(url: string): string {
   try {
@@ -93,32 +127,29 @@ function pathAndQuery(url: string): string {
 
 function checkContent({ page, html }: AuditInputs): Outcome {
   const n = html.text.length;
-  const note = page.truncated ? " (page truncated at 5 MiB)" : "";
+  const note = page.truncated ? ` (page truncated at ${MAX_BODY_LABEL})` : "";
   const fix =
     "Crawlers that don't run JavaScript see almost no text. Add webForAgents() to vite.config.ts so every route is prerendered to static HTML.";
   if (n >= CONTENT_MIN_CHARS) return pass(`${n} characters of text without JavaScript${note}`);
-  if (n >= 50) return warn(`Only ${n} characters of text without JavaScript${note}`, fix);
+  if (n >= CONTENT_WARN_CHARS) return warn(`Only ${n} characters of text without JavaScript${note}`, fix);
   return fail(`Only ${n} characters of text without JavaScript${note}`, fix);
 }
 
 function checkTitle({ html }: AuditInputs): Outcome {
+  const fix = `Set a page title with <Seo title="..." /> (at most ${TITLE_MAX_CHARS} characters).`;
   const t = html.title;
-  if (!t) return fail("No <title> found", 'Set a page title with <Seo title="..." /> (under 70 characters).');
-  if (t.length > 70) {
-    return warn(
-      `Title is ${t.length} characters (over 70)`,
-      'Set a page title with <Seo title="..." /> (under 70 characters).',
-    );
-  }
+  if (!t) return fail("No <title> found", fix);
+  if (t.length > TITLE_MAX_CHARS) return warn(`Title is ${t.length} characters (over ${TITLE_MAX_CHARS})`, fix);
   return pass(`Title is ${t.length} characters`);
 }
 
 function checkDescription({ html }: AuditInputs): Outcome {
-  const fix = 'Add <Seo description="..." /> with 50–160 characters.';
+  const range = `${DESCRIPTION_MIN_CHARS}–${DESCRIPTION_MAX_CHARS}`;
+  const fix = `Add <Seo description="..." /> with ${range} characters.`;
   const d = getMeta(html, { name: "description" })?.trim();
   if (!d) return fail("No meta description found", fix);
-  if (d.length < 50 || d.length > 160) {
-    return warn(`Meta description is ${d.length} characters (aim for 50–160)`, fix);
+  if (d.length < DESCRIPTION_MIN_CHARS || d.length > DESCRIPTION_MAX_CHARS) {
+    return warn(`Meta description is ${d.length} characters (aim for ${range})`, fix);
   }
   return pass(`Meta description is ${d.length} characters`);
 }
@@ -138,33 +169,11 @@ function checkCanonical({ page, html }: AuditInputs): Outcome {
   if (links.length === 0) return fail("No canonical link found", fix);
   if (links.length > 1) return warn(`${links.length} canonical links found; expected one`, fix);
   const href = links[0]!.href!.trim();
-  let resolved: URL;
-  try {
-    resolved = new URL(href, page.finalUrl);
-  } catch {
-    return warn(`Canonical "${href}" is not a valid URL`, fix);
-  }
-  if (!/^[a-z][a-z0-9+.-]*:/i.test(href)) {
-    return warn(`Canonical "${href}" is relative; it resolves to ${resolved.href}`, fix);
-  }
-  let origin = "";
-  try {
-    origin = new URL(page.finalUrl).origin;
-  } catch {
-    // keep empty: treated as a mismatch
-  }
-  if (resolved.origin !== origin) {
-    return warn(`Canonical ${resolved.href} is on a different origin than ${origin || page.finalUrl}`, fix);
-  }
-  return pass(`Canonical is ${resolved.href}`);
-}
-
-function hasType(v: unknown): boolean {
-  if (Array.isArray(v)) return v.some(hasType);
-  if (v === null || typeof v !== "object") return false;
-  const o = v as Record<string, unknown>;
-  if (o["@type"] !== undefined) return true;
-  return Array.isArray(o["@graph"]) && o["@graph"].some(hasType);
+  const resolved = tryResolveUrl(href, page.finalUrl);
+  if (resolved === null) return warn(`Canonical "${href}" is not a valid URL`, fix);
+  if (!hasScheme(href)) return warn(`Canonical "${href}" is relative; it resolves to ${resolved}`, fix);
+  if (isCrossOrigin(resolved, page.finalUrl)) return crossOrigin(`Canonical ${resolved}`, resolved, page.finalUrl);
+  return pass(`Canonical is ${resolved}`);
 }
 
 function checkJsonLd({ html }: AuditInputs): Outcome {
@@ -177,7 +186,7 @@ function checkJsonLd({ html }: AuditInputs): Outcome {
     try {
       parsed.push(JSON.parse(raw));
     } catch (e) {
-      if (!firstError) firstError = (e as Error).message;
+      if (!firstError) firstError = errorMessage(e);
     }
   }
   const bad = html.jsonLd.length - parsed.length;
@@ -185,25 +194,25 @@ function checkJsonLd({ html }: AuditInputs): Outcome {
   if (bad > 0) {
     return warn(`${bad} of ${html.jsonLd.length} JSON-LD blocks do not parse: ${firstError}`, parseFix);
   }
-  if (!parsed.some(hasType)) {
+  if (!parsed.some((p) => jsonLdTypes(p).length > 0)) {
     return warn("JSON-LD parses but has no @type", "Add an @type (for example Organization) to your JSON-LD.");
   }
   return pass(`${parsed.length} JSON-LD block${parsed.length === 1 ? "" : "s"} parse with an @type`);
 }
 
 function checkRobots({ page, robots }: AuditInputs): Outcome {
-  const missingFix = "Add robots.txt; webForAgents() generates one from robots.ai.training / robots.ai.search.";
-  const serverFix = "Fix the server error on /robots.txt; crawlers may treat the whole site as disallowed.";
+  const missingFix = `Add ${ROBOTS_PATH}; webForAgents() generates one from robots.ai.training / robots.ai.search.`;
+  const serverFix = `Fix the server error on ${ROBOTS_PATH}; crawlers may treat the whole site as disallowed.`;
   if (robots.status >= 500) return fail(`${ROBOTS_PATH} returned HTTP ${robots.status}`, serverFix);
   if (robots.status === 0 && robots.error !== undefined) {
-    return fail(`robots.txt unreachable (${robots.error})`, serverFix);
+    return fail(`${ROBOTS_PATH} unreachable (${robots.error})`, serverFix);
   }
   if (isMissing(robots)) return warn(`${ROBOTS_PATH} not found${why(robots)}`, missingFix);
   const parsed = parseRobots(robots.body);
   const path = pathAndQuery(page.finalUrl);
   if (!isAllowed(parsed, "*", path)) {
     return fail(
-      `robots.txt blocks ${path} for all crawlers`,
+      `${ROBOTS_PATH} blocks ${path} for all crawlers`,
       "Remove the Disallow rule matching this path under User-agent: *.",
     );
   }
@@ -218,67 +227,87 @@ function checkRobots({ page, robots }: AuditInputs): Outcome {
   if (trainingBlocked.length > 0) {
     return pass(`Training crawlers blocked (${trainingBlocked.join(", ")}); search bots allowed`);
   }
-  return pass("robots.txt allows this page for all crawlers");
+  return pass(`${ROBOTS_PATH} allows this page for all crawlers`);
 }
 
-const stripSlash = (u: string): string => u.replace(/\/+$/, "");
-
 function checkSitemap({ page, sitemap }: AuditInputs): Outcome {
-  const missingFix = "Serve /sitemap.xml (webForAgents() generates it) and reference it from robots.txt.";
-  if (isMissing(sitemap)) return fail(`${SITEMAP_PATH} not found${why(sitemap)}`, missingFix);
+  const at = sitemap.url;
+  const missingFix = `Serve ${SITEMAP_PATH} (webForAgents() generates it) and reference it from ${ROBOTS_PATH}.`;
+  if (isCrossOrigin(at, page.finalUrl)) return crossOrigin(`Sitemap ${at}`, at, page.finalUrl);
+  if (isMissing(sitemap)) return fail(`Sitemap not found at ${at}${why(sitemap)}`, missingFix);
   const body = sitemap.body;
-  if (/<sitemapindex[\s>]/i.test(body)) return pass("Sitemap index found");
-  if (!/<urlset[\s>]/i.test(body)) return fail(`${SITEMAP_PATH} is not sitemap XML`, missingFix);
-  const want = stripSlash(page.finalUrl);
+  if (/<sitemapindex[\s>]/i.test(body)) return pass(`Sitemap index found at ${at}`);
+  if (!/<urlset[\s>]/i.test(body)) return fail(`${at} is not sitemap XML`, missingFix);
+  const want = trimTrailingSlash(page.finalUrl);
+  const wantPath = trimTrailingSlash(pathAndQuery(page.finalUrl));
+  let elsewhere: string | undefined;
   for (const m of body.matchAll(/<loc>\s*([^<]*?)\s*<\/loc>/gi)) {
-    if (stripSlash(m[1]!.replace(/&amp;/g, "&")) === want) return pass("Sitemap lists this page");
+    const loc = m[1]!.replace(/&amp;/g, "&");
+    if (trimTrailingSlash(loc) === want) return pass(`Sitemap ${at} lists this page`);
+    if (
+      elsewhere === undefined &&
+      isCrossOrigin(loc, page.finalUrl) &&
+      trimTrailingSlash(pathAndQuery(loc)) === wantPath
+    ) {
+      elsewhere = loc;
+    }
   }
+  if (elsewhere !== undefined) return crossOrigin(`Sitemap ${at} lists ${elsewhere}, which`, elsewhere, page.finalUrl);
   return warn(
-    "Sitemap does not list this page",
+    `Sitemap ${at} does not list this page`,
     "Add this route to routes in webForAgents() so it appears in the sitemap.",
   );
 }
 
-function checkLlmsTxt({ llmsTxt }: AuditInputs): Outcome {
-  const fix = "Serve /llms.txt; webForAgents() generates it from your routes.";
-  if (isMissing(llmsTxt)) return fail(`${LLMS_TXT_PATH} not found${why(llmsTxt)}`, fix);
+const triedText = (urls: string[] | undefined, r: FetchResult): string => (urls ?? [r.url]).join(" or ");
+
+function checkLlmsTxt({ llmsTxt, tried }: AuditInputs): Outcome {
+  const fix = `Serve ${LLMS_TXT_PATH}; webForAgents() generates it from your routes.`;
+  if (isMissing(llmsTxt)) {
+    return fail(`${LLMS_TXT_PATH} not found at ${triedText(tried?.llmsTxt, llmsTxt)}${why(llmsTxt)}`, fix);
+  }
   const first =
-    llmsTxt.body
-      .replace(/^﻿/, "")
+    stripBom(llmsTxt.body)
       .split(/\r\n|\r|\n/)
       .find((l) => l.trim() !== "") ?? "";
-  if (!first.startsWith("# ")) {
-    return warn(`${LLMS_TXT_PATH} has no H1 title on its first line`, fix);
-  }
-  return pass(`${LLMS_TXT_PATH} found`);
+  if (!first.startsWith("# ")) return warn(`${llmsTxt.url} has no H1 title on its first line`, fix);
+  return pass(`${LLMS_TXT_PATH} found at ${llmsTxt.url}`);
 }
 
-function checkMarkdown({ markdown }: AuditInputs): Outcome {
+function checkMarkdown({ page, markdown }: AuditInputs): Outcome {
+  const at = markdown.url;
+  if (isCrossOrigin(at, page.finalUrl)) return crossOrigin(`Markdown alternate ${at}`, at, page.finalUrl);
   if (isMissing(markdown)) {
     return fail(
-      `No ${MARKDOWN_MIME} copy found${why(markdown)}`,
-      `Serve a markdown copy of this page at ${markdown.url}; webForAgents() generates one per route.`,
+      `No ${MARKDOWN_MIME} copy found at ${at}${why(markdown)}`,
+      `Serve a markdown copy of this page at ${at}; webForAgents() generates one per route.`,
     );
   }
-  return pass(`Markdown copy found at ${markdown.url}`);
+  return pass(`Markdown copy found at ${at}`);
 }
 
-function checkAgentMap({ agentMap }: AuditInputs): Outcome {
-  const fix = `Serve ${AGENT_MAP_PATH}; webForAgents() generates it from your marked agent actions.`;
-  if (isMissing(agentMap)) return fail(`${AGENT_MAP_PATH} not found${why(agentMap)}`, fix);
+function checkAgentMap({ agentMap, tried, agentMapPath }: AuditInputs): Outcome {
+  const name = agentMapPath ?? AGENT_MAP_PATH;
+  const at = agentMap.url;
+  const fix = `Serve ${name}; webForAgents() generates ${AGENT_MAP_PATH} from your marked agent actions.`;
+  if (isMissing(agentMap))
+    return fail(`${name} not found at ${triedText(tried?.agentMap, agentMap)}${why(agentMap)}`, fix);
   let json: unknown;
   try {
-    json = JSON.parse(agentMap.body.replace(/^\uFEFF/, ""));
+    json = JSON.parse(stripBom(agentMap.body));
   } catch {
-    return fail(`${AGENT_MAP_PATH} is not valid JSON`, fix);
+    return fail(`${at} is not valid JSON`, fix);
   }
-  if (json === null || typeof json !== "object" || Array.isArray(json)) {
-    return fail(`${AGENT_MAP_PATH} is not a JSON object`, fix);
+  if (json === null || typeof json !== "object" || Array.isArray(json)) return fail(`${at} is not a JSON object`, fix);
+  const map = json as Partial<AgentMap>;
+  if (!Array.isArray(map.pages)) return warn(`${at} has no pages array`, fix);
+  if (map.version !== AGENT_MAP_VERSION) {
+    return warn(
+      `${at} has version ${JSON.stringify(map.version) ?? "(none)"}; expected ${AGENT_MAP_VERSION}`,
+      `Regenerate ${name} with the current webForAgents().`,
+    );
   }
-  if (!Array.isArray((json as Record<string, unknown>).pages)) {
-    return warn(`${AGENT_MAP_PATH} has no pages array`, fix);
-  }
-  return pass(`${AGENT_MAP_PATH} found`);
+  return pass(`Agent map found at ${at}`);
 }
 
 const CHECKS: Record<CheckId, (i: AuditInputs) => Outcome> = {

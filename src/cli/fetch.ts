@@ -1,6 +1,8 @@
+import { stripBom } from "../shared/text";
+
 export const DEFAULT_TIMEOUT_MS = 10_000;
 export const MAX_BODY_BYTES = 5 * 1024 * 1024;
-export const USER_AGENT = "web-for-agents-audit (+https://www.npmjs.com/package/@anubhav-choubey/web-for-agents)";
+const USER_AGENT = "web-for-agents-audit (+https://www.npmjs.com/package/@anubhav-choubey/web-for-agents)";
 
 export interface FetchResult {
   url: string;
@@ -105,11 +107,18 @@ export async function fetchText(url: string, opts: FetchOptions): Promise<FetchR
   return result;
 }
 
+/** A response arrived with a 2xx status. */
+export function isOk(r: FetchResult): boolean {
+  return r.error === undefined && r.status >= 200 && r.status < 300;
+}
+
+/** A result for a URL the audit chose not to fetch. */
+export function notFetched(url: string): FetchResult {
+  return { url, finalUrl: url, redirected: false, status: 0, contentType: "", body: "", truncated: false };
+}
+
 export function looksLikeHtml(r: FetchResult): boolean {
   if (r.contentType.includes("text/html")) return true;
-  const head = r.body
-    .replace(/^[\s﻿]+/, "")
-    .slice(0, 15)
-    .toLowerCase();
+  const head = stripBom(r.body).trimStart().slice(0, 15).toLowerCase();
   return head.startsWith("<!doctype html") || head.startsWith("<html");
 }

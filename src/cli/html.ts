@@ -1,3 +1,5 @@
+import { MARKDOWN_MIME } from "../shared/conventions";
+
 export interface HtmlFacts {
   title: string | null;
   metas: Array<Record<string, string>>;
@@ -255,4 +257,14 @@ export function getLinks(facts: HtmlFacts, rel: string): Array<Record<string, st
     const have = (l.rel ?? "").toLowerCase().split(/\s+/);
     return want.every((t) => have.includes(t));
   });
+}
+
+/** Trimmed href of the first `<link rel="alternate" type="text/markdown">` with a non-empty href, else null. */
+export function markdownAlternate(facts: HtmlFacts): string | null {
+  for (const l of getLinks(facts, "alternate")) {
+    const type = (l.type ?? "").split(";")[0]!.trim().toLowerCase();
+    const href = (l.href ?? "").trim();
+    if (type === MARKDOWN_MIME && href !== "") return href;
+  }
+  return null;
 }
