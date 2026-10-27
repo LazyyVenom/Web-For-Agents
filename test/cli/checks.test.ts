@@ -189,6 +189,16 @@ describe("checks", () => {
     expect(c.fix).toBe("Audit the deployed site, or build with siteUrl set to http://h to audit this preview.");
   });
 
+  it("a non-http markdown alternate is an invalid link, never 'points to null'", () => {
+    for (const url of ["javascript:alert(1)", "mailto:a@b.example"]) {
+      const c = byId(inputs({ markdown: notFetched(url) }), "markdown");
+      expect(c.status, url).toBe("warn");
+      expect(c.message, url).toBe(`Markdown alternate ${url} is not a valid http(s) link`);
+      expect(c.message).not.toContain("null");
+      expect(c.fix, url).toContain("http(s)");
+    }
+  });
+
   it("llms.txt and agent map messages name every probed URL", () => {
     const missing = (url: string): FetchResult => ({ ...ok("x", "text/plain", url), status: 404 });
     const i = inputs({

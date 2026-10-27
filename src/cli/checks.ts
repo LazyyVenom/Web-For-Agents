@@ -114,6 +114,16 @@ function crossOrigin(subject: string, url: string, pageUrl: string): Outcome {
   );
 }
 
+const isHttpUrl = (url: string): boolean => /^https?:$/.test(urlProtocol(url));
+
+function urlProtocol(url: string): string {
+  try {
+    return new URL(url).protocol;
+  } catch {
+    return "";
+  }
+}
+
 const isCrossOrigin = (url: string, pageUrl: string): boolean => originOf(url) !== originOf(pageUrl);
 
 function pathAndQuery(url: string): string {
@@ -276,6 +286,12 @@ function checkLlmsTxt({ llmsTxt, tried }: AuditInputs): Outcome {
 
 function checkMarkdown({ page, markdown }: AuditInputs): Outcome {
   const at = markdown.url;
+  if (!isHttpUrl(at)) {
+    return warn(
+      `Markdown alternate ${at} is not a valid http(s) link`,
+      `Point <link rel="alternate" type="${MARKDOWN_MIME}"> at an http(s) URL; webForAgents() generates it for each route.`,
+    );
+  }
   if (isCrossOrigin(at, page.finalUrl)) return crossOrigin(`Markdown alternate ${at}`, at, page.finalUrl);
   if (isMissing(markdown)) {
     return fail(
