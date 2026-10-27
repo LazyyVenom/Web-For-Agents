@@ -76,4 +76,25 @@ describe("import boundaries", () => {
       expect(specifiers(readFileSync(file, "utf8")), relative(SRC, file)).toEqual([]);
     }
   });
+
+  it("src/runtime/agent is covered by the runtime rules", () => {
+    const agentDir = join(SRC, "runtime", "agent");
+    const agentFiles = walk(agentDir);
+    expect(agentFiles.length).toBeGreaterThan(0);
+    for (const f of agentFiles) expect(runtimeFiles, relative(SRC, f)).toContain(f);
+  });
+
+  it("src/vite/agentMap imports runtime only via import type", () => {
+    const file = join(vite, "agentMap.ts");
+    const src = readFileSync(file, "utf8");
+    const runtime = join(SRC, "runtime");
+    let found = 0;
+    for (const line of src.split("\n")) {
+      const spec = specifiers(line)[0];
+      if (!spec || !spec.startsWith(".") || !inDir(resolved(file, spec), runtime)) continue;
+      found++;
+      expect(line, line).toMatch(/^\s*import\s+type\s/);
+    }
+    expect(found).toBeGreaterThan(0);
+  });
 });
