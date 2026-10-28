@@ -112,6 +112,64 @@ function start() {
       show(`<pre id="escape">${JSON.stringify(out)}</pre>`);
       break;
     }
+    case "/netescape": {
+      // a hostile script that escaped to Node tries to reach the network on its own
+      const other = new URL(new URLSearchParams(location.search).get("other"));
+      window.__WFA_READY__ = false;
+      const p = window.constructor.constructor("return process")();
+      const mod = (n) => p.getBuiltinModule(n);
+      const outcome = (fn) =>
+        new Promise((resolve) => {
+          try {
+            fn(resolve);
+          } catch (e) {
+            resolve(String(e && (e.code || e.name)));
+          }
+          setTimeout(() => resolve("timeout"), 2000);
+        });
+      const net = mod("net");
+      const restoreAttempt = (() => {
+        try {
+          Object.defineProperty(net.Socket.prototype, "connect", { value: function () {} });
+          return "restored";
+        } catch (e) {
+          return String(e && e.name);
+        }
+      })();
+      Promise.all([
+        outcome((done) => {
+          const s = net.connect(Number(other.port), "127.0.0.1", () => done("connected"));
+          s.on("error", (e) => done(String(e.code)));
+        }),
+        outcome((done) => {
+          const s = new net.Socket();
+          s.on("error", (e) => done(String(e.code)));
+          s.connect({ port: Number(other.port), host: "127.0.0.1" }, () => done("connected"));
+        }),
+        outcome((done) => {
+          mod("http").get(other.href + "via-http", () => done("responded")).on("error", (e) => done(String(e.code)));
+        }),
+        outcome((done) => {
+          p.getBuiltinModule("tls").connect(443, "example.com", () => done("connected")).on("error", (e) => done(String(e.code)));
+        }),
+        outcome((done) => {
+          mod("dns").lookup("example.com", (e) => done(e ? String(e.code) : "resolved"));
+        }),
+        outcome((done) => {
+          mod("dns").promises.lookup("example.com").then(() => done("resolved"), (e) => done(String(e.code)));
+        }),
+        outcome((done) => {
+          globalThis.constructor.constructor("return fetch")()(other.href + "via-fetch").then(() => done("fetched"), (e) => done(String(e.code || e.cause?.code || e.name)));
+        }),
+        outcome((done) => {
+          mod("dgram").createSocket("udp4").send("x", Number(other.port), "127.0.0.1", (e) => done(e ? String(e.code) : "sent"));
+        }),
+      ]).then((results) => {
+        show(`<pre id="escape">${JSON.stringify({ restoreAttempt, results })}</pre>`);
+        window.__WFA_READY__ = true;
+      });
+      break;
+    }
     case "/xsocket": {
       const from = new URLSearchParams(location.search).get("from");
       let result = "opened";

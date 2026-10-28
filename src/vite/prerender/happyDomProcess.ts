@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { HappyDomRendererOptions } from "./happyDom";
 import { RenderError, type InPageScripts, type RenderResult, type Renderer } from "./renderCore";
-import type { ChildMessage, ParentMessage } from "./renderChild";
+import type { ChildMessage, ChildOptions, ParentMessage } from "./renderChild";
 
 /**
  * Runs the happy-dom renderer in a child process, so page scripts that escape happy-dom's VM
@@ -21,8 +21,11 @@ import type { ChildMessage, ParentMessage } from "./renderChild";
  */
 
 export interface IsolationOptions {
-  /** @internal For tests: leave code generation from strings on, to exercise the scrubbed environment. */
-  allowCodeGeneration?: boolean;
+  /**
+   * Allow eval/new Function in the render process (prerender.isolation.codeGeneration). Off by
+   * default: it is what lets page code escape happy-dom to Node.
+   */
+  codeGeneration?: boolean;
   /** @internal For tests: extra environment for the child. */
   extraEnv?: Record<string, string>;
 }
@@ -91,7 +94,7 @@ function hasFlag(flag: string): boolean {
 }
 
 function execArgv(entry: string, iso: IsolationOptions): string[] {
-  const args = iso.allowCodeGeneration ? [] : ["--disallow-code-generation-from-strings"];
+  const args = iso.codeGeneration ? [] : ["--disallow-code-generation-from-strings"];
   // The stable permission model (Node >= 22.13 / 23.5). Older Node runs without it.
   if (hasFlag("--permission")) {
     const happyDom = realpathSync(createRequire(entry).resolve("happy-dom/package.json"));
@@ -104,6 +107,17 @@ function execArgv(entry: string, iso: IsolationOptions): string[] {
 }
 
 const STDERR_TAIL = 4000;
+
+/** Explains a render that failed because page code tried eval or new Function. */
+export function codeGenerationHint(message: string, iso: IsolationOptions): string {
+  if (iso.codeGeneration || !/Code generation from strings disallowed|EvalError/i.test(message)) return "";
+  return (
+    "; the page tried to run code from a string (eval or new Function), which the isolated happy-dom " +
+    "renderer forbids. Render this route with Chrome (prerender.routeRenderers or prerender.fallback), or set " +
+    "prerender: { isolation: { codeGeneration: true } }, which weakens the sandbox: page code can then " +
+    "escape happy-dom to the render process"
+  );
+}
 
 /** A RenderError for a render the child did not finish because it exited. */
 function exitError(code: number | null, signal: NodeJS.Signals | null, stderr: string): RenderError {
@@ -129,20 +143,48 @@ export function createIsolatedHappyDomRenderer(
     resolve(r: RenderResult): void;
     reject(e: Error): void;
   }
+  /** The child taking new renders, and the server origins it may connect to (fixed at fork). */
   let child: Promise<ChildProcess> | undefined;
+  let childOrigins = new Set<string>();
   let closed = false;
   let nextId = 0;
-  const pending = new Map<number, Pending>();
+  const pending = new Map<number, Pending & { cp: ChildProcess }>();
+  /** Children replaced by one allowed to reach a new origin: closed once their renders finish. */
+  const retiring = new Set<ChildProcess>();
   let current: ChildProcess | undefined;
 
-  const start = async (): Promise<ChildProcess> => {
+  const inFlight = (cp: ChildProcess) => [...pending.values()].filter((p) => p.cp === cp).length;
+  const closeChild = async (cp: ChildProcess) => {
+    if (cp.exitCode !== null || cp.signalCode !== null) return;
+    const exited = new Promise<void>((r) => cp.once("exit", () => r()));
+    try {
+      cp.send({ type: "close" } satisfies ParentMessage);
+    } catch {
+      cp.kill("SIGKILL");
+    }
+    const timer = setTimeout(() => cp.kill("SIGKILL"), CLOSE_MS);
+    await exited;
+    clearTimeout(timer);
+  };
+  const settle = (id: number) => {
+    const p = pending.get(id);
+    pending.delete(id);
+    if (p && retiring.has(p.cp) && inFlight(p.cp) === 0) {
+      retiring.delete(p.cp);
+      void closeChild(p.cp);
+    }
+    return p;
+  };
+
+  const start = async (origins: string[]): Promise<ChildProcess> => {
     const entry = await childEntryFile();
+    const childOptions: ChildOptions = { ...options, localOrigins: origins };
     const cp = fork(entry, [], {
       env: {
         ...scrubbedEnv(),
         ...iso.extraEnv,
         WFA_RENDER_CHILD: "1",
-        WFA_RENDER_OPTIONS: JSON.stringify(options),
+        WFA_RENDER_OPTIONS: JSON.stringify(childOptions),
       },
       execArgv: execArgv(entry, iso),
       cwd: tmpdir(),
@@ -157,10 +199,10 @@ export function createIsolatedHappyDomRenderer(
     cp.on("message", (m: ChildMessage) => {
       if (m.type === "ready") return;
       const p = pending.get(m.id);
-      if (!p) return;
-      pending.delete(m.id);
+      if (!p || p.cp !== cp) return;
+      settle(m.id);
       if (m.type === "result") p.resolve({ html: m.html, finalPath: m.finalPath, inPage: m.inPage });
-      else p.reject(new RenderError("happy-dom", m.message));
+      else p.reject(new RenderError("happy-dom", m.message + codeGenerationHint(m.message, iso)));
     });
     await new Promise<void>((resolve, reject) => {
       const onExit = (code: number | null, signal: NodeJS.Signals | null) =>
@@ -174,18 +216,21 @@ export function createIsolatedHappyDomRenderer(
       });
     });
     cp.once("exit", (code, signal) => {
-      if (child && current === cp) child = undefined;
+      if (current === cp) {
+        child = undefined;
+        current = undefined;
+      }
+      retiring.delete(cp);
       const err = closed && !signal ? new RenderError("happy-dom", "the renderer was closed") : exitError(code, signal, stderr);
       if (closed) err.interrupted = true;
-      for (const p of pending.values()) p.reject(err);
-      pending.clear();
+      for (const [id, p] of pending) {
+        if (p.cp !== cp) continue;
+        pending.delete(id);
+        p.reject(err);
+      }
     });
     current = cp;
     return cp;
-  };
-
-  const send = (cp: ChildProcess, m: ParentMessage) => {
-    cp.send(m);
   };
 
   return {
@@ -197,9 +242,26 @@ export function createIsolatedHappyDomRenderer(
         e.interrupted = true;
         throw e;
       }
+      const origin = new URL(url).origin;
+      if (child && !childOrigins.has(origin)) {
+        // The child's network allow list is fixed when it starts: start one that may reach this origin too.
+        const old = child;
+        child = undefined;
+        void old.then(
+          (cp) => {
+            if (inFlight(cp) === 0) void closeChild(cp);
+            else retiring.add(cp);
+          },
+          () => {},
+        );
+      }
       if (!child) {
-        child = start();
-        child.catch(() => (child = undefined));
+        childOrigins = new Set([...childOrigins, origin]);
+        const started = start([...childOrigins]);
+        child = started;
+        started.catch(() => {
+          if (child === started) child = undefined;
+        });
       }
       const cp = await child;
       const id = ++nextId;
@@ -207,35 +269,28 @@ export function createIsolatedHappyDomRenderer(
         // Backstop for a child whose event loop is stuck (an endless loop in page code): the child
         // enforces timeoutMs itself, so this fires only when it cannot. Killing it fails its other renders too.
         const timer = setTimeout(() => {
-          if (!pending.has(id)) return;
-          pending.delete(id);
+          if (!settle(id)) return;
           reject(new RenderError("happy-dom", `the happy-dom render process stopped responding (no answer ${timeoutMs + BACKSTOP_MS}ms after the render started); it was restarted`));
           cp.kill("SIGKILL");
         }, timeoutMs + BACKSTOP_MS);
         timer.unref?.();
         pending.set(id, {
+          cp,
           resolve: (r) => (clearTimeout(timer), resolve(r)),
           reject: (e) => (clearTimeout(timer), reject(e)),
         });
-        send(cp, { type: "render", id, url, timeoutMs, ...(inPage ? { inPage } : {}) });
+        cp.send({ type: "render", id, url, timeoutMs, ...(inPage ? { inPage } : {}) } satisfies ParentMessage);
       });
     },
     async close() {
       closed = true;
       const c = child;
       child = undefined;
-      if (!c) return;
-      const cp = await c.catch(() => undefined);
-      if (!cp || cp.exitCode !== null || cp.signalCode !== null) return;
-      const exited = new Promise<void>((r) => cp.once("exit", () => r()));
-      try {
-        send(cp, { type: "close" });
-      } catch {
-        cp.kill("SIGKILL");
-      }
-      const timer = setTimeout(() => cp.kill("SIGKILL"), CLOSE_MS);
-      await exited;
-      clearTimeout(timer);
+      const all = [...retiring];
+      retiring.clear();
+      const cp = c ? await c.catch(() => undefined) : undefined;
+      if (cp) all.push(cp);
+      await Promise.all(all.map(closeChild));
     },
   };
 }

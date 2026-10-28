@@ -351,7 +351,7 @@ describe("happy-dom render process isolation", { timeout: SUITE_TIMEOUT_MS }, ()
 
   it("an escaped script sees no secrets and cannot change the build's environment", async () => {
     const target = join(tmp, "b.txt");
-    const out = await escape(createIsolatedHappyDomRenderer({}, { allowCodeGeneration: true }), target);
+    const out = await escape(createIsolatedHappyDomRenderer({}, { codeGeneration: true }), target);
     expect(out.escaped).toBe(true);
     expect(out.secret).toBe(null);
     const kept = ["PATH", "HOME", "TMPDIR", "TMP", "TEMP", "NODE_ENV", "WFA_RENDER_CHILD", "WFA_RENDER_OPTIONS", "SystemRoot", "SYSTEMROOT", "windir", "USERPROFILE"];
@@ -362,6 +362,23 @@ describe("happy-dom render process isolation", { timeout: SUITE_TIMEOUT_MS }, ()
       // the permission model: no writes outside what the child was granted (nothing)
       expect(out.wrote).toBe("ERR_ACCESS_DENIED");
       expect(existsSync(target)).toBe(false);
+    }
+  });
+
+  it("an escaped script cannot reach the network beyond the prerender server", async () => {
+    otherHits.length = 0;
+    const r = createIsolatedHappyDomRenderer({}, { codeGeneration: true });
+    try {
+      const res = await r.render(server.origin + "/netescape?other=" + encodeURIComponent(otherOrigin + "/"), RENDER_MS);
+      const json = /<pre id="escape">(.*?)<\/pre>/.exec(res.html)?.[1];
+      const out = JSON.parse(json!.replace(/&quot;/g, '"')) as { restoreAttempt: string; results: string[] };
+      expect(out.restoreAttempt).toBe("TypeError"); // the wrappers cannot be redefined
+      // net.connect, new Socket().connect, http.get, tls.connect, dns.lookup, dns.promises.lookup, fetch, UDP
+      expect(out.results).toEqual(Array(8).fill("ERR_WFA_NETWORK_BLOCKED"));
+      await new Promise((res) => setTimeout(res, 100));
+      expect(otherHits).toEqual([]);
+    } finally {
+      await r.close();
     }
   });
 
