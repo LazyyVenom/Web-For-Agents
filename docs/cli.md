@@ -1,6 +1,6 @@
 # CLI
 
-Audit any URL for AI-agent readiness. Nothing is installed in the target site.
+Audit any URL for AI-agent readiness. Nothing is installed in the target site. To add the agent files to a site you prerender yourself, see [generate](#generate).
 
 ```sh
 npx @anubhav-choubey/web-for-agents audit example.com
@@ -43,6 +43,42 @@ A passing check earns its full weight, a warning half, a failure none. Each non-
 Exit codes: `0` ok, `1` score below `--min-score`, `2` usage error or fatal error (unreachable page, non-2xx status, not HTML, timeout).
 
 The programmatic API is available from `@anubhav-choubey/web-for-agents/cli` (`audit`, `runCli`, `formatText`, and the `AuditOptions`, `AuditReport`, `CheckResult`, `CheckId` and `CheckStatus` types).
+
+## generate
+
+Already prerender your pages with your own script? `generate` adds the agent files to that output without replacing your page builder:
+
+```sh
+vite build && node scripts/prerender.mjs
+npx web-for-agents generate dist --site-url https://example.com --ai-training block --ai-search allow
+```
+
+It reads every `.html` file in the directory and writes `llms.txt`, `llms-full.txt`, a `.md` copy of each page, `robots.txt`, `sitemap.xml` and `agents.json`. It also adds a markdown `<link>` to each page's `<head>`. See [Using your own prerender](prerendering.md#using-your-own-prerender) for how pages are found and what is kept.
+
+Flags:
+
+- `--site-url <url>` is the absolute URL of the deployed site. Required, here or as `siteUrl` in `--config`.
+- `--ai-training <allow|block>` and `--ai-search <allow|block>` set the AI crawler policy for `robots.txt`. Both are required, here or as `robots.ai` in `--config`. There is no default.
+- `--config <file>` loads options from a `.json`, `.js` or `.mjs` file. A JS file default-exports the options object. Use a JS file for options that are functions or regular expressions, such as `markdown.transform` or `exclude`. Flags take precedence over the file.
+- `--no-link-markdown` leaves your HTML files unchanged.
+- `--overwrite` replaces an existing `robots.txt`, `sitemap.xml`, `llms.txt`, `llms-full.txt` or `agents.json` whose content differs. By default such a file is kept, with a warning.
+- `--json` prints the result (pages found, layout, files written, files kept) as JSON.
+
+```js
+// wfa.config.mjs
+export default {
+  exclude: ["/drafts/*"],
+  llms: { title: "Jane Doe" },
+  markdown: {
+    contentSelector: "main",
+    transform: ({ route, markdown }) => (route === "/" ? markdown + "\n\nEmail: jane@example.com\n" : undefined),
+  },
+};
+```
+
+`generate` loads the package's Vite entry, so `vite` must be installed, as it is in any Vite project. Warnings go to stderr. Exit codes: `0` ok, `2` usage error or failure. When it fails, nothing is written.
+
+The same function is available in code as `generateAgentFiles` from `@anubhav-choubey/web-for-agents/vite`.
 
 ## Auditing a local preview
 

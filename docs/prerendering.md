@@ -133,3 +133,37 @@ If `robots.ai.training` or `robots.ai.search` is `"block"` while `.md` files, `l
 Prerendering is fast. As approximate measurements on a laptop: the 12-page demo in `examples/demo` builds and prerenders in about 1.5 seconds, and a 500-route test site prerenders in under 10 seconds with the default settings.
 
 Every page being rendered is held in memory at once. These figures are approximate. A typical page takes tens of MB, but a heavy page (a large DOM, big data payloads) can peak at around 500 MB. Peak memory is roughly `prerender.concurrency` times the heaviest page, plus about 150 MB for the build and 100 MB for the render process; the Chrome renderer adds Chrome's own processes on top. On small CI runners or containers (1 to 2 GB), lower `prerender.concurrency`, for example to `2`. If a render runs out of memory, the build fails with a message suggesting exactly that, rather than crashing.
+
+## Using your own prerender
+
+If your site already has its own prerender step (for example a script that runs after `vite build` and writes `about.html`, `experience.html` and so on), you do not have to replace it. Turn the plugin's prerender off, or leave the plugin out entirely, and run `generate` after your script:
+
+```sh
+vite build && node scripts/prerender.mjs
+npx web-for-agents generate dist --site-url https://example.com --ai-training block --ai-search allow
+```
+
+The same step is available in code:
+
+```ts
+import { generateAgentFiles } from "@anubhav-choubey/web-for-agents/vite";
+
+await generateAgentFiles({
+  outDir: "dist",
+  siteUrl: "https://example.com",
+  robots: { ai: { training: "block", search: "allow" } },
+});
+```
+
+It takes the same `siteUrl`, `robots`, `exclude`, `sitemap`, `markdown` (including `transform`), `llms` and `agentMap` options as the plugin, plus:
+
+- `linkMarkdown` (default `true`) adds `<link rel="alternate" type="text/markdown">` to each page's `<head>`. A page that already has one is left alone, so running `generate` twice adds the link only once.
+- `overwrite` (default `false`) replaces an existing `robots.txt`, `sitemap.xml`, `llms.txt`, `llms-full.txt` or agent map whose content differs. Without it, such a file (for example your own `public/robots.txt`, copied into `dist`) is kept and a warning is logged.
+
+How pages are found: every `.html` file in `outDir` is a page. `index.html` is `/`, and both `about.html` and `about/index.html` are `/about`, so flat, directory and mixed layouts all work. `200.html`, `404.html`, files under `assets/` and `exclude`d routes are skipped. Pages with `<meta name="robots" content="noindex">` get a `.md` file but stay out of `llms.txt`, the sitemap and `agents.json`. Your HTML is changed only to add the markdown link.
+
+The result lists the pages, the detected layout (`"flat"`, `"directory"` or `"mixed"`), the files written and the files kept. Nothing is written if any page fails, for example when `markdown.transform` throws.
+
+`agents.json` here comes from each page's static markup: elements with `data-agent-action` (what `useAgentAction` and `AgentForm` render) and WebMCP `<form toolname>` forms, with form fields as the input schema. An action registered with only a `handler` and no element exists only while your app runs, so it is not listed in this mode.
+
+The plugin can also write flat files itself: set `prerender.fileLayout: "flat"` to write `/about` as `about.html` instead of `about/index.html`.
