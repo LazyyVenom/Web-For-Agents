@@ -9,66 +9,74 @@ export { normalizeRoute };
 export type Rule = "allow" | "block";
 
 export interface WebForAgentsOptions {
+  /** Absolute http(s) URL of the deployed site, e.g. "https://example.com". */
   siteUrl: string;
-  /** Stage 2 adds crawling; stage 1 uses this list plus "/". */
+  /** Extra routes to prerender, for pages no link reaches. "/" is always included. */
   routes?: string[];
-  /** String = exact path or prefix ending in "/*". */
+  /** Routes to leave out. A string is an exact path, or a prefix when it ends in "/*". */
   exclude?: Array<string | RegExp>;
+  /** robots.txt policy. `ai.training` and `ai.search` are required. */
   robots: {
     ai: { training: Rule; search: Rule; overrides?: Record<string, Rule> };
+    /** Extra `Disallow` paths for all user agents. */
     disallow?: string[];
   };
-  /** Default true. */
+  /** Generate sitemap.xml and the `Sitemap:` line in robots.txt. Default true. */
   sitemap?: boolean;
+  /** Prerender routes after the build. `false` also turns off markdown, llms and the agent map. */
   prerender?: PrerenderOptions | false;
+  /** Write a `.md` version of each page. `false` also turns off llms-full.txt. */
   markdown?: MarkdownOptions | false;
+  /** Write llms.txt and llms-full.txt. Default on. */
   llms?: LlmsOptions | false;
-  /** Default true: writes agents.json (needs prerender). */
+  /** Write agents.json and link it from llms.txt. Needs prerender. Default true. */
   agentMap?: boolean | AgentMapOptions;
   /** Dev-only overlay, injected by `vite` serve and never by `vite build`. Default true. */
   overlay?: boolean | OverlayPluginOptions;
 }
 
 export interface OverlayPluginOptions {
-  /** Default "alt+shift+a". */
+  /** Keyboard shortcut that toggles the panel. Default "alt+shift+a". */
   shortcut?: string;
-  /** Default: the resolved markdown.contentSelector, else "main". */
+  /** Content region shown as markdown. Default: markdown.contentSelector, else "main". */
   contentSelector?: string;
 }
 
 export interface AgentMapOptions {
-  /** Plain file name in outDir. Default "agents.json". */
+  /** Plain `.json` file name, written to the build output root. Default "agents.json". */
   fileName?: string;
 }
 
 export type RendererName = "happy-dom" | "chrome" | "msedge";
 
 export interface PrerenderOptions {
-  /** Default true. */
+  /** Follow same-origin links from "/" and `routes`. Default true. */
   crawl?: boolean;
-  /** Default "happy-dom". */
+  /** Default renderer. "chrome" and "msedge" need playwright-core. Default "happy-dom". */
   renderer?: RendererName;
-  /** Default false. */
+  /** Browser to retry routes that fail under the default renderer. Default false. */
   fallback?: "chrome" | "msedge" | false;
-  /** Default []. `match` uses exclude semantics; first match wins. */
+  /** Per-route renderer. `match` works like `exclude`; the first match wins. Default []. */
   routeRenderers?: Array<{ match: string | RegExp; renderer: RendererName }>;
-  /** Passed to playwright launch instead of channel. */
+  /** Browser binary to launch instead of the installed Chrome or Edge. */
   executablePath?: string;
-  /** Default 15000. */
+  /** Per-route readiness timeout in milliseconds. Default 15000. */
   timeoutMs?: number;
-  /** Default 4. */
+  /** Routes rendered at once. Default 4. */
   concurrency?: number;
-  /** Default 500. */
+  /** Stop discovering routes after this many (a warning is logged). Default 500. */
   maxRoutes?: number;
 }
 
 export interface MarkdownOptions {
-  /** Default "main". */
+  /** CSS selector for the page content converted to markdown. Default "main". */
   contentSelector?: string;
 }
 
 export interface LlmsOptions {
+  /** llms.txt heading. Default: the title of "/". */
   title?: string;
+  /** llms.txt summary. Default: the description of "/". */
   description?: string;
 }
 

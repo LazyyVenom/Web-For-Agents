@@ -4,3 +4,7 @@ test/fixtures/*/dist
 test/fixtures/tmp-*
 .superpowers/
 dist-demo
+*.tgz
+*.log
+.DS_Store
+coverage

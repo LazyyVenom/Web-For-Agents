@@ -5,8 +5,6 @@ import { formatText } from "./report";
 
 export { audit } from "./audit";
 export type { AuditOptions, AuditReport } from "./audit";
-export { parseCliArgs, normalizeInputUrl } from "./args";
-export type { CliArgs } from "./args";
 export { formatText } from "./report";
 export type { CheckId, CheckResult, CheckStatus } from "./checks";
 
@@ -20,7 +18,7 @@ const defaultIo: CliIo = {
   stderr: (s) => void process.stderr.write(s),
 };
 
-/** Exit code: 0 ok, 1 below --min-score, 2 usage or fatal error. */
+/** Runs the CLI with `argv` (without node and script). Resolves to the exit code: 0 ok, 1 below --min-score, 2 usage or fatal error. */
 export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<number> {
   let args;
   try {

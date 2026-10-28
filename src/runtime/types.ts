@@ -1,3 +1,4 @@
+/** One managed `<head>` tag. `key` identifies it when nested `Seo` entries merge. */
 export type HeadTag =
   | { kind: "title"; key: "title"; text: string }
   | { kind: "meta"; key: string; attrs: Record<string, string> }
@@ -6,7 +7,7 @@ export type HeadTag =
 export interface SeoDefaults {
   siteName?: string;
   siteUrl?: string;
-  /** e.g. "%s | Site" */
+  /** Page title format; "%s" is replaced by the page title, e.g. "%s | My Site". */
   titleTemplate?: string;
   description?: string;
   image?: string;

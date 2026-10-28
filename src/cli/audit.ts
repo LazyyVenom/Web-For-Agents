@@ -14,11 +14,13 @@ import { extractHtmlFacts, markdownAlternate } from "./html";
 import { parseRobots } from "./robots";
 
 export interface AuditOptions {
+  /** Per-request timeout in milliseconds. Default 10000. */
   timeoutMs?: number;
+  /** User-Agent header sent with every request. Default: a web-for-agents-audit identifier. */
   userAgent?: string;
   /**
    * Agent map location. A bare file name ("agent-map.json") is probed like agents.json; a path starting
-   * with "/" or a full URL is fetched as is. Default: AGENT_MAP_PATH.
+   * with "/" or a full URL is fetched as is. Default "/agents.json".
    */
   agentMapPath?: string;
 }
@@ -66,6 +68,7 @@ async function probe(get: (u: string) => Promise<FetchResult>, urls: string[]): 
 
 const sameOrigin = (a: string, b: string): boolean => new URL(a).origin === new URL(b).origin;
 
+/** Audits `url` for AI-agent readiness. Fatal problems are reported in `error`, not thrown. */
 export async function audit(url: string, opts: AuditOptions = {}): Promise<AuditReport> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const get = (u: string, accept?: string): Promise<FetchResult> =>

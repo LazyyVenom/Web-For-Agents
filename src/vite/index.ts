@@ -1,7 +1,6 @@
 import type { Plugin } from "vite";
 import { agentMapExtension } from "./agentMap";
 import { createBuildPlugin } from "./buildPlugin";
-import type { LlmsSection } from "./llms";
 import {
   resolveOptions,
   type AgentMapOptions,
@@ -13,11 +12,13 @@ import {
   type Rule,
   type WebForAgentsOptions,
 } from "./options";
-import type { ExtensionContext, ExtensionPage, PrerenderExtension } from "./prerender/extensions";
 import { overlayPlugin } from "./overlay";
 import { AI_BOTS } from "./robots";
 
-/** The build plugin, plus the serve-only overlay plugin unless `overlay: false`. */
+/**
+ * Vite plugins for SEO and agent readiness: the build plugin, plus the serve-only dev overlay
+ * unless `overlay: false`. Put the returned array in `plugins`; Vite flattens it.
+ */
 export function webForAgents(options: WebForAgentsOptions): Plugin[] {
   const resolved = resolveOptions(options);
   const extensions = resolved.agentMap
@@ -38,8 +39,4 @@ export type {
   AgentMapOptions,
   OverlayPluginOptions,
   RendererName,
-  PrerenderExtension,
-  ExtensionContext,
-  ExtensionPage,
-  LlmsSection,
 };

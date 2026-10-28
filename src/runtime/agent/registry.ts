@@ -118,6 +118,7 @@ function describe(name: string, entry: Entry): AgentActionDescriptor | null {
   return d;
 }
 
+/** The actions currently exposed on the page, sorted by name. */
 export function listAgentActions(): AgentActionDescriptor[] {
   return Array.from(activeEntries(), ([name, [, entry]]) => describe(name, entry))
     .filter((d): d is AgentActionDescriptor => d !== null)
@@ -151,6 +152,7 @@ function isDisabled(el: Element): boolean {
   return el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true" || el.matches("fieldset[disabled] *");
 }
 
+/** Runs an exposed action with `input`. Never throws; failures are reported in the result. */
 export async function executeAgentAction(
   name: string,
   input: unknown,

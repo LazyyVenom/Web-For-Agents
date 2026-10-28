@@ -1,5 +1,6 @@
-/** Agent action contract shared by the runtime (window global, WebMCP) and the build (agents.json). */
+// Agent action contract shared by the runtime (window global, WebMCP) and the build (agents.json).
 
+/** The JSON Schema subset used for agent action input. */
 export type JsonSchema = {
   type?: "string" | "number" | "integer" | "boolean" | "array" | "object";
   description?: string;

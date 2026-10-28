@@ -157,7 +157,7 @@ describe("createBuildPlugin", () => {
     expect(b.read("index.html")).toBe(SHELL);
   });
 
-  it("prerender: false keeps stage 1 behaviour", async () => {
+  it("prerender: false writes only the sitemap and robots.txt", async () => {
     const onRoute = vi.fn();
     const finalize = vi.fn();
     const t = make({ routes: ["/about"], prerender: false }, [{ name: "probe", onRoute, finalize }]);
@@ -198,7 +198,7 @@ describe("createBuildPlugin", () => {
     for (const f of ["llms.txt", "fetch/index.html", "index.md"]) {
       expect(w.filter((m) => m === `[web-for-agents] public/${f} exists; skipping generation`)).toHaveLength(1);
     }
-    // Listed in `routes` and served from publicDir: stays in the sitemap (stage 1 behaviour), not in llms.
+    // Listed in `routes` and served from publicDir: stays in the sitemap, but has no markdown, so it is not in llms.
     expect(t.read("sitemap.xml")).toContain("<loc>https://a.com/fetch</loc>");
     expect(t.read("sitemap.xml")).toContain("<loc>https://a.com/</loc>");
   }, 30_000);

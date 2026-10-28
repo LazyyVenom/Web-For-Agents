@@ -84,7 +84,7 @@ export function agentMapLlmsSection(siteUrl: string, fileName: string): LlmsSect
   };
 }
 
-/** Stage 2 prerender extension: collects each page's actions and writes the agent map. */
+/** Prerender extension: collects each page's actions and writes the agent map. */
 export function agentMapExtension(opts: { siteUrl: string; fileName: string }): PrerenderExtension<AgentPageData> {
   const { siteUrl, fileName } = opts;
   const data = new Map<string, AgentPageData>();

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { inPageExpression } from "../../../src/vite/prerender/extensions";
 import { prepareShell } from "../../../src/vite/prerender/probe";
 import {
@@ -43,18 +43,25 @@ afterAll(async () => {
   await new Promise((res) => hanging?.close(res));
 });
 
+// Renders get the production default budget (prerender.timeoutMs). The first page in a fresh
+// Chrome pays one-off start-up costs, which on a loaded CI runner can exceed a few seconds. Only
+// the tests that assert timeout behaviour use tight budgets. Vitest's timeout stays well above the
+// render budget, so a slow render fails with its own error, not a test timeout.
+const RENDER_MS = 15_000;
+const SUITE_TIMEOUT_MS = 30_000;
+
 const suite = (name: RendererName, make: () => Promise<Renderer>) => {
   let r: Renderer;
   beforeAll(async () => {
     r = await make();
-  });
+  }, SUITE_TIMEOUT_MS);
   afterAll(async () => {
     await r?.close();
-  });
+  }, SUITE_TIMEOUT_MS);
   const url = (p: string) => server.origin + p;
 
   it("renders fetched data", async () => {
-    const res = await r.render(url("/fetch"), 5000);
+    const res = await r.render(url("/fetch"), RENDER_MS);
     expect(res.html.startsWith("<!DOCTYPE html>\n")).toBe(true);
     expect(res.html).toContain("Fetched data text");
     expect(res.html).toContain("data-wfa-probe");
@@ -63,47 +70,47 @@ const suite = (name: RendererName, make: () => Promise<Renderer>) => {
   });
 
   it("waits for __WFA_READY__", async () => {
-    const res = await r.render(url("/held"), 5000);
+    const res = await r.render(url("/held"), RENDER_MS);
     expect(res.html).toContain("Held");
     expect(res.finalPath).toBe("/held");
   });
 
   it("renders with a running interval", async () => {
     const t = Date.now();
-    const res = await r.render(url("/interval"), 5000);
+    const res = await r.render(url("/interval"), RENDER_MS);
     expect(res.html).toContain("Interval");
     expect(Date.now() - t).toBeLessThan(3000);
   });
 
   it("tolerates console.timeStamp/profile (React dev builds call them)", async () => {
-    const res = await r.render(url("/console"), 5000);
+    const res = await r.render(url("/console"), RENDER_MS);
     expect(res.html).toContain("Console");
   });
 
   it("renders dynamic imports", async () => {
-    const res = await r.render(url("/dynamic"), 5000);
+    const res = await r.render(url("/dynamic"), RENDER_MS);
     expect(res.html).toContain("Chunk");
   });
 
   it("loads stylesheets (CSS imports must not fail the render)", async () => {
-    const res = await r.render(url("/css"), 5000);
+    const res = await r.render(url("/css"), RENDER_MS);
     expect(res.html).toContain("<h1>Styled</h1>");
   });
 
   it("renders an empty route without throwing", async () => {
-    const res = await r.render(url("/empty"), 5000);
+    const res = await r.render(url("/empty"), RENDER_MS);
     expect(res.finalPath).toBe("/empty");
   });
 
   it("rejects with RenderError on uncaught errors", async () => {
-    const err = await r.render(url("/boom"), 5000).catch((e: unknown) => e);
+    const err = await r.render(url("/boom"), RENDER_MS).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(RenderError);
     expect((err as RenderError).renderer).toBe(name);
     expect((err as Error).message).toContain("boom");
   });
 
   it("captures unhandled promise rejections as render errors", async () => {
-    const err = await r.render(url("/reject"), 5000).catch((e: unknown) => e);
+    const err = await r.render(url("/reject"), RENDER_MS).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(RenderError);
     expect((err as RenderError).renderer).toBe(name);
     expect((err as Error).message).toContain("async boom");
@@ -114,14 +121,14 @@ const suite = (name: RendererName, make: () => Promise<Renderer>) => {
     expect(report).toContain(`/reject [${name}]:`);
     expect(report).toContain("async boom");
     // the process survived and the renderer still works
-    const ok = await r.render(url("/fetch"), 5000);
+    const ok = await r.render(url("/fetch"), RENDER_MS);
     expect(ok.html).toContain("Fetched data text");
   });
 
   it("attributes concurrent rejections to the right render", async () => {
     const [bad, good] = await Promise.allSettled([
-      r.render(url("/reject"), 5000),
-      r.render(url("/held"), 5000),
+      r.render(url("/reject"), RENDER_MS),
+      r.render(url("/held"), RENDER_MS),
     ]);
     expect(bad.status).toBe("rejected");
     expect(((bad as PromiseRejectedResult).reason as Error).message).toContain("async boom");
@@ -138,7 +145,7 @@ const suite = (name: RendererName, make: () => Promise<Renderer>) => {
 
   it("restores process unhandledRejection listeners", async () => {
     const before = process.listeners("unhandledRejection");
-    await r.render(url("/reject"), 5000).catch(() => {});
+    await r.render(url("/reject"), RENDER_MS).catch(() => {});
     expect(process.listeners("unhandledRejection")).toEqual(before);
   });
 
@@ -150,7 +157,7 @@ const suite = (name: RendererName, make: () => Promise<Renderer>) => {
 
   describe("in-page scripts", () => {
     it("returns parsed results", async () => {
-      const res = await r.render(url("/fetch"), 5000, {
+      const res = await r.render(url("/fetch"), RENDER_MS, {
         t: inPageExpression(() => ({
           title: document.title,
           n: document.querySelectorAll("main").length,
@@ -160,7 +167,7 @@ const suite = (name: RendererName, make: () => Promise<Renderer>) => {
     });
 
     it("passes the JSON argument", async () => {
-      const res = await r.render(url("/fetch"), 5000, {
+      const res = await r.render(url("/fetch"), RENDER_MS, {
         t: inPageExpression((arg: { sel: string; tag: string }) => ({
           n: document.querySelectorAll(arg.sel).length,
           tag: arg.tag,
@@ -171,7 +178,7 @@ const suite = (name: RendererName, make: () => Promise<Renderer>) => {
 
     it("fails the render when a script throws", async () => {
       const err = await r
-        .render(url("/fetch"), 5000, {
+        .render(url("/fetch"), RENDER_MS, {
           t: inPageExpression(() => {
             throw new Error("nope");
           }),
@@ -183,13 +190,13 @@ const suite = (name: RendererName, make: () => Promise<Renderer>) => {
     });
 
     it("fails the render when a result is not JSON", async () => {
-      const err = await r.render(url("/fetch"), 5000, { j: `"not json"` }).catch((e: unknown) => e);
+      const err = await r.render(url("/fetch"), RENDER_MS, { j: `"not json"` }).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(RenderError);
       expect((err as Error).message).toContain('extension "j" failed');
     });
 
     it("serializes html before running scripts", async () => {
-      const res = await r.render(url("/fetch"), 5000, {
+      const res = await r.render(url("/fetch"), RENDER_MS, {
         t: inPageExpression(() => {
           const el = document.createElement("aside");
           el.id = "injected-by-ext";
@@ -203,11 +210,11 @@ const suite = (name: RendererName, make: () => Promise<Renderer>) => {
   });
 };
 
-describe("happy-dom renderer", () => {
+describe("happy-dom renderer", { timeout: SUITE_TIMEOUT_MS }, () => {
   suite("happy-dom", async () => createHappyDomRenderer());
 });
 
-describe.skipIf(!chromeAvailable)("chrome renderer", () => {
+describe.skipIf(!chromeAvailable)("chrome renderer", { timeout: SUITE_TIMEOUT_MS }, () => {
   suite("chrome", () => createChromeRenderer("chrome"));
 });
 
@@ -242,6 +249,73 @@ describe("waitForReady", () => {
     await expect(waitForReady(async () => ({ ready: false, errors: [] }), 200)).rejects.toThrow(
       "did not become ready within 200ms",
     );
+  });
+});
+
+describe("chrome page lifecycle", () => {
+  const never = () => new Promise<never>(() => {});
+  const fakeChrome = (browser: Record<string, unknown>) => () =>
+    Promise.resolve({
+      chromium: { launch: () => Promise.resolve({ close: async () => {}, ...browser }) },
+    } as unknown as typeof import("playwright-core"));
+
+  it("bounds a page that never opens by the render deadline", async () => {
+    const r = await createChromeRenderer("chrome", {}, fakeChrome({ newPage: never }));
+    const t = Date.now();
+    const err = await r.render("http://127.0.0.1/", 300).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RenderError);
+    expect((err as Error).message).toContain("did not become ready within 300ms");
+    expect(Date.now() - t).toBeLessThan(1500);
+  });
+
+  const later = <T,>(ms: number, settle: () => Promise<T>) =>
+    new Promise<T>((res, rej) => setTimeout(() => settle().then(res, rej), ms));
+
+  it("closes a page that opens after the deadline", async () => {
+    const close = vi.fn(async () => {});
+    const r = await createChromeRenderer(
+      "chrome",
+      {},
+      fakeChrome({ newPage: () => later(400, async () => ({ close })) }),
+    );
+    const err = await r.render("http://127.0.0.1/", 300).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RenderError);
+    expect(close).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(1), { timeout: 2000 });
+  });
+
+  it("swallows a page open that fails after the deadline", async () => {
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      const r = await createChromeRenderer(
+        "chrome",
+        {},
+        fakeChrome({ newPage: () => later(400, () => Promise.reject(new Error("late failure"))) }),
+      );
+      const err = await r.render("http://127.0.0.1/", 300).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(RenderError);
+      await new Promise((res) => setTimeout(res, 300));
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
+  });
+
+  it("does not wait forever for a page that never closes", async () => {
+    const page = {
+      on: () => {},
+      goto: async () => null,
+      evaluate: async (expr: string) =>
+        expr === SERIALIZE_EXPR ? "<!DOCTYPE html>\n<html></html>" : { ready: true, errors: [], path: "/" },
+      url: () => "http://127.0.0.1/",
+      close: never,
+    };
+    const r = await createChromeRenderer("chrome", { pageCloseMs: 50 }, fakeChrome({ newPage: async () => page }));
+    const t = Date.now();
+    const res = await r.render("http://127.0.0.1/", 1000);
+    expect(res.html).toBe("<!DOCTYPE html>\n<html></html>");
+    expect(Date.now() - t).toBeLessThan(1000);
   });
 });
 
