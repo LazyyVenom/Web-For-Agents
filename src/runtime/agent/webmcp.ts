@@ -36,6 +36,11 @@ function detect(): Found | null {
   return null;
 }
 
+/** Whether document.modelContext or navigator.modelContext is present. */
+export function hasModelContext(): boolean {
+  return detect() !== null;
+}
+
 export async function exposeTool(
   tool: WebMcpTool,
   signal: AbortSignal,

@@ -6,7 +6,7 @@ import { isDisabled, isHiddenOrInert } from "./dom";
 import { submitFormAction } from "./formAutomation";
 import { EMPTY_OBJECT_SCHEMA, schemaFromForm, validateInput } from "./formSchema";
 import type { AgentActionDescriptor, AgentActionResult, AgentActionSpec, JsonSchema } from "./types";
-import { exposeTool, type WebMcpTool } from "./webmcp";
+import { exposeTool, hasModelContext, type WebMcpTool } from "./webmcp";
 
 interface Entry {
   name: string;
@@ -241,36 +241,46 @@ function scheduleSync(): void {
 
 type Active = Map<string, [number, Entry]>;
 
-/** One WebMCP tool per describable active action. */
-function buildTools(active: Active): Map<string, WebMcpTool> {
-  const tools = new Map<string, WebMcpTool>();
-  for (const [name, [, entry]] of active) {
-    let d: AgentActionDescriptor | null;
-    try {
-      d = describe(name, entry);
-    } catch (err) {
-      console.warn(withPrefix(`could not describe agent action "${name}": ${errorMessage(err)}`));
-      continue;
-    }
-    if (!d) continue;
-    const tool: WebMcpTool = {
-      name,
-      description: d.description,
-      inputSchema: d.inputSchema,
-      execute: (input, o) => executeAgentAction(name, input, o?.signal),
-      annotations: { readOnlyHint: d.readOnly, consequentialHint: d.destructive },
-    };
-    if (d.title !== undefined) tool.title = d.title;
-    tools.set(name, tool);
+function warnUndescribable(name: string, err: unknown): void {
+  console.warn(withPrefix(`could not describe agent action "${name}": ${errorMessage(err)}`));
+}
+
+/** The WebMCP tool for an action, or null when it is not describable (hidden or throwing). */
+function buildTool(name: string, entry: Entry): WebMcpTool | null {
+  let d: AgentActionDescriptor | null;
+  try {
+    d = describe(name, entry);
+  } catch (err) {
+    warnUndescribable(name, err);
+    return null;
   }
-  return tools;
+  if (!d) return null;
+  const tool: WebMcpTool = {
+    name,
+    description: d.description,
+    inputSchema: d.inputSchema,
+    execute: (input, o) => executeAgentAction(name, input, o?.signal),
+    annotations: { readOnlyHint: d.readOnly, consequentialHint: d.destructive },
+  };
+  if (d.title !== undefined) tool.title = d.title;
+  return tool;
+}
+
+/** Cheap check that an exposed action still has a handler or element, without building its schema. */
+function stillDescribable(name: string, entry: Entry): boolean {
+  try {
+    return resolve(entry).kind !== null;
+  } catch (err) {
+    warnUndescribable(name, err);
+    return false;
+  }
 }
 
 /** Unregister exposed tools whose entry is gone, superseded, or no longer describable. */
-function revokeStale(active: Active, tools: Map<string, WebMcpTool>): void {
+function revokeStale(active: Active): void {
   for (const [name, current] of exposed) {
     const next = active.get(name);
-    if (!next || next[0] !== current.id || !tools.has(name)) {
+    if (!next || next[0] !== current.id || !stillDescribable(name, next[1])) {
       current.controller.abort();
       exposed.delete(name);
     }
@@ -292,12 +302,17 @@ function warnDuplicates(): void {
   }
 }
 
-/** Register tools not yet exposed. A "failed" registration is unmarked so the next sync retries. */
-function exposeNew(active: Active, tools: Map<string, WebMcpTool>): void {
-  for (const [name, tool] of tools) {
+/**
+ * Register tools not yet exposed; only these are described, so a sync costs one schema per new
+ * action. A "failed" registration is unmarked so the next sync retries.
+ */
+function exposeNew(active: Active): void {
+  for (const [name, [id, entry]] of active) {
     if (exposed.has(name)) continue;
+    const tool = buildTool(name, entry);
+    if (!tool) continue;
     const controller = new AbortController();
-    exposed.set(name, { id: active.get(name)![0], controller });
+    exposed.set(name, { id, controller });
     const unmark = (): void => {
       if (exposed.get(name)?.controller === controller) exposed.delete(name);
     };
@@ -315,11 +330,12 @@ function exposeNew(active: Active, tools: Map<string, WebMcpTool>): void {
 
 function sync(): void {
   syncScheduled = false;
-  const active = activeEntries();
-  const tools = buildTools(active);
-  revokeStale(active, tools);
   warnDuplicates();
-  exposeNew(active, tools);
+  // Without WebMCP nothing is exposed: skip describing (and building form schemas for) every action.
+  if (exposed.size === 0 && !hasModelContext()) return;
+  const active = activeEntries();
+  revokeStale(active);
+  exposeNew(active);
 }
 
 /** Test-only: drop all registrations and module state. */
