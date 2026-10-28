@@ -1,4 +1,5 @@
-import { isValidActionName, AGENT_GLOBAL_VERSION, type AgentGlobal } from "../../shared/agent";
+import { AGENT_GLOBAL_VERSION, type AgentGlobal } from "../../shared/agent";
+import { assertValidActionName } from "../../shared/actionName";
 import { AGENT_GLOBAL } from "../../shared/conventions";
 import { errorMessage, withPrefix } from "../../shared/errors";
 import { hasOwn } from "../../shared/object";
@@ -38,12 +39,6 @@ let syncScheduled = false;
 let forceScheduled = false;
 
 const CONFIRM_BUDGET = 1000;
-
-export function assertValidActionName(name: string): void {
-  if (!isValidActionName(name)) {
-    throw new Error(withPrefix(`invalid action name "${name}": use 1-128 chars of A-Z a-z 0-9 _ - .`));
-  }
-}
 
 function installGlobal(): void {
   if (typeof window === "undefined") return;

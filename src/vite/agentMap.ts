@@ -5,7 +5,7 @@ import {
   AGENT_GLOBAL,
   LINK_ACTION_SELECTOR,
 } from "../shared/conventions";
-import { linkActions, type LinkActionMarkup } from "../shared/markupActions";
+import { firstPerName, linkActions, type LinkActionMarkup } from "../shared/markupActions";
 import {
   AGENT_MAP_VERSION,
   type AgentActionDescriptor,
@@ -82,8 +82,7 @@ export interface AgentMapPageInput {
 const byName = (a: { name: string }, b: { name: string }): number => compareStrings(a.name, b.name);
 
 function toPage(siteUrl: string, p: AgentMapPageInput): AgentMapPage {
-  const seen = new Set<string>();
-  const actions = p.actions.filter((a) => !seen.has(a.name) && !!seen.add(a.name)).sort(byName);
+  const actions = firstPerName(p.actions).sort(byName);
   // Spread in AgentMapPage key order; absent optional fields are omitted.
   return {
     path: p.route,

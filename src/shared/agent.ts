@@ -49,6 +49,9 @@ export function isValidActionName(name: unknown): name is string {
   return typeof name === "string" && ACTION_NAME_RE.test(name);
 }
 
+/** What makes a name valid, for messages. */
+export const ACTION_NAME_RULE = "use 1-128 chars of A-Z a-z 0-9 _ - .";
+
 export const AGENT_GLOBAL_VERSION = 1;
 
 /** Shape of window[AGENT_GLOBAL]. */

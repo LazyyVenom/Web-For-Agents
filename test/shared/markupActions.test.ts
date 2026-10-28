@@ -1,6 +1,6 @@
 import { Window } from "happy-dom";
 import { describe, expect, it } from "vitest";
-import { linkActions, markupActions, markupLinks, resolveLinkHref } from "../../src/shared/markupActions";
+import { actionGroups, firstPerName, linkActions, markupActions, markupLinks, resolveLinkHref } from "../../src/shared/markupActions";
 
 describe("markupActions", () => {
   it("finds data-agent-action elements, then WebMCP forms, with trimmed names and no dedupe", () => {
@@ -80,7 +80,7 @@ describe("link actions", () => {
     expect(resolveLinkHref("/cv.pdf", undefined)).toEqual({ ok: false, reason: "its href is not a valid URL" });
   });
 
-  it("builds descriptors: invalid names skipped, first link wins, taken names skipped before the href check", () => {
+  it("builds descriptors: invalid names warned and skipped, first link wins, taken names skipped before the href check", () => {
     const warnings: string[] = [];
     const out = linkActions(
       [
@@ -99,7 +99,22 @@ describe("link actions", () => {
       ["unsub", "Unsubscribe", "https://a.com/unsub", true, false, "GET"],
     ]);
     expect(warnings).toEqual([
+      'link action "bad name" on /about skipped: invalid name (use 1-128 chars of A-Z a-z 0-9 _ - .)',
       'link action "evil" on /about skipped: javascript: links are not allowed (only http(s), mailto: and tel:)',
     ]);
+  });
+});
+
+describe("firstPerName / actionGroups", () => {
+  it("picks the agents.json winner: earlier group first, then document order", () => {
+    const registry = [{ name: "a", kind: "click", from: "registry" }];
+    const markup = [
+      { name: "a", kind: "link", from: "link-a" },
+      { name: "b", kind: "link", from: "link-b" },
+      { name: "b", kind: "form", from: "form-b" },
+      { name: "c", kind: "click", from: "click-c1" },
+      { name: "c", kind: "form", from: "form-c2" },
+    ];
+    expect(firstPerName(registry, ...actionGroups(markup)).map((a) => a.from)).toEqual(["registry", "form-b", "click-c1"]);
   });
 });

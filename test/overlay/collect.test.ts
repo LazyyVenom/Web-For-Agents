@@ -2,6 +2,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { collectPageReport } from "../../src/overlay/collect";
 import { AGENT_GLOBAL } from "../../src/shared/conventions";
+import { linkActions, markupLinks } from "../../src/shared/markupActions";
+import { staticActions } from "../../src/vite/generateActions";
 import { resetAgentRuntime } from "../helpers/agent";
 
 const NO_MAIN_WARNING =
@@ -139,6 +141,32 @@ describe("collectPageReport", () => {
     expect(collectPageReport(document).actions).toEqual([
       { name: "open-resume", description: "Open", kind: "click", destructive: false, source: "registry" },
     ]);
+  });
+
+  it("an invalid name is shown as not listed, and the winner per name matches agents.json", () => {
+    history.replaceState(null, "", "/about");
+    document.body.innerHTML = `
+      <a href="/cv.pdf" data-agent-action="open resume">CV</a>
+      <a href="/a.pdf" data-agent-action="contact">Link first</a>
+      <form data-agent-action="contact"><input name="email"></form>
+      <button data-agent-action="bad/name">x</button>
+      <a href="/x.pdf" data-agent-action="cv">CV</a>`;
+    const actions = collectPageReport(document, { siteUrl: "https://x.test" }).actions;
+    expect(actions).toEqual([
+      { name: "bad/name", description: null, kind: "click", destructive: false, source: "markup", warning: "Not listed in agents.json: invalid name (use 1-128 chars of A-Z a-z 0-9 _ - .)" },
+      { name: "contact", description: null, kind: "form", destructive: false, source: "markup" },
+      { name: "cv", description: null, kind: "link", destructive: false, source: "markup", href: "https://x.test/x.pdf" },
+      { name: "open resume", description: null, kind: "link", destructive: false, source: "markup", warning: "Not listed in agents.json: invalid name (use 1-128 chars of A-Z a-z 0-9 _ - .)" },
+    ]);
+    // agents.json (generate path) lists exactly the overlay actions without a warning.
+    const warnings: string[] = [];
+    const statics = staticActions(document);
+    const links = linkActions(markupLinks(document), { pageUrl: "https://x.test/about", page: "/about", taken: new Set(statics.map((a) => a.name)) }, (m) =>
+      warnings.push(m),
+    );
+    const listed = [...statics, ...links].map((a) => [a.name, a.kind, a.href]).sort();
+    expect(listed).toEqual(actions.filter((a) => !a.warning).map((a) => [a.name, a.kind, a.href]).sort());
+    expect(warnings).toEqual(['link action "open resume" on /about skipped: invalid name (use 1-128 chars of A-Z a-z 0-9 _ - .)']);
   });
 
   it("actions from the agent action registry", () => {

@@ -1,6 +1,6 @@
+import { assertValidActionName } from "../../shared/actionName";
 import { ACTION_ATTR, ACTION_DESCRIPTION_ATTR, ACTION_DESTRUCTIVE_ATTR } from "../../shared/conventions";
 import type { AgentHintProps } from "./react";
-import { assertValidActionName } from "./registry";
 
 export interface AgentLinkSpec {
   /** 1 to 128 characters of A-Z a-z 0-9 _ - . Unique per page. */

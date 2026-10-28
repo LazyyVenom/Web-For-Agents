@@ -1,4 +1,4 @@
-import { isValidActionName, type AgentActionDescriptor } from "./agent";
+import { ACTION_NAME_RULE, isValidActionName, type AgentActionDescriptor } from "./agent";
 import {
   ACTION_ATTR,
   ACTION_DESCRIPTION_ATTR,
@@ -95,10 +95,28 @@ export function resolveLinkHref(href: string, pageUrl: string | undefined): Link
   return { ok: true, href: url };
 }
 
+/** Why a markup action with an invalid name is not listed in agents.json. */
+export const INVALID_NAME_REASON = `invalid name (${ACTION_NAME_RULE})`;
+
 /**
- * Agent action descriptors for link actions on one page. Invalid names are skipped, the first link
- * with a name wins, and names in `taken` (actions found another way, which win) are skipped before
- * their href is checked. A rejected href is reported through `warn`, naming the action and `page`.
+ * One action per name, as agents.json picks it: the earlier group wins, then the first in document
+ * order. Groups in agents.json order: registry actions, form/click markup, link markup (see
+ * actionGroups). The result keeps that order.
+ */
+export function firstPerName<T extends { name: string }>(...groups: ReadonlyArray<readonly T[]>): T[] {
+  const seen = new Set<string>();
+  return groups.flat().filter((a) => !seen.has(a.name) && !!seen.add(a.name));
+}
+
+/** Markup actions split into the agents.json precedence groups: form/click first, then links. */
+export function actionGroups<T extends { kind: string }>(markup: readonly T[]): [T[], T[]] {
+  return [markup.filter((a) => a.kind !== "link"), markup.filter((a) => a.kind === "link")];
+}
+
+/**
+ * Agent action descriptors for link actions on one page. The first link with a name wins, and
+ * names in `taken` (actions found another way, which win) are skipped before their href is checked.
+ * An invalid name or a rejected href is reported through `warn`, naming the action and `page`.
  */
 export function linkActions(
   links: readonly LinkActionMarkup[],
@@ -108,8 +126,12 @@ export function linkActions(
   const seen = new Set(opts.taken);
   const out: AgentActionDescriptor[] = [];
   for (const link of links) {
-    if (!isValidActionName(link.name) || seen.has(link.name)) continue;
+    if (seen.has(link.name)) continue;
     seen.add(link.name);
+    if (!isValidActionName(link.name)) {
+      warn(`link action "${link.name}" on ${opts.page} skipped: ${INVALID_NAME_REASON}`);
+      continue;
+    }
     const r = resolveLinkHref(link.href, opts.pageUrl);
     if (!r.ok) {
       warn(`link action "${link.name}" on ${opts.page} skipped: ${r.reason}`);
