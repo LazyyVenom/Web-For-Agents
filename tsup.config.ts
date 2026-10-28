@@ -5,5 +5,5 @@ export default defineConfig({
   format: ["esm"],
   dts: { entry: { index: "src/index.ts", vite: "src/vite/index.ts", cli: "src/cli/index.ts", overlay: "src/overlay/index.ts" } },
   clean: true,
-  external: ["react", "react-dom", "react-dom/client", "vite", "happy-dom", "turndown", "turndown-plugin-gfm", "playwright-core"],
+  external: ["react", "react-dom", "react-dom/client", "vite", "happy-dom", "turndown", "turndown-plugin-gfm", "playwright-core", "@anubhav-choubey/web-for-agents/vite"],
 });

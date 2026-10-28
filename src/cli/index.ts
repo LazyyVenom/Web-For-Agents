@@ -1,6 +1,7 @@
 import { errorMessage, withPrefix } from "../shared/errors";
 import { audit } from "./audit";
 import { USAGE, parseCliArgs } from "./args";
+import { runGenerate } from "./generate";
 import { formatText } from "./report";
 import { safeJson, safeText } from "./terminal";
 
@@ -32,6 +33,7 @@ export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<num
     io.stdout(USAGE);
     return 0;
   }
+  if (args.command === "generate") return runGenerate(args.generate!, args.json, io);
   const report = await audit(args.url!, {
     timeoutMs: args.timeoutMs,
     ...(args.agentMap === undefined ? {} : { agentMapPath: args.agentMap }),

@@ -12,6 +12,31 @@ describe("parseCliArgs", () => {
     });
   });
 
+  it("parses generate with flags", () => {
+    expect(
+      parseCliArgs(["generate", "dist", "--site-url", "https://a.com", "--ai-training", "block", "--ai-search", "allow", "--config", "c.mjs", "--no-link-markdown", "--overwrite", "--json"]),
+    ).toEqual({
+      command: "generate",
+      generate: { outDir: "dist", siteUrl: "https://a.com", aiTraining: "block", aiSearch: "allow", config: "c.mjs", linkMarkdown: false, overwrite: true },
+      json: true,
+      timeoutMs: 10000,
+    });
+    expect(parseCliArgs(["generate", "out"]).generate).toEqual({ outDir: "out", linkMarkdown: true, overwrite: false });
+  });
+
+  it("rejects bad generate input and mixed-up flags", () => {
+    for (const [argv, msg] of [
+      [["generate"], "generate requires an output directory"],
+      [["generate", "a", "b"], 'unexpected argument "b"'],
+      [["generate", "a", "--ai-training", "yes"], '--ai-training must be "allow" or "block"'],
+      [["generate", "a", "--min-score", "5"], "--min-score is not an option of generate"],
+      [["generate", "a", "--config", " "], "--config must be a file path"],
+      [["audit", "u", "--site-url", "https://a.com"], "--site-url is an option of generate, not audit"],
+    ] as const) {
+      expect(() => parseCliArgs([...argv]), argv.join(" ")).toThrow(msg);
+    }
+  });
+
   it("gives help for no args and --help", () => {
     expect(parseCliArgs([]).command).toBe("help");
     expect(parseCliArgs(["--help"]).command).toBe("help");
