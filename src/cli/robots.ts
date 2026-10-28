@@ -11,6 +11,25 @@ export interface RobotsGroup {
 export interface ParsedRobots {
   groups: RobotsGroup[];
   sitemaps: string[];
+  /** Set when a parse cap was hit: what was ignored, e.g. "robots.txt exceeds 500 KiB; rules beyond that were ignored". */
+  truncated?: string;
+}
+
+/** Bytes of a robots.txt that are parsed; RFC 9309 section 2.5 requires crawlers to read at least 500 KiB. */
+export const MAX_ROBOTS_BYTES = 500 * 1024;
+/** Longer Allow/Disallow patterns are ignored. */
+export const MAX_PATTERN_CHARS = 512;
+
+/**
+ * The first MAX_ROBOTS_BYTES (UTF-8) of `text`, cut back to the last complete line so a rule is
+ * never shortened into a different one. Null when the text fits.
+ */
+function capBytes(text: string): string | null {
+  const bytes = new TextEncoder().encode(text);
+  if (bytes.length <= MAX_ROBOTS_BYTES) return null;
+  const head = new TextDecoder().decode(bytes.subarray(0, MAX_ROBOTS_BYTES));
+  const end = Math.max(head.lastIndexOf("\n"), head.lastIndexOf("\r"));
+  return end < 0 ? "" : head.slice(0, end);
 }
 
 const token = (s: string): string => s.trim().toLowerCase().split(/[/\s]/)[0] ?? "";
@@ -19,8 +38,10 @@ export function parseRobots(text: string): ParsedRobots {
   const out: ParsedRobots = { groups: [], sitemaps: [] };
   let cur: RobotsGroup | null = null;
   let inAgents = false;
-  let rules = 0;
-  for (const raw of stripBom(text).split(/\r\n|\r|\n/)) {
+  let longPatterns = 0;
+  const body = stripBom(text);
+  const capped = capBytes(body);
+  for (const raw of (capped ?? body).split(/\r\n|\r|\n/)) {
     const line = raw.replace(/#.*$/, "").trim();
     const i = line.indexOf(":");
     if (i < 0) continue;
@@ -38,21 +59,21 @@ export function parseRobots(text: string): ParsedRobots {
       if (t) cur.agents.push(t);
     } else if (key === "allow" || key === "disallow") {
       inAgents = false;
-      if (cur && value && value.length <= MAX_PATTERN_CHARS && cur.rules.length < MAX_RULES_PER_GROUP && rules < MAX_RULES) {
-        cur.rules.push({ allow: key === "allow", pattern: value });
-        rules++;
-      }
+      if (!cur || !value) continue;
+      if (value.length > MAX_PATTERN_CHARS) longPatterns++;
+      else cur.rules.push({ allow: key === "allow", pattern: value });
     }
   }
+  const notes: string[] = [];
+  if (capped !== null) notes.push(`exceeds ${MAX_ROBOTS_BYTES / 1024} KiB; rules beyond that were ignored`);
+  if (longPatterns > 0) {
+    notes.push(
+      `has ${longPatterns} pattern${longPatterns === 1 ? "" : "s"} over ${MAX_PATTERN_CHARS} characters, which ${longPatterns === 1 ? "was" : "were"} ignored`,
+    );
+  }
+  if (notes.length > 0) out.truncated = `robots.txt ${notes.join(" and ")}`;
   return out;
 }
-
-/** Rules kept per group; later rules are ignored (Google reads the first 500 KiB of a file). */
-export const MAX_RULES_PER_GROUP = 2000;
-/** Rules kept per file across all groups. */
-export const MAX_RULES = 10_000;
-/** Longer Allow/Disallow patterns are ignored. */
-export const MAX_PATTERN_CHARS = 512;
 
 /**
  * Glob match without regex or backtracking: `*` matches any run, a trailing `$` anchors the end,
