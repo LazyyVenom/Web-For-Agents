@@ -27,6 +27,8 @@ export interface IsolationOptions {
    * default: it is what lets page code escape happy-dom to Node.
    */
   codeGeneration?: boolean;
+  /** @internal For tests: overrides CACHE_TOUCH_MS. */
+  cacheTouchMs?: number;
   /** @internal For tests: extra environment for the child. */
   extraEnv?: Record<string, string>;
 }
@@ -65,6 +67,28 @@ export async function childEntryFile(): Promise<string> {
   if (!file.endsWith(".ts")) return file;
   return (sourceEntry ??= bundleFromSource(file));
 }
+
+/** Sets a dev bundle's mtime to now, marking it in use. */
+function touchCacheEntry(dir: string): void {
+  try {
+    const now = new Date();
+    utimesSync(dir, now, now);
+  } catch {
+    // best effort
+  }
+}
+
+/** The dev bundle directory holding `entry`, or undefined for the package build. */
+function cacheEntryOf(entry: string): string | undefined {
+  const dir = path.dirname(entry);
+  return path.basename(dir).startsWith("render-child-") &&
+    path.basename(path.dirname(dir)) === "web-for-agents"
+    ? dir
+    : undefined;
+}
+
+/** How often a running build re-marks its dev bundle as in use (well under PRUNE_AFTER_MS). */
+export const CACHE_TOUCH_MS = 30_000;
 
 /** Cache entries younger than this are kept: another build may be using them. */
 const PRUNE_AFTER_MS = 60_000;
@@ -105,12 +129,7 @@ async function bundleFromSource(file: string): Promise<string> {
     }
   }
   // Mark the current bundle as in use, so another build's pruning spares it.
-  try {
-    const now = new Date();
-    utimesSync(outDir, now, now);
-  } catch {
-    // best effort
-  }
+  touchCacheEntry(outDir);
   // Keep only the current bundle (older ones are stale), sparing any another build just wrote.
   for (const entry of readdirSync(cacheDir)) {
     if (entry === id || !entry.startsWith("render-child-")) continue;
@@ -205,6 +224,8 @@ export function createIsolatedHappyDomRenderer(
   const retiring = new Set<ChildProcess>();
   let current: ChildProcess | undefined;
   let lastEnv: Record<string, string> | undefined;
+  /** Keeps the dev bundle's mtime fresh while this renderer lives, so other builds never prune it. */
+  let toucher: ReturnType<typeof setInterval> | undefined;
 
   const inFlight = (cp: ChildProcess) => [...pending.values()].filter((p) => p.cp === cp).length;
   const closeChild = async (cp: ChildProcess) => {
@@ -231,6 +252,11 @@ export function createIsolatedHappyDomRenderer(
 
   const start = async (origins: string[]): Promise<ChildProcess> => {
     const entry = await childEntryFile();
+    const cacheDir = cacheEntryOf(entry);
+    if (cacheDir && !toucher && !closed) {
+      toucher = setInterval(() => touchCacheEntry(cacheDir), iso.cacheTouchMs ?? CACHE_TOUCH_MS);
+      toucher.unref?.();
+    }
     // The environment carries options only: script bodies could exceed the OS limit on one
     // environment string (about 128 KiB on Linux, 32 KB on Windows), so they follow over IPC.
     const { syncResources, ...small } = options;
@@ -374,6 +400,8 @@ export function createIsolatedHappyDomRenderer(
     },
     async close() {
       closed = true;
+      clearInterval(toucher);
+      toucher = undefined;
       const c = child;
       child = undefined;
       const all = [...retiring];

@@ -499,6 +499,28 @@ describe("happy-dom render process isolation", { timeout: SUITE_TIMEOUT_MS }, ()
     }
   });
 
+  it("keeps the dev bundle's cache entry fresh while the build runs", async () => {
+    const entry = await childEntryFile();
+    const dir = (await import("node:path")).dirname(entry);
+    const { utimesSync, statSync } = await import("node:fs");
+    const r = createIsolatedHappyDomRenderer({}, { cacheTouchMs: 50 });
+    try {
+      await r.render(server.origin + "/fetch", RENDER_MS);
+      const old = new Date(Date.now() - 3_600_000);
+      utimesSync(dir, old, old);
+      await vi.waitFor(() => expect(Date.now() - statSync(dir).mtimeMs).toBeLessThan(10_000), { timeout: 2000 });
+    } finally {
+      await r.close();
+    }
+    // stopped on close
+    const old = new Date(Date.now() - 3_600_000);
+    utimesSync(dir, old, old);
+    await new Promise((res) => setTimeout(res, 200));
+    expect(Date.now() - statSync(dir).mtimeMs).toBeGreaterThan(3_000_000);
+    const now = new Date();
+    utimesSync(dir, now, now);
+  });
+
   it("reports a crashed render process and recovers", async () => {
     const r = createIsolatedHappyDomRenderer();
     try {
