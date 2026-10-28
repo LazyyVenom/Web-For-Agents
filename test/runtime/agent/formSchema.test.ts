@@ -221,13 +221,13 @@ describe("agentFields", () => {
 });
 
 describe("regex input cap", () => {
-  it("rejects over-long input before running an author pattern", () => {
-    const schema = { type: "object", properties: { p: { type: "string", pattern: "^(a+)+$" } } } as const;
+  it("rejects over-long input before running an author pattern (bounds polynomial backtracking)", () => {
+    const schema = { type: "object", properties: { p: { type: "string", pattern: "^a*a*b$" } } } as const;
     const start = Date.now();
-    const r = validateInput(schema, { p: "a".repeat(10_001) + "!" });
+    const r = validateInput(schema, { p: "a".repeat(1_000_000) });
     expect(Date.now() - start).toBeLessThan(100);
     expect(r).toEqual({ ok: false, errors: [{ field: "p", message: "must be at most 10000 characters to be checked" }] });
-    expect(validateInput(schema, { p: "a".repeat(10_000) }).ok).toBe(true);
+    expect(validateInput(schema, { p: "a".repeat(9_999) + "b" }).ok).toBe(true);
   });
 });
 

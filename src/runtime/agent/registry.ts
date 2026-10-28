@@ -386,6 +386,7 @@ function sync(): void {
   syncScheduled = forceScheduled = false;
   warnDuplicates();
   // Without WebMCP nothing is exposed: skip describing (and building form schemas for) every action.
+  // A WebMCP that appears later is picked up by the next sync (a mount, unmount or refreshAgentActions).
   if (exposed.size === 0 && !hasModelContext()) return;
   const active = activeEntries();
   exposeNew(active, revokeStale(active, force));

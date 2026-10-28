@@ -156,7 +156,11 @@ export function schemaFromForm(form: HTMLFormElement): JsonSchema {
   return out;
 }
 
-/** Longest string run through a pattern or format regex: bounds catastrophic backtracking in author patterns. */
+/**
+ * Longest string run through a pattern or format regex. This bounds polynomial backtracking
+ * (O(n^2), O(n^3) patterns stay fast at 10k chars); it does not make exponential patterns such as
+ * `(a+)+$` safe, which can hang on far shorter input.
+ */
 const MAX_REGEX_INPUT = 10_000;
 
 export type Errors = Array<{ field: string; message: string }>;
