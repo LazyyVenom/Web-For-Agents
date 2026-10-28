@@ -19,10 +19,11 @@ describe("safeText", () => {
     const out = safeText(HOSTILE);
     expect(out).not.toMatch(ACTIVE);
     expect(out).not.toContain("\n");
-    expect(out).toBe("a [2Kb ]8;;http://evil c ]0;title de 31m ");
+    expect(out).toBe("a [2Kb ]8;;http://evil c ]0;title de 31m");
   });
-  it("collapses newlines and tabs", () => {
+  it("collapses newlines, tabs and line/paragraph separators", () => {
     expect(safeText("a\r\n\tb")).toBe("a b");
+    expect(safeText("a\u2028b\u2029 c ")).toBe("a b c");
   });
   it("leaves ordinary text alone", () => {
     expect(safeText("Café – 日本 🙂 \"q\"")).toBe("Café – 日本 🙂 \"q\"");
