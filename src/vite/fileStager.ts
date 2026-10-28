@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { LOG_PREFIX } from "../shared/errors";
+import { MAX_NAME_BYTES } from "./prerender/paths";
 
 export type StageStatus = "staged" | "replaced" | "skipped";
 
@@ -29,8 +30,6 @@ export function outputFileName(fileName: string): string {
   return rel;
 }
 
-/** Longest file name most file systems accept, in bytes. */
-export const MAX_NAME_BYTES = 255;
 
 const short = (s: string, max: number) => (s.length <= max ? s : s.slice(0, max - 1) + "\u2026");
 
