@@ -7,6 +7,7 @@ import {
   publicMdUrl,
   publicUrl,
   routeDepth,
+  isRouteTooLong,
   routeHtmlFile,
   routeMdFile,
   trimTrailingSlash,
@@ -18,6 +19,14 @@ describe("route file helpers", () => {
     expect(routeHtmlFile("/about")).toBe("about/index.html");
     expect(routeHtmlFile("/blog/post")).toBe("blog/post/index.html");
     expect(routeHtmlFile("/caf%C3%A9")).toBe("café/index.html");
+    expect(routeHtmlFile("/", "flat")).toBe("index.html");
+    expect(routeHtmlFile("/about", "flat")).toBe("about.html");
+    expect(routeHtmlFile("/a/b/", "flat")).toBe("a/b.html");
+    expect(routeHtmlFile("/caf%C3%A9", "flat")).toBe("café.html");
+    expect(isRouteTooLong("/" + "a".repeat(252))).toBe(false);
+    expect(isRouteTooLong("/" + "a".repeat(252), "flat")).toBe(true);
+    expect(isRouteTooLong("/" + "a".repeat(250), "flat")).toBe(false);
+    expect(isRouteTooLong("/" + "a".repeat(252) + "/b", "flat")).toBe(false);
     expect(routeMdFile("/")).toBe("index.md");
     expect(routeMdFile("/about")).toBe("about.md");
     expect(routeMdFile("/blog/post")).toBe("blog/post.md");

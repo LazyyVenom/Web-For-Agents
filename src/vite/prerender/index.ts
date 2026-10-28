@@ -60,6 +60,8 @@ export async function prerenderSite(input: {
       ...(pr.executablePath !== undefined ? { executablePath: pr.executablePath } : {}),
       allowOrigins: pr.allowOrigins,
       ...(pr.idleMs !== undefined ? { idleMs: pr.idleMs } : {}),
+      ...(pr.readySelector !== undefined ? { readySelector: pr.readySelector } : {}),
+      onTimeout: pr.onTimeout,
       codeGeneration: pr.isolation.codeGeneration,
       syncResources,
     });
@@ -83,6 +85,7 @@ export async function prerenderSite(input: {
           ...(markdown ? { markdownUrl: (route: string) => publicMdUrl(options.siteUrl, route) } : {}),
           inPage,
           skipRoute: input.skipRoute,
+          fileLayout: pr.fileLayout,
         },
         async (url, renderer, timeoutMs, scripts) => (await pool.get(renderer)).render(url, timeoutMs, scripts),
       ).catch((e: unknown) => {

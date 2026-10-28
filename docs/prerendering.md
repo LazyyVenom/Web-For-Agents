@@ -55,6 +55,27 @@ useEffect(() => {
 
 Pages that never go idle (polling requests, a long-lived `fetch` stream, a DOM that keeps changing) time out the same way. Hold and release around the work the page actually needs, so the renderer captures it once that is done, or raise `prerender.timeoutMs` for slow routes.
 
+## Animated pages
+
+Only content changes keep a page from going quiet. These include added or removed nodes and changed text. Attribute changes do not count, so CSS-class, `style`, `aria-*` and `data-*` animations never delay a capture.
+
+Some pages keep changing their content forever: a typing effect, a rotating quote, a mascot's lines every few seconds. They never go quiet, so they time out. Two options handle them, and both work the same in happy-dom and Chrome.
+
+`prerender.readySelector` names an element that marks the page as ready. A route is captured as soon as that element exists and no `fetch`/XHR is in flight, however busy the DOM still is. `holdPrerender()` is still respected. Choose an element that appears once the real content is in place (after a loading screen, for example):
+
+```ts
+webForAgents({
+  // ...
+  prerender: { readySelector: "[data-hero-ready]" },
+});
+```
+
+The selector applies to every route. A route where it never matches times out, so put the marker on every page, or pick a selector every page has (such as `main h1`). An invalid selector fails the render with a message naming it.
+
+`prerender.onTimeout: "snapshot"` saves a page that is still not ready at `prerender.timeoutMs`, instead of failing the build. The page is saved exactly as it was at that moment, so a typing effect may be half-typed. The build logs a warning naming each such route. Page errors still fail the route, and so does a page that has not finished loading by the deadline. The default, `"fail"`, keeps the behaviour described above.
+
+Prefer `readySelector` where you can: it captures a known state, and it does not wait for the full timeout. Use `"snapshot"` as a safety net, together with a lower `timeoutMs` if waiting the full 15 seconds per route is too slow.
+
 ## SPA fallback
 
 After prerendering, `dist/index.html` is the rendered `/` page. If your host serves `index.html` for unknown URLs, deep links that were not prerendered would get the home page's HTML: it flashes before the app boots, and `hydrateApp` would hydrate the wrong markup. Point the fallback at `dist/200.html` instead, which is the untouched shell. If `public/200.html` exists, it is used as is and not generated.
@@ -133,3 +154,68 @@ If `robots.ai.training` or `robots.ai.search` is `"block"` while `.md` files, `l
 Prerendering is fast. As approximate measurements on a laptop: the 12-page demo in `examples/demo` builds and prerenders in about 1.5 seconds, and a 500-route test site prerenders in under 10 seconds with the default settings.
 
 Every page being rendered is held in memory at once. These figures are approximate. A typical page takes tens of MB, but a heavy page (a large DOM, big data payloads) can peak at around 500 MB. Peak memory is roughly `prerender.concurrency` times the heaviest page, plus about 150 MB for the build and 100 MB for the render process; the Chrome renderer adds Chrome's own processes on top. On small CI runners or containers (1 to 2 GB), lower `prerender.concurrency`, for example to `2`. If a render runs out of memory, the build fails with a message suggesting exactly that, rather than crashing.
+
+## Using your own prerender
+
+If your site already has its own prerender step (for example a script that runs after `vite build` and writes `about.html`, `experience.html` and so on), you do not have to replace it. Turn the plugin's prerender off, or leave the plugin out entirely, and run `generate` after your script:
+
+```sh
+vite build && node scripts/prerender.mjs
+npx web-for-agents generate dist --site-url https://example.com --ai-training block --ai-search allow
+```
+
+The same step is available in code:
+
+```ts
+import { generateAgentFiles } from "@anubhav-choubey/web-for-agents/vite";
+
+await generateAgentFiles({
+  outDir: "dist",
+  siteUrl: "https://example.com",
+  robots: { ai: { training: "block", search: "allow" } },
+});
+```
+
+It takes the same `siteUrl`, `robots`, `exclude`, `sitemap`, `markdown` (including `transform`), `llms` and `agentMap` options as the plugin, plus:
+
+- `linkMarkdown` (default `true`) adds `<link rel="alternate" type="text/markdown">` to each page's `<head>`. It goes just before the real `</head>`: a `</head>` inside a comment, a `<script>` or `<style>` body or an attribute value is skipped. Without a `</head>` it goes after the `<head>` tag, else before `<body>`, else after the doctype and `<html>` tag (never before the doctype). The link carries `data-wfa="markdown"`. On later runs only that marked link is updated, in place, so running `generate` twice adds the link only once. A markdown alternate link of your own (without the marker) is left untouched, no second link is added, and the route is named in one info line.
+- `overwrite` (default `false`) replaces an existing `robots.txt`, `sitemap.xml`, `llms.txt`, `llms-full.txt` or agent map whose content differs. Without it, such a file (for example your own `public/robots.txt`, copied into `dist`) is kept and a warning is logged.
+
+How pages are found: every `.html` file in `outDir` is a page. `index.html` is `/`, and both `about.html` and `about/index.html` are `/about`, so flat, directory and mixed layouts all work. If both exist, the first one in sorted order is used and a warning names both. File names become URLs the way a browser writes them: `c++.html` is `/c++`, `a b.html` is `/a%20b`.
+
+These are skipped:
+
+- `200.html` and `404.html`, in any directory (host fallback and error pages).
+- The top-level `assets/` and `node_modules/` directories.
+- Files and directories whose name starts with a dot.
+- Symbolic links, with a warning.
+- Files with other extensions, such as `.htm`, or `.HTML` in capitals.
+- File names that cannot be a URL path (a backslash, for example), with a warning.
+- `exclude`d routes.
+- `/index` (from `index/index.html`), whose `index.md` would replace the markdown of `/`, with a warning.
+
+Pages with `<meta name="robots" content="noindex">` get a `.md` file but stay out of `llms.txt`, the sitemap and `agents.json`.
+
+Your HTML is changed only to add the markdown link, or to update the one `generate` added before. The file's encoding is detected (BOM, else `<meta charset>`, else UTF-8) and every other byte is left as it was, so a `windows-1252` page stays `windows-1252`. UTF-16 files are read but not changed. An existing `.md` file with different content is replaced, with a warning. Nothing is ever written through a symbolic link, so nothing lands outside `outDir`.
+
+The result lists the pages, the detected layout (`"flat"`, `"directory"` or `"mixed"`), the files written and the files kept. Nothing is written if any page fails, for example when `markdown.transform` throws.
+
+`agents.json` here comes from each page's static markup: elements with `data-agent-action` (what `useAgentAction` and `AgentForm` render) and WebMCP `<form toolname>` forms, with form fields as the input schema. An action registered with only a `handler` and no element exists only while your app runs, so it is not listed in this mode.
+
+The plugin can also write flat files itself: set `prerender.fileLayout: "flat"` to write `/about` as `about.html` instead of `about/index.html`. See [Flat file layout](#flat-file-layout).
+
+## Flat file layout
+
+With `prerender.fileLayout: "flat"`, `/about` is written to `about.html` and `/blog/post` to `blog/post.html`. `/` stays `index.html`, the `.md` files are the same as in the directory layout, and `200.html` is still the SPA fallback. Your host must serve `about.html` at `/about`:
+
+| Host | Setup |
+| --- | --- |
+| Netlify | Pretty URLs, on by default. |
+| Vercel | `"cleanUrls": true` in `vercel.json`. |
+| Cloudflare Pages | Works by default. |
+| nginx | `try_files $uri $uri.html $uri/ =404;` |
+| S3 + CloudFront | Needs a viewer-request function that appends `.html` to extensionless paths. |
+
+If both `about.html` and a directory `about/` exist, some hosts redirect `/about` to `/about/`. Check that the canonical URL you set matches what your host serves.
+
+A route whose file would be another route's file is skipped with a warning naming both, instead of overwriting it. In the flat layout that is `/index` (it would write `index.html`, the page for `/`) and `/200` (it would write `200.html`, the SPA fallback). In both layouts `/index` would also write `index.md`. A route whose file name would be too long with the `.html` suffix is skipped with a warning.

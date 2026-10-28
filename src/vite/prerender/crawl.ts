@@ -62,6 +62,8 @@ export interface CrawlOptions {
   inPage: InPageScripts;
   /** Routes that are neither rendered nor listed. */
   skipRoute?(route: string): boolean;
+  /** Output layout, for the file name length check. Default "directory". */
+  fileLayout?: "directory" | "flat";
 }
 
 export type RenderFn = (
@@ -118,7 +120,7 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
   const seeds: string[] = [];
   for (const s of [...new Set(opts.seeds.map(normalizeRoute))].sort()) {
     if (!isSafeRoute(s)) continue;
-    if (isRouteTooLong(s)) seedTooLong.push(s);
+    if (isRouteTooLong(s, opts.fileLayout)) seedTooLong.push(s);
     else if (!skip(s)) seeds.push(s);
   }
 
@@ -177,7 +179,7 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
     const tooLong: string[] = [];
     const candidate = (r: string | null): r is string => {
       if (r === null || isExcluded(r, opts.exclude)) return false;
-      if (isRouteTooLong(r)) {
+      if (isRouteTooLong(r, opts.fileLayout)) {
         tooLong.push(r);
         return false;
       }

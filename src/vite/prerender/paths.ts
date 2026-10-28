@@ -30,9 +30,33 @@ function decodeSegments(route: string): string[] {
   return segments(normalizeRoute(route)).map((s) => decodeURIComponent(s));
 }
 
-export function routeHtmlFile(route: string): string {
+/**
+ * One decoded path segment, percent-encoded the way browsers write URL paths: "c++" stays "c++",
+ * "a b" becomes "a%20b", "é" becomes "%C3%A9". "%" is encoded too, so the route decodes back to
+ * the file name.
+ */
+export function encodePathSegment(segment: string): string {
+  return encodeURIComponent(segment).replace(/%(24|26|2B|2C|3B|3D|3A|40)/g, (m) => decodeURIComponent(m));
+}
+
+/**
+ * The inverse of routeHtmlFile, for either layout: "index.html" -> "/", "about.html" and
+ * "about/index.html" -> "/about". `file` is relative to outDir with "/" separators.
+ */
+export function routeOfHtmlFile(file: string): string {
+  const segs = file.slice(0, -".html".length).split("/");
+  if (segs[segs.length - 1] === "index") segs.pop();
+  return "/" + segs.map(encodePathSegment).join("/");
+}
+
+/**
+ * The HTML file for a route. "directory": "/about" -> "about/index.html". "flat": "/about" ->
+ * "about.html". "/" is "index.html" in both.
+ */
+export function routeHtmlFile(route: string, layout: "directory" | "flat" = "directory"): string {
   const segs = decodeSegments(route);
-  return segs.length === 0 ? "index.html" : segs.join("/") + "/index.html";
+  if (segs.length === 0) return "index.html";
+  return segs.join("/") + (layout === "flat" ? ".html" : "/index.html");
 }
 
 export function routeMdFile(route: string): string {
@@ -78,8 +102,11 @@ export const MAX_SEGMENT_BYTES = MAX_NAME_BYTES - ".md".length;
 /** Longest decoded route, in UTF-8 bytes, so dist paths stay well inside OS path limits. */
 export const MAX_ROUTE_BYTES = 1024;
 
-/** True when a route's file names would be too long to write (see MAX_SEGMENT_BYTES, MAX_ROUTE_BYTES). */
-export function isRouteTooLong(route: string): boolean {
+/**
+ * True when a route's file names would be too long to write (see MAX_SEGMENT_BYTES, MAX_ROUTE_BYTES).
+ * With the flat layout the last segment also gets ".html", which is longer than ".md".
+ */
+export function isRouteTooLong(route: string, layout: "directory" | "flat" = "directory"): boolean {
   let segs: string[];
   try {
     segs = decodeSegments(route);
@@ -87,9 +114,10 @@ export function isRouteTooLong(route: string): boolean {
     return false; // not our concern: isSafeRoute rejects undecodable routes
   }
   let total = 0;
-  for (const s of segs) {
+  const leafMax = layout === "flat" ? MAX_NAME_BYTES - ".html".length : MAX_SEGMENT_BYTES;
+  for (const [i, s] of segs.entries()) {
     const n = Buffer.byteLength(s, "utf8");
-    if (n > MAX_SEGMENT_BYTES) return true;
+    if (n > (i === segs.length - 1 ? leafMax : MAX_SEGMENT_BYTES)) return true;
     total += n + 1;
   }
   return total > MAX_ROUTE_BYTES;

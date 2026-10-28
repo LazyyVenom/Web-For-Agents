@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -28,6 +28,27 @@ describe("outputFileName", () => {
 });
 
 describe("createFileStager", () => {
+  it("never writes through a symbolic link, file or directory, and writes bytes as given", () => {
+    const t = setup();
+    const outside = mkdtempSync(path.join(os.tmpdir(), "wfa-stager-out-"));
+    tmpDirs.push(outside);
+    mkdirSync(t.outDir, { recursive: true });
+    writeFileSync(path.join(outside, "f.md"), "outside");
+    symlinkSync(path.join(outside, "f.md"), path.join(t.outDir, "f.md"));
+    symlinkSync(outside, path.join(t.outDir, "dir"));
+    expect(t.stager.stage("f.md", "x").status).toBe("skipped");
+    expect(t.stager.stage("dir/g.md", "x").status).toBe("skipped");
+    expect(t.stager.stage("ok.bin", Buffer.from([0xe9, 0x80])).status).toBe("staged");
+    t.stager.flush();
+    expect(readFileSync(path.join(outside, "f.md"), "utf8")).toBe("outside");
+    expect(existsSync(path.join(outside, "g.md"))).toBe(false);
+    expect(readFileSync(path.join(t.outDir, "ok.bin"))).toEqual(Buffer.from([0xe9, 0x80]));
+    expect(t.warn.mock.calls.map((c) => c[0])).toEqual([
+      "[web-for-agents] f.md is a symbolic link; not writing f.md through it",
+      "[web-for-agents] dir is a symbolic link; not writing dir/g.md through it",
+    ]);
+  });
+
   it("writes nothing until flush, then everything", () => {
     const { outDir, stager } = setup();
     expect(stager.stage("a/b.txt", "1")).toEqual({ file: "a/b.txt", status: "staged" });

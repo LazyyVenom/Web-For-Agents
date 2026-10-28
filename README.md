@@ -68,6 +68,8 @@ After `vite build`, the plugin crawls from `/` plus `routes` and writes:
 | `agents.json` | Every page and the agent actions on it. |
 | `sitemap.xml`, `robots.txt` | Sitemap of discovered routes, and your AI-crawler policy. |
 
+Already have your own prerender script? Skip the plugin's prerender and run `npx web-for-agents generate dist --site-url https://example.com --ai-training block --ai-search allow` after it. It adds the same `.md`, `llms.txt`, `robots.txt`, `sitemap.xml` and `agents.json` files to your HTML. See [Using your own prerender](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/prerendering.md#using-your-own-prerender).
+
 Files you place in `public/` are never overwritten. Content regions, `holdPrerender`, `hydrateApp`, host fallback configs and memory limits: see [Prerendering](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/prerendering.md).
 
 ## Agent actions
@@ -152,6 +154,7 @@ All options and the AI crawler list: [Plugin options](https://github.com/LazyyVe
 - [Dev overlay](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/overlay.md)
 - [Security](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/security.md)
 - [Advanced exports](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/advanced.md)
+- [Changelog](https://github.com/LazyyVenom/Web-For-Agents/blob/master/CHANGELOG.md)
 
 ## Development
 

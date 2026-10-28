@@ -271,8 +271,8 @@ describe("checks", () => {
 
   it("title limit is inclusive", () => {
     const t = (n: number) => byId(inputs({ src: pageHtml({ head: `<title>${"t".repeat(n)}</title>` }) }), "title");
-    expect(t(70).status).toBe("pass");
-    expect(t(71).message).toBe("Title is 71 characters (over 70)");
-    expect(t(71).fix).toBe('Set a page title with <Seo title="..." /> (at most 70 characters).');
+    expect(t(60).status).toBe("pass");
+    expect(t(61).message).toBe("Title is 61 characters (over 60)");
+    expect(t(61).fix).toBe('Set a page title with <Seo title="..." /> (at most 60 characters).');
   });
 });

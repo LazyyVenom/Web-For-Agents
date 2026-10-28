@@ -43,8 +43,11 @@ export const PROBE_SCRIPT = `(function () {
     };
   }
   if (w.MutationObserver) {
+    // Content changes only: attribute churn (class, style, aria-*, data-* animations) never settles
+    // on an animated page. Attributes are still saved, so a late attribute-only update (a meta tag or
+    // an img src changed alone, after the content is quiet) may be captured before or after it lands.
     new w.MutationObserver(touch).observe(document, {
-      childList: true, subtree: true, attributes: true, characterData: true
+      childList: true, subtree: true, characterData: true
     });
   }
   w.addEventListener("error", function (e) {
@@ -69,12 +72,30 @@ export interface ReadyState {
   path: string;
 }
 
-/** JS expression evaluating to a ReadyState; ready once the page has been quiet for `idleMs`. */
-export function readyCheck(idleMs: number = IDLE_MS): string {
-  return `(function () {
+/**
+ * JS expression evaluating to a ReadyState. By default the page is ready once it has been quiet for
+ * `idleMs`. With `readySelector` (prerender.readySelector) it is ready as soon as that element
+ * exists and no request is in flight, however busy the DOM still is; an invalid selector is
+ * reported as an error.
+ */
+export function readyCheck(idleMs: number = IDLE_MS, readySelector?: string): string {
+  if (readySelector === undefined) {
+    return `(function () {
   var p = window.${PROBE_GLOBAL};
   if (!p) return { ready: false, errors: [], path: location.pathname };
   var ready = document.readyState === "complete" && p.inflight === 0 && Date.now() - p.last >= ${idleMs} && window.${READY_GLOBAL} !== false;
+  return { ready: ready, errors: p.errors.slice(), path: location.pathname };
+})()`;
+  }
+  const sel = JSON.stringify(readySelector);
+  const invalid = JSON.stringify(`prerender.readySelector ${sel} is not a valid CSS selector: `);
+  return `(function () {
+  var p = window.${PROBE_GLOBAL};
+  if (!p) return { ready: false, errors: [], path: location.pathname };
+  var found;
+  try { found = document.querySelector(${sel}) !== null; }
+  catch (e) { return { ready: false, errors: [${invalid} + String((e && e.message) || e)], path: location.pathname }; }
+  var ready = document.readyState === "complete" && p.inflight === 0 && found && window.${READY_GLOBAL} !== false;
   return { ready: ready, errors: p.errors.slice(), path: location.pathname };
 })()`;
 }

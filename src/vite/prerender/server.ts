@@ -3,8 +3,39 @@ import type { AddressInfo } from "node:net";
 import { realpathSync } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
-import { parseAst } from "vite";
+import { errorMessage, withPrefix } from "../../shared/errors";
 import { isRelativeBase, trimTrailingSlash } from "./paths";
+
+type ParseAst = typeof import("vite").parseAst;
+let viteParseAst: ParseAst | undefined;
+
+export const VITE_MISSING =
+  "prerendering needs the vite package, which is not installed: npm i -D vite. " +
+  "To add agent files to HTML you prerendered yourself, use web-for-agents generate, which does not need vite.";
+
+/** True when `e` says `pkg` itself could not be found (not a module inside it). */
+export function isPackageNotFound(e: unknown, pkg: string): boolean {
+  const code = (e as { code?: unknown } | null)?.code;
+  if (code !== "ERR_MODULE_NOT_FOUND" && code !== "MODULE_NOT_FOUND") return false;
+  return new RegExp(`(Cannot find (package|module) ['"]${pkg}['"])`).test(errorMessage(e));
+}
+
+/**
+ * Loads Vite's parser on first use. vite is imported lazily so that the rest of this package's vite
+ * entry (generateAgentFiles) works without vite installed. `importVite` is for tests.
+ */
+export async function loadViteParser(importVite: () => Promise<{ parseAst: ParseAst }> = () => import("vite")): Promise<ParseAst> {
+  if (viteParseAst) return viteParseAst;
+  let mod: { parseAst: ParseAst };
+  try {
+    mod = await importVite();
+  } catch (e) {
+    if (isPackageNotFound(e, "vite")) throw new Error(withPrefix(VITE_MISSING), { cause: e });
+    throw e;
+  }
+  viteParseAst = mod.parseAst;
+  return viteParseAst;
+}
 
 export { isRelativeBase };
 
@@ -56,6 +87,8 @@ export function fixImportMeta(code: string): string {
  */
 export function parenthesizeRegExps(code: string): string {
   if (!code.includes("/")) return code;
+  const parseAst = viteParseAst;
+  if (!parseAst) throw new Error(withPrefix("internal: loadViteParser() must run before parenthesizeRegExps"));
   let ast: unknown;
   try {
     // sourceType is read by Vite 8's parser (rolldown) and ignored by Rollup's, which always parses modules.
@@ -208,7 +241,9 @@ export function startStaticServer(opts: StaticServerOptions): Promise<StaticServ
     }
   });
 
-  return new Promise((resolveP, reject) => {
+  // happyDomCompat parses JS with Vite's parser; load it (or fail with an install hint) up front.
+  const ready: Promise<unknown> = compat ? loadViteParser() : Promise.resolve();
+  return ready.then(() => new Promise((resolveP, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
       const { port } = server.address() as AddressInfo;
@@ -223,5 +258,5 @@ export function startStaticServer(opts: StaticServerOptions): Promise<StaticServ
           }),
       });
     });
-  });
+  }));
 }

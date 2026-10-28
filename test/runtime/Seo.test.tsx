@@ -409,3 +409,54 @@ describe("navigation watching", () => {
     expect(history.pushState).toBe(original);
   });
 });
+
+describe("Seo length warnings", () => {
+  const long = "d".repeat(190);
+  let warn: { mock: { calls: unknown[][] }; mockRestore(): void } & ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warn.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it("warns once per distinct value in development", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const { rerender } = render(<Seo title="t" description={long + "1"} />);
+    rerender(<Seo title="t" description={long + "1"} />);
+    render(<Seo title={"t".repeat(61)} description={long + "1"} />);
+    const calls = warn.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(calls).toHaveLength(2); // the long description once, the long title once
+    expect(calls[0]).toContain("[web-for-agents]");
+    expect(calls[0]).toContain("191 characters");
+  });
+
+  it("measures the rendered title (after titleTemplate) and provider default descriptions", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const title = "t".repeat(45); // 45 characters, but 66 once the template is applied
+    const defaults = { titleTemplate: "%s | Jane Doe Portfolio", description: "Too short." };
+    render(
+      <SeoProvider defaults={defaults}>
+        <Seo title={title} />
+      </SeoProvider>,
+    );
+    const calls = warn.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(calls).toEqual([
+      `[web-for-agents] <Seo> title is 66 characters (over 60): "${title} | Jane Doe Portfolio"`,
+      '[web-for-agents] <Seo> description is 10 characters (aim for 50-160): "Too short."',
+    ]);
+  });
+
+  it("does not warn for good lengths", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    render(<Seo title="A fine title" description={"d".repeat(120)} />);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("does not warn in production", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    render(<Seo title={"t".repeat(80)} description={"x" + long} />);
+    expect(warn).not.toHaveBeenCalled();
+  });
+});

@@ -82,11 +82,52 @@ export interface PrerenderOptions {
    * happy-dom. Prefer rendering such routes with Chrome. Default { codeGeneration: false }.
    */
   isolation?: { codeGeneration?: boolean };
+  /**
+   * Where each route's HTML is written. "directory": "/about" -> about/index.html.
+   * "flat": "/about" -> about.html ("/" stays index.html). Default "directory".
+   */
+  fileLayout?: FileLayout;
+  /**
+   * CSS selector that marks a route as rendered: the page is ready once it matches and no request
+   * is in flight, even if the DOM keeps changing (animations). Default: wait for the DOM to go quiet.
+   */
+  readySelector?: string;
+  /**
+   * What to do when a route is not ready by `timeoutMs`. "fail" stops the build; "snapshot" saves the
+   * page as it is at the deadline and logs a warning. Default "fail".
+   */
+  onTimeout?: "fail" | "snapshot";
 }
+
+export type FileLayout = "directory" | "flat";
+
+/** What `markdown.transform` receives for each page. */
+export interface MarkdownTransformPage {
+  /** Route path, e.g. "/about". */
+  route: string;
+  /** Absolute URL of the page. */
+  url: string;
+  title: string;
+  description?: string;
+  /** The generated markdown. */
+  markdown: string;
+  /** The page's full rendered HTML. */
+  html: string;
+}
+
+/** Returns the markdown to use instead, or undefined to keep the generated one. */
+export type MarkdownTransform = (page: MarkdownTransformPage) => string | undefined | Promise<string | undefined>;
 
 export interface MarkdownOptions {
   /** CSS selector for the page content converted to markdown. Default "main". */
   contentSelector?: string;
+  /** Rewrites each page's markdown (used for the .md file and llms-full.txt). */
+  transform?: MarkdownTransform;
+}
+
+export interface ResolvedMarkdown {
+  contentSelector: string;
+  transform?: MarkdownTransform;
 }
 
 export interface LlmsOptions {
@@ -96,9 +137,12 @@ export interface LlmsOptions {
   description?: string;
 }
 
-export type ResolvedPrerender = Required<Omit<PrerenderOptions, "executablePath" | "idleMs" | "isolation">> & {
+export type ResolvedPrerender = Required<
+  Omit<PrerenderOptions, "executablePath" | "idleMs" | "isolation" | "readySelector">
+> & {
   executablePath?: string;
   idleMs?: number;
+  readySelector?: string;
   isolation: { codeGeneration: boolean };
 };
 
@@ -111,7 +155,7 @@ export interface ResolvedOptions {
   sitemap: boolean;
   exclude: Array<string | RegExp>;
   prerender: ResolvedPrerender | false;
-  markdown: { contentSelector: string } | false;
+  markdown: ResolvedMarkdown | false;
   llms: LlmsOptions | false;
   agentMap: { fileName: string } | false;
   overlay: { enabled: boolean; shortcut: string; contentSelector: string };
@@ -216,7 +260,17 @@ function resolvePrerender(input: PrerenderOptions): ResolvedPrerender {
     maxRoutes: posInt("maxRoutes", input.maxRoutes, 500),
     allowOrigins,
     isolation: resolveIsolation(input.isolation, bad),
+    fileLayout: input.fileLayout ?? "directory",
+    onTimeout: input.onTimeout ?? "fail",
   };
+  if (out.fileLayout !== "directory" && out.fileLayout !== "flat") bad("fileLayout", '"directory" or "flat"');
+  if (out.onTimeout !== "fail" && out.onTimeout !== "snapshot") bad("onTimeout", '"fail" or "snapshot"');
+  if (input.readySelector !== undefined) {
+    if (typeof input.readySelector !== "string" || input.readySelector.trim() === "") {
+      bad("readySelector", "a non-empty string");
+    }
+    out.readySelector = input.readySelector;
+  }
   if (input.executablePath !== undefined) out.executablePath = input.executablePath;
   if (input.idleMs !== undefined) {
     if (typeof input.idleMs !== "number" || !Number.isInteger(input.idleMs) || input.idleMs < 0) {
@@ -234,6 +288,23 @@ export function agentOutputs(r: ResolvedOptions): string[] {
   if (r.llms && r.markdown) out.push("llms-full.txt");
   if (r.markdown) out.push(".md files");
   if (r.agentMap) out.push(r.agentMap.fileName);
+  return out;
+}
+
+/** Validates markdown options (shared by the plugin and generateAgentFiles). */
+export function resolveMarkdown(input: MarkdownOptions | undefined): ResolvedMarkdown {
+  if (input !== undefined && (typeof input !== "object" || input === null)) {
+    throw new Error(withPrefix("markdown must be false or { contentSelector, transform }"));
+  }
+  const sel = input?.contentSelector;
+  if (sel !== undefined && (typeof sel !== "string" || sel === "")) {
+    throw new Error(`${LOG_PREFIX} markdown.contentSelector must be a non-empty string`);
+  }
+  const out: ResolvedMarkdown = { contentSelector: sel ?? DEFAULT_CONTENT_SELECTOR };
+  if (input?.transform !== undefined) {
+    if (typeof input.transform !== "function") throw new Error(withPrefix("markdown.transform must be a function"));
+    out.transform = input.transform;
+  }
   return out;
 }
 
@@ -337,13 +408,7 @@ export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
       warnings.push(withPrefix(`${names} ${verb} disabled because prerender is false`));
     }
   } else {
-    if (input.markdown !== false) {
-      const sel = input.markdown?.contentSelector;
-      if (sel !== undefined && (typeof sel !== "string" || sel === "")) {
-        throw new Error(`${LOG_PREFIX} markdown.contentSelector must be a non-empty string`);
-      }
-      markdown = { contentSelector: sel ?? DEFAULT_CONTENT_SELECTOR };
-    }
+    if (input.markdown !== false) markdown = resolveMarkdown(input.markdown);
     if (input.llms !== false) llms = { ...input.llms };
     agentMap = requestedAgentMap;
   }

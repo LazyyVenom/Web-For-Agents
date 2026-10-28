@@ -2,6 +2,7 @@ import { createContext, createElement, useContext, useEffect, useLayoutEffect, u
 import type { ReactNode } from "react";
 import { buildEntryTags, buildHeadTags, defaultCanonicalTags } from "./buildHeadTags";
 import { HEAD_OWNED_ATTR } from "../shared/conventions";
+import { DESCRIPTION_MAX_CHARS, DESCRIPTION_MIN_CHARS, TITLE_MAX_CHARS } from "../shared/metaLength";
 import { applyHeadTags, removeHeadTag } from "./headManager";
 import type { HeadTag, SeoDefaults, SeoProps } from "./types";
 
@@ -57,6 +58,8 @@ function flush(doc: Document): void {
       else merged.set(tag.key, tag);
     }
   }
+  // The guard is the form bundlers replace, so production builds drop the call and warnLengths.
+  if (process.env.NODE_ENV !== "production") warnLengths(merged);
   for (const key of store.applied) if (!merged.has(key)) removeHeadTag(key, doc);
   applyHeadTags([...merged.values()], doc);
   store.applied = new Set(merged.keys());
@@ -121,6 +124,32 @@ function release(): void {
 }
 
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
+const warnedLengths = new Set<string>();
+
+/**
+ * Development-only: checks the title and description the head actually gets (after titleTemplate,
+ * with SeoProvider defaults), the same values the build and the audit measure. Warns once per value.
+ */
+function warnLengths(merged: Map<string, HeadTag>): void {
+  if (process.env.NODE_ENV !== "production") {
+    const t = merged.get("title");
+    const d = merged.get("name:description");
+    const title = t?.kind === "title" ? t.text : undefined;
+    const description = d?.kind === "meta" ? d.attrs.content : undefined;
+    const once = (value: string, message: string) => {
+      if (warnedLengths.has(message + value)) return;
+      warnedLengths.add(message + value);
+      console.warn(`[web-for-agents] ${message}: "${value}"`);
+    };
+    if (title && title.length > TITLE_MAX_CHARS) {
+      once(title, `<Seo> title is ${title.length} characters (over ${TITLE_MAX_CHARS})`);
+    }
+    if (description && (description.length < DESCRIPTION_MIN_CHARS || description.length > DESCRIPTION_MAX_CHARS)) {
+      once(description, `<Seo> description is ${description.length} characters (aim for ${DESCRIPTION_MIN_CHARS}-${DESCRIPTION_MAX_CHARS})`);
+    }
+  }
+}
 
 const DefaultsContext = createContext<SeoDefaults>({});
 

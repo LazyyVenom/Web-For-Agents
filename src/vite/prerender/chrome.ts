@@ -1,16 +1,21 @@
 import { IDLE_MS, readyCheck, type ReadyState } from "./probe";
 import {
   RenderError,
+  assertNoPageErrors,
   SERIALIZE_EXPR,
   blockedHint,
   createDeadline,
   createOriginPolicy,
   errorMessage,
   POLL_MS,
+  SNAPSHOT_GRACE_MS,
+  TimeoutError,
   readyTimeoutMessage,
   runInPage,
+  snapshotWarning,
   waitForReady,
   withoutBlockedLoads,
+  type ReadinessOptions,
   type Renderer,
 } from "./renderCore";
 
@@ -33,7 +38,7 @@ function settleWithin(work: Promise<unknown>, ms: number): Promise<void> {
 
 export async function createChromeRenderer(
   channel: "chrome" | "msedge",
-  opts: {
+  opts: ReadinessOptions & {
     executablePath?: string;
     /** Origins pages may load from besides the prerender server. Default []. */
     allowOrigins?: readonly string[];
@@ -70,7 +75,7 @@ export async function createChromeRenderer(
 
   const allowed = createOriginPolicy(opts.allowOrigins);
   const idleMs = opts.idleMs ?? IDLE_MS;
-  const check = readyCheck(idleMs);
+  const check = readyCheck(idleMs, opts.readySelector);
   // Ctrl-C reaches the browser too: its renders then fail because it is gone, not because of the page.
   let gone = false;
   browser.on?.("disconnected", () => {
@@ -91,8 +96,9 @@ export async function createChromeRenderer(
   };
 
   const renderPage: Renderer["render"] = async (url, timeoutMs, inPage) => {
-    const deadline = createDeadline(timeoutMs);
-    const timeoutText = readyTimeoutMessage(timeoutMs);
+    let deadline = createDeadline(timeoutMs);
+    let timeoutText = readyTimeoutMessage(timeoutMs);
+    let budgetMs = timeoutMs;
     const origin = new URL(url).origin;
     const blocked: string[] = [];
     // Opening the page counts against the deadline, and closing it is capped at PAGE_CLOSE_MS, so a
@@ -136,23 +142,38 @@ export async function createChromeRenderer(
       page.on("pageerror", (e) => pageErrors.push(e.message));
       let html: string;
       let finalPath: string;
+      /** The deadline passed before the page was ready, and prerender.onTimeout is "snapshot". */
+      let timedOut = false;
       try {
         // Playwright's own timeout is a backstop; the deadline fires first with our message.
         await deadline.race(
           page.goto(url, { waitUntil: "load", timeout: deadline.remaining() + 1000 }),
           timeoutText,
         );
-        await deadline.race(
-          waitForReady(
-            async () => {
-              const r = (await page.evaluate(check)) as ReadyState;
-              return { ready: r.ready, errors: withoutBlockedLoads([...pageErrors, ...r.errors], blocked) };
-            },
-            timeoutMs,
-            Math.min(POLL_MS, idleMs),
-          ),
-          timeoutText,
-        );
+        try {
+          await deadline.race(
+            waitForReady(
+              async () => {
+                const r = (await page.evaluate(check)) as ReadyState;
+                return { ready: r.ready, errors: withoutBlockedLoads([...pageErrors, ...r.errors], blocked) };
+              },
+              timeoutMs,
+              Math.min(POLL_MS, idleMs),
+            ),
+            timeoutText,
+          );
+        } catch (e) {
+          if (!(opts.onTimeout === "snapshot" && e instanceof TimeoutError)) throw e;
+          timedOut = true;
+          // The deadline has passed: serializing the snapshot and its in-page scripts get a short grace period.
+          deadline = createDeadline(SNAPSHOT_GRACE_MS);
+          budgetMs = SNAPSHOT_GRACE_MS;
+          timeoutText = readyTimeoutMessage(SNAPSHOT_GRACE_MS);
+          await assertNoPageErrors(async () => {
+            const r = (await deadline.race(page.evaluate(check), timeoutText)) as ReadyState;
+            return withoutBlockedLoads([...pageErrors, ...r.errors], blocked);
+          });
+        }
         html = (await deadline.race(page.evaluate(SERIALIZE_EXPR), timeoutText)) as string;
         finalPath = new URL(page.url()).pathname;
       } catch (e) {
@@ -163,9 +184,9 @@ export async function createChromeRenderer(
         inPage,
         (expr) => page.evaluate(expr),
         deadline,
-        timeoutMs,
+        budgetMs,
       );
-      return { html, finalPath, inPage: results };
+      return { html, finalPath, inPage: results, ...(timedOut ? { warnings: [snapshotWarning(timeoutMs)] } : {}) };
     } finally {
       await settleWithin(page.close(), opts.pageCloseMs ?? PAGE_CLOSE_MS);
     }

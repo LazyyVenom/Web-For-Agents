@@ -93,10 +93,49 @@ export function readyTimeoutMessage(timeoutMs: number): string {
   return `did not become ready within ${timeoutMs}ms`;
 }
 
+/** A render's deadline passed (see createDeadline and waitForReady). */
+export class TimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TimeoutError";
+  }
+}
+
+/** Readiness options shared by every renderer (prerender.readySelector, prerender.onTimeout). */
+export interface ReadinessOptions {
+  /** Ready once this element exists and no request is in flight; DOM activity is ignored. */
+  readySelector?: string;
+  /** "snapshot": a page still not ready at the deadline is saved as it is, with a warning. Default "fail". */
+  onTimeout?: "fail" | "snapshot";
+}
+
+/**
+ * Time a snapshot gets, after the deadline, to serialize the page and run the in-page scripts. The
+ * isolated renderer's backstop (timeoutMs + 10s) stays above it.
+ */
+export const SNAPSHOT_GRACE_MS = 5000;
+
+/** The warning a render saved as a snapshot (prerender.onTimeout: "snapshot") carries. */
+export function snapshotWarning(timeoutMs: number): string {
+  return (
+    `${readyTimeoutMessage(timeoutMs)}; saved the page as it was at the deadline (prerender.onTimeout: "snapshot"). ` +
+    `If it is still loading or animating, set prerender.readySelector to an element that marks it ready`
+  );
+}
+
 /** How often readiness is polled by default (Chrome). */
 export const POLL_MS = 50;
 /** happy-dom's poll interval when its page has settled (see SETTLED_IDLE_MS). */
 export const SETTLED_POLL_MS = 20;
+
+/**
+ * Before a snapshot is saved: one last read of the page's errors, since errors raised after the
+ * last readiness poll would otherwise be lost. Throws the first error, as waitForReady does.
+ */
+export async function assertNoPageErrors(readErrors: () => string[] | Promise<string[]>): Promise<void> {
+  const errors = await readErrors();
+  if (errors.length) throw new Error(errors[0]);
+}
 
 /** Polls `check` every `pollMs` until ready; rejects with the first reported error or on timeout. */
 export async function waitForReady(
@@ -109,7 +148,7 @@ export async function waitForReady(
     const { ready, errors } = await check();
     if (errors.length) throw new Error(errors[0]);
     if (ready) return;
-    if (Date.now() >= deadline) throw new Error(readyTimeoutMessage(timeoutMs));
+    if (Date.now() >= deadline) throw new TimeoutError(readyTimeoutMessage(timeoutMs));
     await new Promise((r) => setTimeout(r, pollMs));
   }
 }
@@ -131,7 +170,7 @@ export function createDeadline(timeoutMs: number): Deadline {
     race(work, message) {
       let timer: ReturnType<typeof setTimeout> | undefined;
       const expired = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(message)), remaining());
+        timer = setTimeout(() => reject(new TimeoutError(message)), remaining());
       });
       // `work` may still reject after losing the race; the caller closes the page.
       work.catch(() => {});

@@ -45,6 +45,46 @@ function start() {
       setInterval(() => {}, 1000);
       show("<h1>Interval</h1>");
       break;
+    case "/typing": {
+      // An animated home page: a loading screen, then a hero whose tagline types and erases itself
+      // forever, a mascot line that changes every few hundred ms, and a class-toggling idle animation.
+      show('<p class="loading">Loading</p>');
+      setTimeout(() => {
+        show(
+          '<h1 class="hero">Animated home</h1><p id="tagline"></p><p id="mascot"></p>' +
+            '<section id="about" data-hero-ready><p>About text that is always there.</p></section>',
+        );
+        const tagline = document.getElementById("tagline");
+        const mascot = document.getElementById("mascot");
+        const hero = document.querySelector(".hero");
+        const text = "I build things for the web";
+        let i = 0;
+        setInterval(() => {
+          i = (i + 1) % (text.length + 1);
+          tagline.textContent = text.slice(0, i);
+        }, 20);
+        const lines = ["Hello!", "Scroll down", "Nice to meet you"];
+        let n = 0;
+        setInterval(() => (mascot.textContent = lines[n++ % lines.length]), 150);
+        setInterval(() => hero.classList.toggle("pulse"), 30);
+      }, 100);
+      break;
+    }
+    case "/classes": {
+      // Attribute-only churn: content is static, but classes, styles and data-* change forever.
+      show('<h1 class="blink">Classes</h1><p aria-busy="false">Static text</p>');
+      const h1 = root.querySelector("h1");
+      const p = root.querySelector("p");
+      let k = 0;
+      setInterval(() => {
+        k++;
+        h1.classList.toggle("on");
+        h1.style.opacity = String(k % 2);
+        h1.setAttribute("data-frame", String(k));
+        p.setAttribute("aria-busy", String(k % 2 === 0));
+      }, 20);
+      break;
+    }
     case "/dynamic":
       import("./chunk.js").then((m) => m.render(root));
       break;

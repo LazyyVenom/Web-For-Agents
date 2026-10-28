@@ -80,7 +80,7 @@ function num(el: Field, attr: string): number | undefined {
 }
 
 function inputSchema(el: HTMLInputElement | HTMLTextAreaElement): JsonSchema {
-  const type = el instanceof HTMLTextAreaElement ? "textarea" : (el.getAttribute("type") ?? "text").toLowerCase();
+  const type = el.tagName === "TEXTAREA" ? "textarea" : (el.getAttribute("type") ?? "text").toLowerCase();
   const s: JsonSchema = {};
   if (type === "checkbox") {
     s.type = "boolean";

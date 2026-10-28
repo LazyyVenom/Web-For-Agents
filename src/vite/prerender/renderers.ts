@@ -1,7 +1,7 @@
 import type { RendererName } from "../options";
 import { createChromeRenderer } from "./chrome";
 import { createIsolatedHappyDomRenderer } from "./happyDomProcess";
-import type { Renderer } from "./renderCore";
+import type { ReadinessOptions, Renderer } from "./renderCore";
 
 export { createChromeRenderer } from "./chrome";
 export { createHappyDomRenderer } from "./happyDom";
@@ -22,7 +22,7 @@ export interface RendererPool {
 }
 
 /** Lazily creates one renderer per name. */
-export function createRendererPool(opts: {
+export function createRendererPool(opts: ReadinessOptions & {
   executablePath?: string;
   allowOrigins?: readonly string[];
   idleMs?: number;
@@ -32,6 +32,10 @@ export function createRendererPool(opts: {
   syncResources?: Record<string, { body: string; contentType: string }>;
 }): RendererPool {
   const made = new Map<RendererName, Promise<Renderer>>();
+  const readiness: ReadinessOptions = {
+    ...(opts.readySelector !== undefined ? { readySelector: opts.readySelector } : {}),
+    ...(opts.onTimeout !== undefined ? { onTimeout: opts.onTimeout } : {}),
+  };
   return {
     get(name) {
       let r = made.get(name);
@@ -43,6 +47,7 @@ export function createRendererPool(opts: {
                   {
                     allowOrigins: opts.allowOrigins ?? [],
                     ...(opts.idleMs !== undefined ? { idleMs: opts.idleMs } : {}),
+                    ...readiness,
                     ...(opts.syncResources ? { syncResources: opts.syncResources } : {}),
                   },
                   { codeGeneration: opts.codeGeneration === true },
@@ -52,6 +57,7 @@ export function createRendererPool(opts: {
                 ...(opts.executablePath !== undefined ? { executablePath: opts.executablePath } : {}),
                 allowOrigins: opts.allowOrigins ?? [],
                 ...(opts.idleMs !== undefined ? { idleMs: opts.idleMs } : {}),
+                ...readiness,
               });
         made.set(name, r);
       }

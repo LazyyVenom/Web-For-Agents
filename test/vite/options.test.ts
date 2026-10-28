@@ -168,6 +168,29 @@ describe("prerender and output options", () => {
     );
   });
 
+  it("validates prerender.fileLayout, readySelector and onTimeout", () => {
+    const pr = (prerender: object) => resolveOptions({ ...base, prerender }).prerender as Record<string, unknown>;
+    expect(pr({ fileLayout: "flat" }).fileLayout).toBe("flat");
+    expect(pr({ onTimeout: "snapshot" }).onTimeout).toBe("snapshot");
+    expect(pr({ readySelector: "#ready" }).readySelector).toBe("#ready");
+    expect(pr({})).not.toHaveProperty("readySelector");
+    expect(() => pr({ fileLayout: "nested" })).toThrow('[web-for-agents] prerender.fileLayout must be "directory" or "flat"');
+    expect(() => pr({ onTimeout: "skip" })).toThrow('[web-for-agents] prerender.onTimeout must be "fail" or "snapshot"');
+    for (const readySelector of ["", "  ", 1]) {
+      expect(() => pr({ readySelector })).toThrow("prerender.readySelector must be a non-empty string");
+    }
+  });
+
+  it("validates markdown.transform", () => {
+    const transform = () => undefined;
+    const r = resolveOptions({ ...base, markdown: { transform } });
+    expect(r.markdown).toEqual({ contentSelector: "main", transform });
+    expect(() => resolveOptions({ ...base, markdown: { transform: "x" as never } })).toThrow(
+      "[web-for-agents] markdown.transform must be a function",
+    );
+    expect(() => resolveOptions({ ...base, markdown: "x" as never })).toThrow("markdown must be false or");
+  });
+
   it("prerender defaults", () => {
     const r = resolveOptions({ ...base, robots: { ai: { training: "allow", search: "allow" } } });
     expect(r.prerender).toEqual({
@@ -180,6 +203,8 @@ describe("prerender and output options", () => {
       maxRoutes: 500,
       allowOrigins: [],
       isolation: { codeGeneration: false },
+      fileLayout: "directory",
+      onTimeout: "fail",
     });
     expect(r.markdown).toEqual({ contentSelector: "main" });
     expect(r.llms).toEqual({});

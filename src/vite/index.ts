@@ -1,11 +1,15 @@
 import type { Plugin } from "vite";
 import { agentMapExtension } from "./agentMap";
 import { createBuildPlugin } from "./buildPlugin";
+import { generateAgentFiles, type GenerateOptions, type GenerateResult, type GeneratedPage } from "./generate";
 import {
   resolveOptions,
   type AgentMapOptions,
   type LlmsOptions,
+  type FileLayout,
   type MarkdownOptions,
+  type MarkdownTransform,
+  type MarkdownTransformPage,
   type OverlayPluginOptions,
   type PrerenderOptions,
   type RendererName,
@@ -29,8 +33,14 @@ export function webForAgents(options: WebForAgentsOptions): Plugin[] {
   return plugins;
 }
 
-export { AI_BOTS };
+export { AI_BOTS, generateAgentFiles };
 export type {
+  GenerateOptions,
+  GenerateResult,
+  GeneratedPage,
+  FileLayout,
+  MarkdownTransform,
+  MarkdownTransformPage,
   WebForAgentsOptions,
   Rule,
   PrerenderOptions,
