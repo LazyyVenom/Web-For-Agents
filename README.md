@@ -601,6 +601,8 @@ npx vitest run test/vite test/e2e test/cli/audit.e2e.test.ts
 npm ci   # back to the locked versions
 ```
 
+CI runs one job on every push and pull request (Node 22: typecheck, tests, build, pack and the demo build). The full matrix (Node 20.19, 22 and 24, Vite 5 to 7, and the packed package against Vite 5 to 8) runs only when started manually with "Run workflow" on the Actions tab, for example before a release.
+
 The demo in `examples/demo` uses every feature; its README lists what each page shows.
 
 ## License
