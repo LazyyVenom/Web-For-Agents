@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { get } from "node:http";
 import { tmpdir } from "node:os";
@@ -38,11 +38,15 @@ beforeAll(() => {
 });
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-function raw(origin: string, path: string): Promise<{ status: number; type?: string; body: string }> {
+function raw(
+  origin: string,
+  path: string,
+  headers?: Record<string, string>,
+): Promise<{ status: number; type?: string; body: string }> {
   return new Promise((resolve, reject) => {
     const u = new URL(origin);
     // Pass host/port/path separately so the path is sent verbatim (no URL normalization).
-    get({ host: u.hostname, port: u.port, path }, (res) => {
+    get({ host: u.hostname, port: u.port, path, ...(headers ? { headers } : {}) }, (res) => {
       let body = "";
       res.on("data", (c) => (body += c));
       res.on("end", () =>
@@ -77,6 +81,36 @@ describe("server", () => {
   it("rejects traversal", async () => {
     expect((await raw(s.origin, "/%2e%2e/%2e%2e/etc/passwd")).status).toBe(404);
     expect((await raw(s.origin, "/../package.json")).status).toBe(404);
+  });
+
+  it("does not follow symlinks out of the served directory", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "wfa-outside-"));
+    try {
+      writeFileSync(join(outside, "secret.txt"), "SECRET");
+      symlinkSync(join(outside, "secret.txt"), join(dir, "leak.txt"));
+      symlinkSync(outside, join(dir, "leakdir"));
+      symlinkSync(join(dir, "data.json"), join(dir, "inside.json"));
+      for (const p of ["/leak.txt", "/leakdir/secret.txt"]) {
+        const r = await raw(s.origin, p);
+        expect(r.status, p).toBe(404);
+        expect(r.body, p).not.toContain("SECRET");
+      }
+      // a symlink that stays inside is still served
+      expect((await raw(s.origin, "/inside.json")).body).toBe("{}");
+    } finally {
+      for (const f of ["leak.txt", "leakdir", "inside.json"]) rmSync(join(dir, f), { force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses requests for another Host (DNS rebinding)", async () => {
+    const port = new URL(s.origin).port;
+    for (const host of ["evil.example", `evil.example:${port}`, `localhost:${port}`]) {
+      const r = await raw(s.origin, "/assets/app.js", { host });
+      expect(r.status, host).toBe(421);
+      expect(r.body, host).not.toContain("console.log");
+    }
+    expect((await raw(s.origin, "/assets/app.js", { host: `127.0.0.1:${port}` })).status).toBe(200);
   });
 
   it("close resolves and refuses connections", async () => {

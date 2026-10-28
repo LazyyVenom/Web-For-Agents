@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { readFile, stat } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import { parseAst } from "vite";
 import { isRelativeBase, trimTrailingSlash } from "./paths";
@@ -121,11 +122,20 @@ async function isFile(p: string): Promise<boolean> {
   }
 }
 
+/** True when `p` is `root` or inside it. */
+function within(root: string, p: string): boolean {
+  return p === root || p.startsWith(root.endsWith(sep) ? root : root + sep);
+}
+
 export function startStaticServer(opts: StaticServerOptions): Promise<StaticServer> {
   const root = resolve(opts.dir);
+  // Files are served only when their real path (symlinks resolved) stays inside the real root.
+  const realRoot = realpathSync(root);
   const relative = opts.relativeBase ?? isRelativeBase(opts.base);
   const compat = opts.happyDomCompat === true;
   let origin = "";
+  /** "127.0.0.1:<port>", set once listening. Other Host headers are refused (DNS rebinding). */
+  let host = "";
   const baseUrl = opts.fullBase === undefined ? undefined : trimTrailingSlash(opts.fullBase) + "/";
   const local = (code: string) => (baseUrl === undefined ? code : code.split(baseUrl).join(origin + "/"));
   const mount = relative ? "" : trimTrailingSlash(opts.base);
@@ -139,6 +149,7 @@ export function startStaticServer(opts: StaticServerOptions): Promise<StaticServ
       res.end(body);
     };
     const notFound = () => send(404, "text/plain; charset=utf-8", "Not found");
+    if (req.headers.host !== host) return send(421, "text/plain; charset=utf-8", "Misdirected request");
     try {
       let pathname = (req.url ?? "/").split("#")[0]!.split("?")[0]!;
       try {
@@ -156,6 +167,7 @@ export function startStaticServer(opts: StaticServerOptions): Promise<StaticServ
 
       const rootIndex = resolve(root, "index.html");
       const serve = async (file: string) => {
+        if (!within(realRoot, await realpath(file))) return notFound();
         const ext = extname(file).toLowerCase();
         const type = TYPES[ext] ?? "application/octet-stream";
         if (compat && (ext === ".js" || ext === ".mjs")) {
@@ -200,7 +212,8 @@ export function startStaticServer(opts: StaticServerOptions): Promise<StaticServ
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
       const { port } = server.address() as AddressInfo;
-      origin = `http://127.0.0.1:${port}`;
+      host = `127.0.0.1:${port}`;
+      origin = `http://${host}`;
       resolveP({
         origin,
         close: () =>
