@@ -5,7 +5,7 @@ import type { PageInfo } from "./analyze";
 import { finalizePage } from "./finalize";
 import { mountPath } from "../../shared/url";
 import { byRoute, isRouteTooLong, isSafeRoute, linkToRoute } from "./paths";
-import type { InPageScripts, RenderResult } from "./renderCore";
+import { RenderError, type InPageScripts, type RenderResult } from "./renderCore";
 
 export interface PrerenderedPage {
   route: string;
@@ -65,39 +65,56 @@ export type RenderFn = (
   inPage: InPageScripts,
 ) => Promise<RenderResult>;
 
+/** Thrown by crawlRoutes when a renderer was closed or killed mid-crawl (Ctrl-C), rather than reporting each route as failed. */
+export class PrerenderInterruptedError extends Error {
+  constructor(message: string) {
+    super(`${LOG_PREFIX} prerender interrupted: ${message}`);
+    this.name = "PrerenderInterruptedError";
+  }
+}
+
+function isInterrupted(e: unknown): boolean {
+  return e instanceof RenderError && e.interrupted === true;
+}
+
+/** What rendering one route produced. */
+interface Outcome {
+  page?: PrerenderedPage;
+  failure?: CrawlFailure;
+  /** Candidate routes it links to (or redirected to). */
+  found: string[];
+  tooLong: string[];
+}
+
+/** Runs at most `n` tasks at once, in call order. */
+function createLimiter(n: number) {
+  let active = 0;
+  const waiting: Array<() => void> = [];
+  return async <T>(task: () => Promise<T>): Promise<T> => {
+    if (active >= n) await new Promise<void>((r) => waiting.push(r));
+    else active++;
+    try {
+      return await task();
+    } finally {
+      const next = waiting.shift();
+      if (next) next();
+      else active--;
+    }
+  };
+}
+
 export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise<CrawlResult> {
   const mount = mountPath(opts.base);
   const linkBase = mount + "/";
   const skip = (route: string) => opts.skipRoute?.(route) === true;
-  const seen = new Set<string>();
-  const queue: string[] = [];
-  let truncated = false;
 
-  const enqueue = (route: string) => {
-    if (seen.has(route)) return;
-    if (seen.size >= opts.maxRoutes) {
-      truncated = true;
-      return;
-    }
-    seen.add(route);
-    queue.push(route);
-  };
-  const tooLong = new Set<string>();
-  const fits = (route: string): boolean => {
-    if (!isRouteTooLong(route)) return true;
-    tooLong.add(route);
-    return false;
-  };
+  const seedTooLong: string[] = [];
+  const seeds: string[] = [];
   for (const s of [...new Set(opts.seeds.map(normalizeRoute))].sort()) {
-    if (isSafeRoute(s) && fits(s) && !skip(s)) enqueue(s);
+    if (!isSafeRoute(s)) continue;
+    if (isRouteTooLong(s)) seedTooLong.push(s);
+    else if (!skip(s)) seeds.push(s);
   }
-
-  const candidate = (route: string | null): route is string =>
-    route !== null && !isExcluded(route, opts.exclude) && fits(route) && !skip(route);
-
-  const pages: PrerenderedPage[] = [];
-  const failures: CrawlFailure[] = [];
-  const bodyFallbackRoutes: string[] = [];
 
   const attempt = async (route: string, renderer: RendererName) => {
     // The root is requested as "/sub/", the URL a host serves; routers given basename "/sub/" do not match "/sub".
@@ -119,40 +136,47 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
     return { result, html, info, url };
   };
 
-  /** Returns newly discovered routes; the caller orders them deterministically. */
-  const processRoute = async (route: string): Promise<string[]> => {
+  /** Renders a route (with the fallback renderer if needed). Rejects only when the crawl was interrupted. */
+  const processRoute = async (route: string): Promise<Outcome> => {
+    const none = (failure: CrawlFailure): Outcome => ({ failure, found: [], tooLong: [] });
     let primary: RendererName;
     try {
       primary = opts.rendererFor(route);
     } catch (e) {
-      failures.push({ route, renderer: "happy-dom", message: `rendererFor threw: ${errorMessage(e)}` });
-      return [];
+      return none({ route, renderer: "happy-dom", message: `rendererFor threw: ${errorMessage(e)}` });
     }
     let used = primary;
     let out: Awaited<ReturnType<typeof attempt>>;
     try {
       out = await attempt(route, primary);
     } catch (e) {
+      if (isInterrupted(e)) throw e;
       const fb = opts.fallback;
-      if (fb === false || fb === primary) {
-        failures.push({ route, renderer: primary, message: errorMessage(e) });
-        return [];
-      }
+      if (fb === false || fb === primary) return none({ route, renderer: primary, message: errorMessage(e) });
       try {
         out = await attempt(route, fb);
         used = fb;
       } catch (e2) {
-        failures.push({
+        if (isInterrupted(e2)) throw e2;
+        return none({
           route,
           renderer: primary,
           message: `${errorMessage(e)}; fallback ${fb} also failed: ${errorMessage(e2)}`,
         });
-        return [];
       }
     }
 
     const { result, html, info, url } = out;
     const found: string[] = [];
+    const tooLong: string[] = [];
+    const candidate = (r: string | null): r is string => {
+      if (r === null || isExcluded(r, opts.exclude)) return false;
+      if (isRouteTooLong(r)) {
+        tooLong.push(r);
+        return false;
+      }
+      return !skip(r);
+    };
     let redirected = false;
     if (result.finalPath) {
       const finalRoute = linkToRoute(new URL(result.finalPath, url).href, opts.origin, linkBase);
@@ -161,41 +185,114 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
         if (opts.crawl && candidate(finalRoute)) found.push(finalRoute);
       }
     }
-    pages.push({
-      route,
-      html,
-      info,
-      renderer: used,
-      listed: !info.noindex && !redirected,
-      inPage: result.inPage,
-    });
-    if (info.contentSource === "body") bodyFallbackRoutes.push(route);
     if (opts.crawl) {
       for (const link of info.links) {
         const r = linkToRoute(link, opts.origin, linkBase);
         if (candidate(r)) found.push(r);
       }
     }
-    return found;
+    const page: PrerenderedPage = {
+      route,
+      html,
+      info,
+      renderer: used,
+      listed: !info.noindex && !redirected,
+      inPage: result.inPage,
+    };
+    return { page, found: [...new Set(found)].sort(), tooLong };
   };
 
-  // Breadth-first by level: render a level, then enqueue newly found routes in sorted order,
-  // so the set kept under maxRoutes does not depend on timing.
-  while (queue.length > 0) {
-    const level = queue.splice(0);
-    const found: string[][] = new Array(level.length);
-    let next = 0;
-    const worker = async () => {
-      while (next < level.length) {
-        const i = next++;
-        const route = level[i]!;
-        found[i] = await processRoute(route);
+  const limit = createLimiter(opts.concurrency);
+  /** Outcome per route, set when its render starts, so no route renders twice. */
+  const outcomes = new Map<string, Promise<Outcome>>();
+  const run = (route: string): Promise<Outcome> => {
+    let p = outcomes.get(route);
+    if (!p) {
+      p = limit(() => processRoute(route));
+      outcomes.set(route, p);
+    }
+    return p;
+  };
+
+  // Phase 1, pipelined: every route found is queued at once, so the pool never waits for a whole
+  // level (a chain of pages renders as fast as its links appear). While the routes found stay within
+  // maxRoutes, which ones render does not depend on timing: all of them do.
+  let overflow = false;
+  let interrupted: unknown;
+  const flowSeen = new Set<string>();
+  await new Promise<void>((resolve) => {
+    let pending = 0;
+    const discover = (route: string) => {
+      if (flowSeen.has(route) || overflow || interrupted !== undefined) return;
+      if (flowSeen.size >= opts.maxRoutes) {
+        overflow = true; // the cap truncates: phase 2 decides which routes are kept
+        return;
       }
+      flowSeen.add(route);
+      pending++;
+      // Routes still waiting for the pool when the cap is hit are left for phase 2.
+      const started = limit(async () => {
+        if (overflow || interrupted !== undefined) return undefined;
+        const p = processRoute(route);
+        outcomes.set(route, p);
+        return p;
+      });
+      started
+        .then(
+          (out) => {
+            if (out) for (const r of out.found) discover(r);
+          },
+          (e: unknown) => {
+            interrupted ??= e;
+          },
+        )
+        .finally(() => {
+          if (--pending === 0) resolve();
+        });
     };
-    await Promise.all(Array.from({ length: Math.min(opts.concurrency, level.length) }, worker));
-    for (const r of [...new Set(found.flat())].sort()) enqueue(r);
+    for (const s of seeds) discover(s);
+    if (pending === 0) resolve();
+  });
+  if (interrupted !== undefined) throw interrupted;
+
+  let selected: string[] = [...flowSeen];
+  let truncated = false;
+  if (overflow) {
+    // Phase 2, level by level: render a level (reusing phase-1 renders), then enqueue the routes it
+    // found in sorted order, so the set kept under maxRoutes does not depend on timing.
+    const seen = new Set<string>();
+    const queue: string[] = [];
+    const enqueue = (route: string) => {
+      if (seen.has(route)) return;
+      if (seen.size >= opts.maxRoutes) {
+        truncated = true;
+        return;
+      }
+      seen.add(route);
+      queue.push(route);
+    };
+    for (const s of seeds) enqueue(s);
+    while (queue.length > 0) {
+      const level = queue.splice(0);
+      const outs = await Promise.all(level.map(run));
+      for (const r of [...new Set(outs.flatMap((o) => o.found))].sort()) enqueue(r);
+    }
+    selected = [...seen];
   }
 
+  const pages: PrerenderedPage[] = [];
+  const failures: CrawlFailure[] = [];
+  const bodyFallbackRoutes: string[] = [];
+  const tooLong = new Set(seedTooLong);
+  for (const route of selected) {
+    const o = await run(route);
+    if (o.page) {
+      pages.push(o.page);
+      if (o.page.info.contentSource === "body") bodyFallbackRoutes.push(route);
+    }
+    if (o.failure) failures.push(o.failure);
+    for (const r of o.tooLong) tooLong.add(r);
+  }
   pages.sort(byRoute);
   failures.sort(byRoute);
   bodyFallbackRoutes.sort();
