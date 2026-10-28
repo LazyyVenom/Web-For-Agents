@@ -1,22 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, type ComponentPropsWithoutRef } from "react";
-import {
-  ACTION_ATTR,
-  ACTION_DESCRIPTION_ATTR,
-  ACTION_DESTRUCTIVE_ATTR,
-  ACTION_PARAM_ATTR,
-} from "../../shared/conventions";
+import { ACTION_KIND_ATTR, ACTION_PARAM_ATTR } from "../../shared/conventions";
 import { assertValidActionName } from "../../shared/actionName";
+import { hintProps as buildHintProps, type AgentHintProps } from "./link";
 import { refreshAgentActions, registerAgentAction } from "./registry";
 import type { AgentActionSpec } from "./types";
 
-export type AgentHintProps = {
-  [ACTION_ATTR]: string;
-  [ACTION_DESCRIPTION_ATTR]: string;
-  "aria-description": string;
-  [ACTION_DESTRUCTIVE_ATTR]?: "true";
-};
+export type { AgentHintProps };
 
-export type AgentParamProps = { [ACTION_PARAM_ATTR]: string };
+// A literal key (agentParam below fails to compile if ACTION_PARAM_ATTR changes): a computed key
+// would make index.d.ts reference the constant from a private declaration chunk.
+export type AgentParamProps = { "data-agent-param": string };
 
 const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
@@ -52,13 +45,9 @@ export function useAgentAction<I = Record<string, unknown>, R = unknown>(
     return unregister;
   }, [name, title, description, destructive, readOnly, schemaKey, hasHandler]);
 
-  const hintProps: AgentHintProps = {
-    [ACTION_ATTR]: name,
-    [ACTION_DESCRIPTION_ATTR]: description,
-    "aria-description": description,
-  };
-  if (destructive) hintProps[ACTION_DESTRUCTIVE_ATTR] = "true";
-  return { ref, hintProps };
+  // The kind is known at render time (also during SSR) only from the spec: a handler runs code;
+  // without one the action clicks its element. AgentForm says "form" itself.
+  return { ref, hintProps: buildHintProps(name, description, hasHandler ? "handler" : "click", destructive) };
 }
 
 /** A `<form>` registered as an agent action. Without a `handler`, its fields define the input and the form is submitted. */
@@ -67,7 +56,8 @@ export function AgentForm<I = Record<string, unknown>, R = unknown>(
 ) {
   const { agent, ...formProps } = props;
   const { ref, hintProps } = useAgentAction(agent);
-  return <form ref={ref} {...hintProps} {...formProps} />;
+  const kind = agent.handler ? "handler" : "form";
+  return <form ref={ref} {...hintProps} {...{ [ACTION_KIND_ATTR]: kind }} {...formProps} />;
 }
 
 /** Props that describe a form field to agents. */

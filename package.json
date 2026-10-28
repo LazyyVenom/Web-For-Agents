@@ -55,6 +55,12 @@
       ],
       "overlay": [
         "dist/overlay.d.ts"
+      ],
+      "schema": [
+        "dist/schema.d.ts"
+      ],
+      "link": [
+        "dist/link.d.ts"
       ]
     }
   },
@@ -75,12 +81,21 @@
       "types": "./dist/overlay.d.ts",
       "import": "./dist/overlay.js"
     },
+    "./schema": {
+      "types": "./dist/schema.d.ts",
+      "import": "./dist/schema.js"
+    },
+    "./link": {
+      "types": "./dist/link.d.ts",
+      "import": "./dist/link.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
     "build": "tsup",
     "demo:dev": "vite examples/demo",
     "demo:build": "vite build examples/demo --outDir dist-demo --emptyOutDir",
+    "prepare": "npm run build",
     "prepublishOnly": "npm run build && npm test && npm run typecheck",
     "test": "vitest run",
     "test:pack": "npm run build && vitest run --config vitest.pack.config.ts",

@@ -1,6 +1,28 @@
 import { assertValidActionName } from "../../shared/actionName";
-import { ACTION_ATTR, ACTION_DESCRIPTION_ATTR, ACTION_DESTRUCTIVE_ATTR } from "../../shared/conventions";
-import type { AgentHintProps } from "./react";
+import type { ActionKind } from "../../shared/agent";
+import { ACTION_ATTR, ACTION_DESCRIPTION_ATTR, ACTION_DESTRUCTIVE_ATTR, ACTION_KIND_ATTR } from "../../shared/conventions";
+
+/** Attributes that describe an action in the markup, so static HTML (agents.json, the overlay) sees it. */
+export type AgentHintProps = {
+  [ACTION_ATTR]: string;
+  [ACTION_DESCRIPTION_ATTR]: string;
+  "aria-description": string;
+  /** How the action runs: "handler" | "form" | "click" | "link". */
+  [ACTION_KIND_ATTR]: ActionKind;
+  [ACTION_DESTRUCTIVE_ATTR]?: "true";
+};
+
+/** The hint attributes for an action; shared by `agentLinkProps` and `useAgentAction`. */
+export function hintProps(name: string, description: string, kind: ActionKind, destructive?: boolean): AgentHintProps {
+  const props: AgentHintProps = {
+    [ACTION_ATTR]: name,
+    [ACTION_DESCRIPTION_ATTR]: description,
+    "aria-description": description,
+    [ACTION_KIND_ATTR]: kind,
+  };
+  if (destructive) props[ACTION_DESTRUCTIVE_ATTR] = "true";
+  return props;
+}
 
 export interface AgentLinkSpec {
   /** 1 to 128 characters of A-Z a-z 0-9 _ - . Unique per page. */
@@ -17,11 +39,5 @@ export interface AgentLinkSpec {
  */
 export function agentLinkProps(spec: AgentLinkSpec): AgentHintProps {
   assertValidActionName(spec.name);
-  const props: AgentHintProps = {
-    [ACTION_ATTR]: spec.name,
-    [ACTION_DESCRIPTION_ATTR]: spec.description,
-    "aria-description": spec.description,
-  };
-  if (spec.destructive) props[ACTION_DESTRUCTIVE_ATTR] = "true";
-  return props;
+  return hintProps(spec.name, spec.description, "link", spec.destructive);
 }

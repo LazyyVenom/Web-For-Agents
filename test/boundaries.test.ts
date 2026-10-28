@@ -23,7 +23,8 @@ function specifiers(src: string): string[] {
 const inDir = (file: string, dir: string) => file === dir || file.startsWith(dir + sep);
 const stripExt = (p: string) => p.replace(/\.(tsx?|js)$/, "");
 
-const runtimeFiles = [...walk(join(SRC, "runtime")), join(SRC, "index.ts")];
+const entryFiles = walk(join(SRC, "entries"));
+const runtimeFiles = [...walk(join(SRC, "runtime")), join(SRC, "index.ts"), ...entryFiles];
 const sharedFiles = walk(join(SRC, "shared"));
 const markdownFile = join(SRC, "shared", "markdown");
 const vite = join(SRC, "vite");
@@ -33,6 +34,28 @@ const overlayFiles = walk(overlay);
 
 function resolved(file: string, spec: string): string {
   return stripExt(resolve(dirname(file), spec));
+}
+
+function sourceFile(base: string): string {
+  for (const ext of [".ts", ".tsx"]) if (existsSync(base + ext)) return base + ext;
+  throw new Error(`cannot resolve ${base}`);
+}
+
+/** Every module `entry` loads at runtime, transitively (`import type` lines are skipped), and every bare specifier. */
+function runtimeGraph(entry: string): { files: Set<string>; bare: Set<string> } {
+  const files = new Set<string>();
+  const bare = new Set<string>();
+  const visit = (file: string) => {
+    if (files.has(file)) return;
+    files.add(file);
+    const src = readFileSync(file, "utf8").replace(/^\s*(?:import|export)\s+type\s[^;]*;/gm, "");
+    for (const spec of specifiers(src)) {
+      if (spec.startsWith(".")) visit(sourceFile(resolved(file, spec)));
+      else bare.add(spec);
+    }
+  };
+  visit(entry);
+  return { files, bare };
 }
 
 describe("import boundaries", () => {
@@ -135,6 +158,20 @@ describe("import boundaries", () => {
       if (!spec || line.startsWith("import type")) continue;
       expect(inDir(resolved(file, spec), join(SRC, "shared")), `link.ts -> ${spec}`).toBe(true);
     }
+  });
+
+  it("the /schema and /link entries never load react, react-dom or the agent runtime", () => {
+    const forbidden = ["registry", "webmcp", "react", "formAutomation", "formSchema", "dom"].map((n) => join(SRC, "runtime", "agent", n));
+    for (const name of ["schema", "link"]) {
+      const { files, bare } = runtimeGraph(join(SRC, "entries", `${name}.ts`));
+      expect([...bare], `entries/${name}`).toEqual([]);
+      for (const f of files) {
+        expect(forbidden, `entries/${name} -> ${relative(SRC, f)}`).not.toContain(stripExt(f));
+        expect(f.endsWith(".tsx"), `entries/${name} -> ${relative(SRC, f)}`).toBe(false);
+      }
+    }
+    // The walker does see react where it is used.
+    expect(runtimeGraph(join(SRC, "index.ts")).bare).toContain("react-dom/client");
   });
 
   it("src/runtime/agent is covered by the runtime rules", () => {

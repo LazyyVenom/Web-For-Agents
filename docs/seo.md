@@ -67,11 +67,37 @@ Search engines truncate long titles and descriptions, and very short description
 - `schema.breadcrumbList`
 - `schema.organization`
 - `schema.webSite`
-- `schema.person`: `name`, `url`, `image`, `jobTitle`, `description`, `email`, `sameAs`, `worksFor` (a name or `{ name, url }`)
+- `schema.person`: `name`, `url`, `image`, `jobTitle`, `description`, `email`, `sameAs`, `worksFor` (a name, `{ name, url }`, a node or a ref), `address` (text or a `PostalAddress` node), `knowsAbout` (text, nodes or a mix)
 - `schema.softwareApplication`: `name`, `description`, `applicationCategory`, `operatingSystem`, `url`, `image`, `offers`, `aggregateRating`, `author`. For rich results Google requires `name`, `offers.price` (`0` for a free app) and one of `aggregateRating` or `review`; the [audit](cli.md) warns when one is missing.
-- `schema.profilePage`: `mainEntity` (a person or organization node), `url`, `name`, `dateCreated`, `dateModified`
-- `schema.creativeWork`: `name`, `description`, `url`, `image`, `author`, `dateCreated`, `keywords` (a string or array)
-- `schema.webPage`: `name`, `url`, `description`, `breadcrumb` (a `schema.breadcrumbList` node)
-- `schema.graph(nodes)`: combines nodes into one `@graph` document with a single `@context`; nested nodes lose their own `@context`.
+- `schema.profilePage`: `mainEntity` (a person or organization node, or a ref; Google requires it for the rich result), `url`, `name`, `dateCreated`, `dateModified`, `breadcrumb`
+- `schema.creativeWork`: `name`, `description`, `url`, `image`, `author`, `dateCreated`, `keywords` (a string or array, written comma-separated), `genre` (a string or array)
+- `schema.webPage`: `name`, `url`, `description`, `breadcrumb` (a `schema.breadcrumbList` node or a ref), `isPartOf` (usually a ref to the `WebSite`)
+- `schema.graph(nodes)`: combines nodes into one `@graph` document with a single `@context`; nested nodes lose their own `@context`. `null`, `undefined` and `false` entries are skipped, so `cond && node` works.
+- `schema.ref(id)`: `{ "@id": id }`, a pointer to a node defined elsewhere.
 
-Fields left `undefined` are omitted from every builder.
+Fields left `undefined` or `null` are omitted from every builder, including nested ones: `schema.profilePage({ mainEntity: undefined })` gives a `ProfilePage` without `mainEntity` rather than throwing. `author`, `brand`, `worksFor`, `mainEntity`, `breadcrumb`, `isPartOf`, `publisher` and `logo` also take a node or a ref. Wherever a node is nested, its own `@context` is dropped.
+
+Every builder takes two more options (in its input object; `faqPage` and `breadcrumbList` take them as a second argument):
+
+- `id`: written as `"@id"`, so other nodes can point at this one with `schema.ref(id)`.
+- `extra`: any other schema.org properties, merged in last, so they override the typed fields. `@type` and `@context` cannot be overridden. Values can be nodes, refs or arrays of them.
+
+```ts
+const site = "https://example.com";
+schema.graph([
+  schema.webSite({ name: "Ada", url: site, id: `${site}/#site` }),
+  schema.person({ name: "Ada", url: site, id: `${site}/#me`, knowsAbout: ["TypeScript", "SEO"], extra: { alumniOf: "MIT" } }),
+  schema.profilePage({ url: `${site}/about`, mainEntity: schema.ref(`${site}/#me`) }),
+  schema.webPage({ name: "Projects", url: `${site}/projects`, isPartOf: schema.ref(`${site}/#site`) }),
+]);
+```
+
+### Without React
+
+`@anubhav-choubey/web-for-agents/schema` exports `schema`, `serializeJsonLd` and the `JsonLdNode`, `JsonLdGraph`, `JsonLdRef` and `JsonLdNodeOptions` types, and imports nothing else: no React, no React DOM. Use it from Node scripts (for example one that writes JSON-LD into static HTML) and from code that should not pull React into its bundle. The root entry still exports the same functions.
+
+```js
+import { schema, serializeJsonLd } from "@anubhav-choubey/web-for-agents/schema";
+```
+
+The root entry (`@anubhav-choubey/web-for-agents`) imports `react` and `react-dom/client` when it loads, because `hydrateApp` returns its `Root` synchronously; importing it in Node needs both installed.
