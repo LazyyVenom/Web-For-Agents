@@ -76,7 +76,7 @@ export default {
 };
 ```
 
-`generate` loads the package's Vite entry, so `vite` must be installed, as it is in any Vite project. Warnings go to stderr. Exit codes: `0` ok, `2` usage error or failure. When it fails, nothing is written.
+`generate` does not need Vite: it works on any directory of HTML files. Warnings go to stderr. Exit codes: `0` ok, `2` usage error or failure. When it fails, nothing is written.
 
 The same function is available in code as `generateAgentFiles` from `@anubhav-choubey/web-for-agents/vite`.
 

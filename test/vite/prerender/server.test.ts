@@ -20,11 +20,38 @@ vi.mock("vite", async (importOriginal) => {
 import {
   fixImportMeta,
   happyDomCompat,
+  isPackageNotFound,
   isRelativeBase,
+  loadViteParser,
   parenthesizeRegExps,
   startStaticServer,
   type StaticServer,
 } from "../../../src/vite/prerender/server";
+
+beforeAll(async () => {
+  await loadViteParser();
+});
+
+describe("loadViteParser", () => {
+  const missing = (msg: string) => Object.assign(new Error(msg), { code: "ERR_MODULE_NOT_FOUND" });
+
+  it("detects a missing vite package, not a missing module inside it", () => {
+    expect(isPackageNotFound(missing("Cannot find package 'vite' imported from /x/dist/chunk.js"), "vite")).toBe(true);
+    expect(isPackageNotFound(missing("Cannot find module 'vite' imported from /x"), "vite")).toBe(true);
+    expect(isPackageNotFound(missing("Cannot find module '/n/vite/dist/x.js' imported from /n/vite/index.js"), "vite")).toBe(false);
+    expect(isPackageNotFound(new Error("Cannot find package 'vite'"), "vite")).toBe(false);
+  });
+
+  it("fails with an install hint when vite is not installed", async () => {
+    // A fresh module instance, so the parser cached by beforeAll does not short-circuit the import.
+    vi.resetModules();
+    const fresh = await import("../../../src/vite/prerender/server");
+    await expect(
+      fresh.loadViteParser(() => Promise.reject(missing("Cannot find package 'vite' imported from /app/dist/chunk.js"))),
+    ).rejects.toThrow("[web-for-agents] prerendering needs the vite package, which is not installed: npm i -D vite.");
+    await expect(fresh.loadViteParser(() => Promise.reject(new Error("boom")))).rejects.toThrow("boom");
+  });
+});
 
 let dir: string;
 beforeAll(() => {

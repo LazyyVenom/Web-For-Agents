@@ -92,6 +92,7 @@ let dist: string;
 let origin: string;
 let server: Server | undefined;
 let packedFiles: string[];
+let tarball: string;
 
 beforeAll(async () => {
   if (!existsSync(path.join(repo, "dist/bin.js"))) {
@@ -102,7 +103,7 @@ beforeAll(async () => {
     filename: string;
     files: Array<{ path: string }>;
   }>;
-  const tarball = path.join(work, path.basename(packed[0]!.filename));
+  tarball = path.join(work, path.basename(packed[0]!.filename));
   packedFiles = packed[0]!.files.map((f) => f.path);
 
   app = path.join(work, "app");
@@ -205,5 +206,30 @@ describe(`packed package in a Vite ${viteMajor} app`, () => {
     expect(readFileSync(path.join(own, "about.md"), "utf8")).toContain("# About us");
     expect(readFileSync(path.join(own, "llms.txt"), "utf8")).toContain(`${origin}/about.md`);
     expect(existsSync(path.join(own, "agents.json"))).toBe(true);
+  });
+});
+
+describe("packed package without vite", () => {
+  it("runs generate on plain HTML with only the package installed", async () => {
+    const bare = path.join(work, "bare");
+    mkdirSync(bare, { recursive: true });
+    writeFileSync(path.join(bare, "package.json"), JSON.stringify({ name: "bare", private: true, type: "module" }));
+    await sh("npm", ["install", "--no-audit", "--no-fund", "--prefer-offline", tarball], bare);
+    expect(existsSync(path.join(bare, "node_modules/vite")), "vite must not be installed").toBe(false);
+
+    const site = path.join(bare, "site");
+    mkdirSync(site, { recursive: true });
+    const page = (t: string) =>
+      `<!doctype html><html><head><title>${t}</title></head><body><main><h1>${t}</h1><p>Text.</p></main></body></html>`;
+    writeFileSync(path.join(site, "index.html"), page("Home"));
+    writeFileSync(path.join(site, "about.html"), page("About"));
+    const bin = path.join(bare, "node_modules/.bin/web-for-agents");
+    const args = ["generate", site, "--site-url", "https://example.com", "--ai-training", "allow", "--ai-search", "allow", "--json"];
+    const result = JSON.parse(await sh(bin, args, bare)) as { pages: Array<{ route: string }> };
+    expect(result.pages.map((p) => p.route)).toEqual(["/", "/about"]);
+    for (const f of ["about.md", "llms.txt", "robots.txt", "sitemap.xml", "agents.json"]) {
+      expect(existsSync(path.join(site, f)), f).toBe(true);
+    }
+    expect(readFileSync(path.join(site, "about.html"), "utf8")).toContain('href="https://example.com/about.md"');
   });
 });

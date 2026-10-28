@@ -74,7 +74,7 @@ Options:
   -h, --help           show this help
 
 generate: write llms.txt, llms-full.txt, .md pages, robots.txt, sitemap.xml and
-agents.json for HTML you prerendered yourself (needs vite installed).
+agents.json for HTML you prerendered yourself.
 
 Options:
   --site-url <url>     absolute URL of the deployed site (or siteUrl in --config)

@@ -8,7 +8,8 @@ import { safeJson, safeText } from "./terminal";
 
 /**
  * The generator lives in the package's vite entry; the CLI loads it by package name, so the audit
- * path never loads vite, happy-dom or turndown.
+ * path never loads happy-dom or turndown. That entry imports vite only lazily, when prerendering,
+ * so generate works without vite installed.
  */
 const VITE_ENTRY = "@anubhav-choubey/web-for-agents/vite";
 

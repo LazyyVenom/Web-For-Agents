@@ -4,7 +4,7 @@ import { CONTENT_ATTR, LLMS_FULL_TXT_PATH, LLMS_TXT_PATH, MARKDOWN_MIME, ROBOTS_
 import { LOG_PREFIX, withPrefix } from "../shared/errors";
 import { compareStrings } from "../shared/sort";
 import { agentMapExtension, type AgentPageData } from "./agentMap";
-import { fileOf, pageLengthWarnings, pageMarkdown, prefixed, SPA_FALLBACK_FILE, stageSiteFiles, type SitePage } from "./buildPlugin";
+import { fileOf, pageLengthWarnings, pageMarkdown, prefixed, SPA_FALLBACK_FILE, stageSiteFiles, type SitePage } from "./siteFiles";
 import { createFileStager, type FileStager } from "./fileStager";
 import { staticActions } from "./generateActions";
 import {
