@@ -28,7 +28,7 @@ The demo in `examples/demo` uses every feature; its README lists what each page 
 
 ## Releasing
 
-Releases are published by `.github/workflows/release.yml` when a version tag is pushed. It runs a single job (typecheck, tests, build), fails if the tag does not match the `version` in `package.json`, and publishes with npm trusted publishing (OIDC). There is no `NPM_TOKEN`, and provenance is attached automatically. The job never runs on forks. Tags with a hyphen (`v0.5.0-beta.1`) publish under the `next` dist-tag; others under `latest`.
+Releases are published by `.github/workflows/release.yml` when a version tag is pushed. It runs two jobs. `verify` has read-only permissions and no OIDC token: it runs `npm ci`, typecheck, tests, build and the pack test, fails if the tag does not match the `version` in `package.json`, then runs `npm pack` and uploads the tarball as an artifact. `publish` needs `verify`, has `id-token: write`, installs no dependencies, downloads the tarball and publishes it with npm trusted publishing (OIDC) and `--ignore-scripts`, using a pinned npm version. There is no `NPM_TOKEN`, and provenance is attached automatically. Neither job runs on forks, and all actions are pinned by commit SHA. Tags with a hyphen (`v0.5.0-beta.1`) publish under the `next` dist-tag; others under `latest`.
 
 1. Run the manual CI matrix from the Actions tab if the release touches Vite or Node support.
 2. Bump the version without tagging: `npm version 0.4.0 --no-git-tag-version`.
@@ -44,7 +44,13 @@ Releases are published by `.github/workflows/release.yml` when a version tag is 
 4. Save. All fields are case-sensitive and npm does not check them until the first publish, which must succeed within 2 days or the setting expires.
 5. Optional: under Publishing access, require 2FA and disallow tokens.
 
-Requirements: npm CLI 11.5.1 or later (the workflow installs the latest npm), Node 22.14 or later, the `id-token: write` permission, a GitHub-hosted runner, and `repository.url` in `package.json` matching the GitHub repository exactly.
+Requirements: npm CLI 11.5.1 or later (the workflow pins npm 12.2.1; update it deliberately), Node 22.14 or later, the `id-token: write` permission, a GitHub-hosted runner, and `repository.url` in `package.json` matching the GitHub repository exactly.
+
+### Optional hardening
+
+- Create a GitHub environment named `release` (Settings, Environments) with required reviewers, add `environment: release` to the `publish` job, and enter `release` in the environment field of npm's trusted-publisher settings. Do these together, or publishing fails.
+- Add a tag protection rule (or a ruleset) for `v*` tags so only maintainers can create them.
+- npm runs `prepare` (the build) only for git and local-folder installs, never for installs from the registry. pnpm 10 blocks build scripts for git dependencies by default; allow them with `pnpm.onlyBuiltDependencies`.
 
 ## Troubleshooting
 
