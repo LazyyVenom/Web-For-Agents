@@ -153,6 +153,13 @@ describe("demo build", () => {
     expect(js).not.toContain("virtual:web-for-agents/overlay");
     expect(distFiles(outDir).filter((f) => readFileSync(f).includes("127.0.0.1")).map((f) => path.relative(outDir, f))).toEqual([]);
   });
+
+  it("ships no development length check: no warning text and no empty effect", () => {
+    const js = jsBundle(outDir);
+    expect(js).not.toContain("characters (aim for");
+    expect(js).not.toContain("characters (over");
+    expect(js).not.toMatch(/useEffect\)?\(\(\)=>\{\},/);
+  });
 });
 
 describe("demo audit", () => {

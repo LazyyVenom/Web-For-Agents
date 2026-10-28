@@ -58,6 +58,8 @@ function flush(doc: Document): void {
       else merged.set(tag.key, tag);
     }
   }
+  // The guard is the form bundlers replace, so production builds drop the call and warnLengths.
+  if (process.env.NODE_ENV !== "production") warnLengths(merged);
   for (const key of store.applied) if (!merged.has(key)) removeHeadTag(key, doc);
   applyHeadTags([...merged.values()], doc);
   store.applied = new Set(merged.keys());
@@ -125,10 +127,16 @@ const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : use
 
 const warnedLengths = new Set<string>();
 
-/** Development-only: warns once per distinct value. The guard is the form bundlers replace, so production drops it. */
-function warnLengths(props: SeoProps): void {
+/**
+ * Development-only: checks the title and description the head actually gets (after titleTemplate,
+ * with SeoProvider defaults), the same values the build and the audit measure. Warns once per value.
+ */
+function warnLengths(merged: Map<string, HeadTag>): void {
   if (process.env.NODE_ENV !== "production") {
-    const { title, description } = props;
+    const t = merged.get("title");
+    const d = merged.get("name:description");
+    const title = t?.kind === "title" ? t.text : undefined;
+    const description = d?.kind === "meta" ? d.attrs.content : undefined;
     const once = (value: string, message: string) => {
       if (warnedLengths.has(message + value)) return;
       warnedLengths.add(message + value);
@@ -175,11 +183,6 @@ export function useSeo(props: SeoProps): void {
   const [order] = useState(() => ++seq);
   const entryRef = useRef<Entry | null>(null);
   const key = JSON.stringify([props, defaults]);
-
-  useEffect(() => {
-    warnLengths(props);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.title, props.description]);
 
   useIsoLayoutEffect(() => {
     const store = getStore(document);

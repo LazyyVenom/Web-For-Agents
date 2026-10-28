@@ -432,6 +432,22 @@ describe("Seo length warnings", () => {
     expect(calls[0]).toContain("191 characters");
   });
 
+  it("measures the rendered title (after titleTemplate) and provider default descriptions", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const title = "t".repeat(45); // 45 characters, but 66 once the template is applied
+    const defaults = { titleTemplate: "%s | Jane Doe Portfolio", description: "Too short." };
+    render(
+      <SeoProvider defaults={defaults}>
+        <Seo title={title} />
+      </SeoProvider>,
+    );
+    const calls = warn.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(calls).toEqual([
+      `[web-for-agents] <Seo> title is 66 characters (over 60): "${title} | Jane Doe Portfolio"`,
+      '[web-for-agents] <Seo> description is 10 characters (aim for 50-160): "Too short."',
+    ]);
+  });
+
   it("does not warn for good lengths", () => {
     vi.stubEnv("NODE_ENV", "development");
     render(<Seo title="A fine title" description={"d".repeat(120)} />);

@@ -55,7 +55,7 @@ The default is the lowest-priority layer, so an explicit `canonical` on any `<Se
 
 ## Length warnings
 
-Search engines truncate long titles and descriptions, and very short descriptions waste the snippet. In development, `<Seo>` and `useSeo` log a `[web-for-agents]` `console.warn` when a title is over 60 characters or a description is under 50 or over 160. Each distinct value warns once. The check sits behind `process.env.NODE_ENV !== "production"`, so bundlers remove it from production builds.
+Search engines truncate long titles and descriptions, and very short descriptions waste the snippet. In development, `<Seo>` and `useSeo` log a `[web-for-agents]` `console.warn` when a title is over 60 characters or a description is under 50 or over 160. The check measures what the head actually gets: the title after `titleTemplate`, and the description from props or the `SeoProvider` defaults. These are the same values the build and the CLI audit measure. Each distinct value warns once. The check sits behind `process.env.NODE_ENV !== "production"`, so bundlers remove it from production builds.
 
 ## Schema builders
 
