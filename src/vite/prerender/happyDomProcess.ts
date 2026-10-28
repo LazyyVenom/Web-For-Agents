@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { HappyDomRendererOptions } from "./happyDom";
+import { LOG_PREFIX } from "../../shared/errors";
 import { RenderError, type InPageScripts, type RenderResult, type Renderer } from "./renderCore";
 import type { ChildMessage, ChildOptions, ParentMessage } from "./renderChild";
 
@@ -119,6 +120,17 @@ async function bundleFromSource(file: string): Promise<string> {
 function hasFlag(flag: string): boolean {
   return process.allowedNodeEnvironmentFlags.has(flag);
 }
+
+/** Whether this Node has the stable permission model the render process runs under (22.13+, 23.5+). */
+export function hasPermissionModel(): boolean {
+  return hasFlag("--permission");
+}
+
+/** Logged once per build when happy-dom renders on a Node without the permission model. */
+export const NO_PERMISSION_MODEL_WARNING =
+  `${LOG_PREFIX} Node ${process.version} has no permission model (Node 22.13+), so the happy-dom render process is ` +
+  "only partly contained: code that escapes happy-dom could still open raw sockets, start processes or workers, " +
+  "and read or write files. Use Node 22.13 or later for builds that load untrusted scripts, or the Chrome renderer.";
 
 function execArgv(entry: string, iso: IsolationOptions): string[] {
   const args = iso.codeGeneration ? [] : ["--disallow-code-generation-from-strings"];

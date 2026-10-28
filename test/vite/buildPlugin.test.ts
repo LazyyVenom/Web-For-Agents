@@ -447,6 +447,14 @@ describe("createBuildPlugin", () => {
     expect(t.read("blocker")).toBe("a file where a directory is needed");
   }, 30_000);
 
+  it("does not warn about the permission model on a Node that has it", async () => {
+    const t = make({ prerender: { crawl: false } });
+    await t.run();
+    expect(t.warnings().some((m) => m.includes("has no permission model"))).toBe(
+      !process.allowedNodeEnvironmentFlags.has("--permission"),
+    );
+  }, 30_000);
+
   it("warns when routes are truncated", async () => {
     const t = make({ prerender: { maxRoutes: 2, concurrency: 1 } });
     await t.run();

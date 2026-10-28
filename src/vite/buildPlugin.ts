@@ -7,7 +7,8 @@ import { errorMessage, LOG_PREFIX, withPrefix } from "../shared/errors";
 import { createFileStager, type FileStager } from "./fileStager";
 import { buildLlmsFullTxt, buildLlmsTxt, type LlmsPage, type LlmsSection } from "./llms";
 import type { ResolvedOptions } from "./options";
-import { prerenderSite, type CrawlResult } from "./prerender/index";
+import { NO_PERMISSION_MODEL_WARNING, hasPermissionModel } from "./prerender/happyDomProcess";
+import { mayUseHappyDom, prerenderSite, type CrawlResult } from "./prerender/index";
 import type { ExtensionContext, ExtensionPage, PrerenderExtension } from "./prerender/extensions";
 import { MAX_ROUTE_BYTES, MAX_SEGMENT_BYTES, publicMdUrl, publicUrl, routeHtmlFile, routeMdFile, shortRoute } from "./prerender/paths";
 import { buildRobots } from "./robots";
@@ -52,6 +53,7 @@ export function createBuildPlugin(resolved: ResolvedOptions, extensions: Prerend
   let ssr = false;
   let wrote = false;
   let loggedWarnings = false;
+  let warnedPermission = false;
 
   interface Rendered {
     result: CrawlResult;
@@ -66,6 +68,12 @@ export function createBuildPlugin(resolved: ResolvedOptions, extensions: Prerend
     if (!fs.existsSync(shellFile)) throw new Error(`${LOG_PREFIX} ${shellFile} not found`);
     const shell = fs.readFileSync(shellFile, "utf8");
     stager.stage(SPA_FALLBACK_FILE, shell);
+
+    const pr = resolved.prerender;
+    if (pr !== false && mayUseHappyDom(pr) && !hasPermissionModel() && !warnedPermission) {
+      warnedPermission = true;
+      logger.warn(NO_PERMISSION_MODEL_WARNING);
+    }
 
     let result: CrawlResult;
     try {
