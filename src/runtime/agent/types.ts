@@ -21,3 +21,8 @@ export interface AgentActionSpec<I = Record<string, unknown>, R = unknown> {
   /** Milliseconds to wait after a form submit before reporting messages. Default 300. */
   submitSettleMs?: number;
 }
+
+export interface RefreshAgentActionsOptions {
+  /** Also re-describe already exposed actions and re-register those whose tool changed. */
+  force?: boolean;
+}

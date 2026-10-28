@@ -10,5 +10,11 @@ export { hydrateApp } from "./runtime/hydrate";
 export { CONTENT_ATTR, EXCLUDE_ATTR, PRERENDERED_ATTR, READY_GLOBAL } from "./shared/conventions";
 export { useAgentAction, AgentForm, agentParam } from "./runtime/agent/react";
 export type { AgentHintProps, AgentParamProps } from "./runtime/agent/react";
-export { listAgentActions, executeAgentAction } from "./runtime/agent/registry";
-export type { AgentActionSpec, AgentActionDescriptor, AgentActionResult, JsonSchema } from "./runtime/agent/types";
+export { listAgentActions, executeAgentAction, refreshAgentActions } from "./runtime/agent/registry";
+export type {
+  AgentActionSpec,
+  AgentActionDescriptor,
+  AgentActionResult,
+  JsonSchema,
+  RefreshAgentActionsOptions,
+} from "./runtime/agent/types";

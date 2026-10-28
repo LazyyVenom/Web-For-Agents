@@ -6,7 +6,13 @@ import { compareStrings } from "../../shared/sort";
 import { isConcealed, isDisabled } from "./dom";
 import { submitFormAction } from "./formAutomation";
 import { EMPTY_OBJECT_SCHEMA, schemaFromForm, validateFormInput, validateInput } from "./formSchema";
-import type { AgentActionDescriptor, AgentActionResult, AgentActionSpec, JsonSchema } from "./types";
+import type {
+  AgentActionDescriptor,
+  AgentActionResult,
+  AgentActionSpec,
+  JsonSchema,
+  RefreshAgentActionsOptions,
+} from "./types";
 import { exposeTool, hasModelContext, type WebMcpTool } from "./webmcp";
 
 interface Entry {
@@ -266,7 +272,7 @@ export async function executeAgentAction(
  * mounts cheap; pass `force: true` after revealing form fields (a modal, tab or wizard step) to
  * re-describe them and re-register any whose name, description, schema or hints changed.
  */
-export function refreshAgentActions(opts?: { force?: boolean }): void {
+export function refreshAgentActions(opts?: RefreshAgentActionsOptions): void {
   if (opts?.force) forceScheduled = true;
   scheduleSync();
 }
