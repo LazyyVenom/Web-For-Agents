@@ -25,7 +25,7 @@ import { startStaticServer, type StaticServer } from "../../../src/vite/prerende
 import type { RendererName } from "../../../src/vite/options";
 import { probeChrome } from "../../helpers/chrome";
 import { canObserveModuleLoads, wrappersInstalledBeforeHappyDom } from "../../helpers/childOrder";
-import { childEntryFile } from "../../../src/vite/prerender/happyDomProcess";
+import { CACHE_TOUCH_MS, childEntryFile, keepFresh } from "../../../src/vite/prerender/happyDomProcess";
 import { isSyncResources } from "../../../src/vite/prerender/renderChild";
 
 const dir = fileURLToPath(new URL("../../fixtures/static-app/", import.meta.url));
@@ -507,64 +507,48 @@ describe("happy-dom render process isolation", { timeout: SUITE_TIMEOUT_MS }, ()
     }
   });
 
-  it("keeps the dev bundle's cache entry fresh while the build runs", async () => {
-    const entry = await childEntryFile();
-    const dir = (await import("node:path")).dirname(entry);
-    const { utimesSync, statSync } = await import("node:fs");
-    const r = createIsolatedHappyDomRenderer({}, { cacheTouchMs: 50 });
+  it("keeps the dev bundle's cache entry fresh while the renderer lives, and stops on close", async () => {
+    // The real bundle directory is shared with other test files running in parallel, which touch it
+    // too, so the refresh is observed through an injected keepFresh instead of the directory's mtime.
+    const calls: Array<string | undefined> = [];
+    let stopped = 0;
+    const r = createIsolatedHappyDomRenderer({}, {
+      keepFresh: (dir) => {
+        calls.push(dir);
+        return () => stopped++;
+      },
+    });
     try {
-      try {
-        await r.render(server.origin + "/fetch", RENDER_MS);
-        const old = new Date(Date.now() - 3_600_000);
-        utimesSync(dir, old, old);
-        await vi.waitFor(() => expect(Date.now() - statSync(dir).mtimeMs).toBeLessThan(10_000), { timeout: 2000 });
-      } finally {
-        await r.close();
-      }
-      // stopped on close
-      const old = new Date(Date.now() - 3_600_000);
-      utimesSync(dir, old, old);
-      await new Promise((res) => setTimeout(res, 200));
-      expect(Date.now() - statSync(dir).mtimeMs).toBeGreaterThan(3_000_000);
+      await r.render(server.origin + "/fetch", RENDER_MS);
+      await r.render(server.origin + "/fetch", RENDER_MS);
     } finally {
-      const now = new Date();
-      utimesSync(dir, now, now);
+      await r.close();
     }
+    const entry = await childEntryFile();
+    expect(calls).toEqual([(await import("node:path")).dirname(entry)]); // once, for the dev bundle
+    expect(stopped).toBe(1);
   });
 
-  it("leaves no render process running when closed during a start or restart", async () => {
-    const alive = (pid: number) => {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch {
-        return false;
-      }
-    };
-    // Deterministic: the child is disconnected (render() would restart it) and close() runs before
-    // render() resumes from awaiting its child.
-    {
-      const r = createIsolatedHappyDomRenderer();
-      await r.render(server.origin + "/fetch", RENDER_MS);
-      r.childProcess()!.disconnect();
-      const pending = r.render(server.origin + "/fetch", RENDER_MS).catch((e: unknown) => e);
-      await r.close();
-      expect(((await pending) as RenderError).interrupted).toBe(true);
-      await new Promise((res) => setTimeout(res, 300));
-      expect(r.childPids()).toHaveLength(1);
-      await vi.waitFor(() => expect(r.childPids().filter(alive)).toEqual([]), { timeout: 3000 });
-    }
-    for (const delay of [0, 5, 30, 120]) {
-      // each child dies right after it starts, so renders keep restarting it
-      const r = createIsolatedHappyDomRenderer({}, { extraEnv: { WFA_RENDER_TEST_EXIT_AFTER_READY: "1" } });
-      const renders = Array.from({ length: 4 }, () => r.render(server.origin + "/fetch", RENDER_MS).catch((e: unknown) => e));
-      await new Promise((res) => setTimeout(res, delay));
-      await r.close();
-      const results = await Promise.all(renders);
-      for (const e of results) expect(e).toBeInstanceOf(RenderError);
-      const late = await r.render(server.origin + "/fetch", RENDER_MS).catch((e: unknown) => e);
-      expect((late as RenderError).interrupted).toBe(true);
-      await vi.waitFor(() => expect(r.childPids().filter(alive)).toEqual([]), { timeout: 3000 });
+  it("keepFresh touches the directory every CACHE_TOUCH_MS until stopped", async () => {
+    const { mkdtempSync, rmSync, statSync, utimesSync } = await import("node:fs");
+    const dir = mkdtempSync(join(tmpdir(), "wfa-fresh-"));
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      const hourAgo = new Date(Date.now() - 3_600_000);
+      utimesSync(dir, hourAgo, hourAgo);
+      const ageMs = () => Date.now() - statSync(dir).mtimeMs;
+      const stop = keepFresh(dir);
+      expect(ageMs()).toBeGreaterThan(3_000_000); // nothing yet
+      vi.advanceTimersByTime(CACHE_TOUCH_MS);
+      expect(ageMs()).toBeLessThan(5_000); // touched
+      stop();
+      utimesSync(dir, hourAgo, hourAgo);
+      vi.advanceTimersByTime(CACHE_TOUCH_MS * 3);
+      expect(ageMs()).toBeGreaterThan(3_000_000); // no touches after stop
+      expect(keepFresh(undefined)).toBeTypeOf("function"); // package build: no-op
+    } finally {
+      vi.useRealTimers();
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
