@@ -1,3 +1,4 @@
+import { hasOwn } from "../../shared/object";
 import { isDisabled } from "./dom";
 import { agentFields, schemaFromForm, validateInput, type Field } from "./formSchema";
 import type { AgentActionResult } from "./types";
@@ -19,7 +20,7 @@ function notify(el: Element): void {
 /** Writes only to agentFields(form): the same fields the schema advertises. */
 function fill(form: HTMLFormElement, values: Record<string, unknown>): void {
   for (const [name, els] of agentFields(form)) {
-    if (!Object.prototype.hasOwnProperty.call(values, name)) continue;
+    if (!hasOwn(values, name)) continue;
     const value = values[name];
     if (value === undefined) continue;
     for (const el of els) {

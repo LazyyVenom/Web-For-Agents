@@ -1,6 +1,7 @@
 import { isValidActionName, AGENT_GLOBAL_VERSION, type AgentGlobal } from "../../shared/agent";
 import { AGENT_GLOBAL } from "../../shared/conventions";
 import { errorMessage, withPrefix } from "../../shared/errors";
+import { hasOwn } from "../../shared/object";
 import { compareStrings } from "../../shared/sort";
 import { isDisabled, isHiddenOrInert } from "./dom";
 import { submitFormAction } from "./formAutomation";
@@ -144,7 +145,7 @@ function clip(s: string): string {
  * sorted, so the agent's key order and padding cannot push a field out of view.
  */
 function describeInput(schema: JsonSchema, value: Record<string, unknown>): string {
-  const declared = Object.keys(schema.properties ?? {}).filter((k) => Object.prototype.hasOwnProperty.call(value, k));
+  const declared = Object.keys(schema.properties ?? {}).filter((k) => hasOwn(value, k));
   const known = new Set(declared);
   const extra = Object.keys(value)
     .filter((k) => !known.has(k))

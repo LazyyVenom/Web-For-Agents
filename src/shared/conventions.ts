@@ -15,6 +15,11 @@ export const EXCLUDE_ATTR = "data-wfa-exclude";
 export const PRERENDERED_ATTR = "data-wfa-prerendered";
 /** Window flag that is `false` while a `holdPrerender()` hold is active. */
 export const READY_GLOBAL = "__WFA_READY__";
+/**
+ * Markup that hides content from users and assistive tech. Shared by markdown extraction and the
+ * agent runtime (which adds inert, closed dialog and closed details to it).
+ */
+export const HIDDEN_SELECTOR = '[hidden], [aria-hidden="true"]';
 /** Marks head tags managed by <Seo>; the value is the tag key. */
 export const HEAD_OWNED_ATTR = "data-wfa";
 

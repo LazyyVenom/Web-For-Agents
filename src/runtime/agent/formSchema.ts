@@ -2,6 +2,7 @@ import {
   ACTION_PARAM_ATTR,
   WEBMCP_TOOLPARAMDESCRIPTION_ATTR,
 } from "../../shared/conventions";
+import { hasOwn } from "../../shared/object";
 import { collapseWhitespace as clean } from "../../shared/text";
 import { isConcealed } from "./dom";
 import type { JsonSchema } from "./types";
@@ -154,8 +155,6 @@ export function schemaFromForm(form: HTMLFormElement): JsonSchema {
   if (required.length) out.required = required;
   return out;
 }
-
-const hasOwn = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
 
 /** Longest string run through a pattern or format regex: bounds catastrophic backtracking in author patterns. */
 const MAX_REGEX_INPUT = 10_000;
