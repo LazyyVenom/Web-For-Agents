@@ -2,6 +2,7 @@ import { Window } from "happy-dom";
 import { describe, expect, it } from "vitest";
 import { actionGroups, firstPerName, linkActions, markupActions, markupKind, markupLinks, resolveLinkHref } from "../../src/shared/markupActions";
 import { staticActions } from "../../src/vite/generateActions";
+import { collectPageReport } from "../../src/overlay/collect";
 
 describe("markupActions", () => {
   it("finds data-agent-action elements, then WebMCP forms, with trimmed names and no dedupe", () => {
@@ -58,6 +59,17 @@ describe("markupKind", () => {
         <a data-agent-action="no-href" data-agent-kind="link"></a>
         <a href="/x" data-agent-action="link-form" data-agent-kind="form"></a>`),
     ).toEqual([["f", "form"], ["l", "link"], ["c", "click"], ["unknown", "click"], ["not-form", "click"], ["no-href", "click"], ["link-form", "link"]]);
+  });
+
+  it('reports "form" for data-agent-kind="click" on a <form>, in generate and the overlay alike', () => {
+    expect(kinds(`<form data-agent-action="hand-built" data-agent-kind="click"><input name="q"></form>`)).toEqual([["hand-built", "form"]]);
+    const window = new Window({ url: "https://a.com/" });
+    const doc = window.document as unknown as Document;
+    doc.body.innerHTML = `<main><form data-agent-action="hand-built" data-agent-kind="click"><input name="q"></form></main>`;
+    const listed = staticActions(doc);
+    expect(listed.map((a) => [a.name, a.kind, Object.keys(a.inputSchema.properties ?? {})])).toEqual([["hand-built", "form", ["q"]]]);
+    expect(collectPageReport(doc).actions.map((a) => [a.name, a.kind])).toEqual([["hand-built", "form"]]);
+    window.happyDOM.close();
   });
 
   it("gives generate's static actions and links the true kind", () => {

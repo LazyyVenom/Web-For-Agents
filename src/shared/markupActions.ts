@@ -25,8 +25,9 @@ export interface MarkupAction {
 
 /**
  * The kind of a `data-agent-action` element. The `data-agent-kind` attribute (ACTION_KIND_ATTR,
- * written by the runtime hint props) wins when the element can have that kind: "handler" and
- * "click" on any element, "form" on a `<form>`, "link" on an `<a href>`. Otherwise (no attribute,
+ * written by the runtime hint props) wins when the element can have that kind: "handler" on any
+ * element, "click" on any element but a `<form>` (where it means "form", as the runtime resolves a
+ * handler-less form action), "form" on a `<form>`, "link" on an `<a href>`. Otherwise (no attribute,
  * an unknown value, or a kind the element cannot have) it is inferred as before: "form" for a
  * `<form>`, "link" for an `<a href>` (LINK_ACTION_SELECTOR), else "click".
  */
@@ -37,7 +38,8 @@ export function markupKind(el: Element): ActionKind {
     case "handler":
       return "handler";
     case "click":
-      return "click";
+      // hintProps write "click" for any handler-less action; on a <form> the runtime runs it as a form.
+      return isForm ? "form" : "click";
     case "form":
       if (isForm) return "form";
       break;
