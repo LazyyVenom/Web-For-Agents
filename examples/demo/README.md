@@ -49,4 +49,4 @@ DEMO_SITE_URL=http://127.0.0.1:4173 npm run demo:build
 - `200.html`: the untouched SPA shell, for host fallbacks.
 - No overlay code and no `127.0.0.1` anywhere.
 
-To audit a running copy, build the package (`npm run build`) and run `node dist/bin.js audit <url>`. Note that an audit follows the absolute URLs baked into the build, so audit a build made with `DEMO_SITE_URL` set to the origin you serve it from; with the default, the canonical, sitemap and markdown checks point at `paperlantern.example` and warn.
+To audit a running copy, build the package (`npm run build`) and run `node dist/bin.js audit <url>`. The build bakes absolute URLs into the pages, so audit a build made with `DEMO_SITE_URL` set to the origin you serve it from. With the default, the canonical, sitemap and markdown checks point at `paperlantern.example`; the audit does not fetch them and warns instead.
