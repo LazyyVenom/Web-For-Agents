@@ -27,6 +27,9 @@ export function isPrivateIp(ip: string): boolean {
 /**
  * A URL hostname is private when it is a private IP literal, "localhost" (or a *.localhost name),
  * or when DNS resolves it to any private address. Unresolvable names count as public.
+ *
+ * Limitation: this is a point-in-time lookup. fetch() resolves the name again to connect, so a
+ * DNS-rebinding host (public answer here, private answer there) is not detected.
  */
 export async function isPrivateHost(hostname: string): Promise<boolean> {
   const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();

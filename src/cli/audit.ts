@@ -26,10 +26,19 @@ export interface AuditOptions {
   agentMapPath?: string;
   /**
    * Refuse redirects from a public host to a private, loopback or link-local address instead of
-   * following them with a warning. Default false.
+   * following them with a warning. Default false. Each hop's host is resolved before the request, so
+   * a DNS-rebinding host that answers differently at connect time is not caught: this is a guard
+   * against accidental internal fetches, not a sandbox.
    */
   blockPrivateRedirects?: boolean;
-  /** Classifies a URL hostname as private. Default: IP ranges, "localhost" and a DNS lookup. */
+}
+
+/**
+ * Test hooks for `auditWithHooks`; not part of the public API.
+ * @internal
+ */
+export interface AuditHooks {
+  /** Classifies a URL hostname as private. Default: isPrivateHost (IP ranges, "localhost", DNS). */
   isPrivateHost?: (hostname: string) => Promise<boolean>;
 }
 
@@ -79,9 +88,18 @@ async function probe(get: (u: string) => Promise<FetchResult>, urls: string[]): 
 const sameOrigin = (a: string, b: string): boolean => new URL(a).origin === new URL(b).origin;
 
 /** Audits `url` for AI-agent readiness. Fatal problems are reported in `error`, not thrown. */
-export async function audit(url: string, opts: AuditOptions = {}): Promise<AuditReport> {
+export function audit(url: string, opts: AuditOptions = {}): Promise<AuditReport> {
+  return auditWithHooks(url, opts);
+}
+
+/**
+ * `audit` with test hooks. Not exported from the package entry point.
+ * @internal
+ */
+export async function auditWithHooks(url: string, opts: AuditOptions = {}, hooks: AuditHooks = {}): Promise<AuditReport> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const classify = opts.isPrivateHost ?? isPrivateHost;
+  // One classification per host for the whole audit; fetchText bounds each wait by its timeout.
+  const classify = hooks.isPrivateHost ?? isPrivateHost;
   const classified = new Map<string, Promise<boolean>>();
   const isPrivate = (host: string): Promise<boolean> => {
     let p = classified.get(host);
@@ -127,13 +145,6 @@ export async function audit(url: string, opts: AuditOptions = {}): Promise<Audit
     const getSameOrigin = (u: string, accept?: string): Promise<FetchResult> =>
       sameOrigin(u, page.finalUrl) ? get(u, accept) : Promise.resolve(notFetched(u));
 
-    // Only the sitemap location depends on robots.txt; every other file is fetched alongside it,
-    // so a slow or hanging robots.txt delays the sitemap alone.
-    const robotsP = get(at(ROBOTS_PATH));
-    const sitemapP = robotsP.then((robots) => {
-      const listed = isOk(robots) ? parseRobots(robots.body).sitemaps[0] : undefined;
-      return getSameOrigin((listed && tryResolveUrl(listed, page.finalUrl)) || at(SITEMAP_PATH));
-    });
     const alt = markdownAlternate(html);
     const altUrl = alt === null ? null : tryResolveUrl(alt, page.finalUrl);
     const pagePath = new URL(page.finalUrl).pathname;
@@ -151,6 +162,14 @@ export async function audit(url: string, opts: AuditOptions = {}): Promise<Audit
           ? [new URL(custom, page.finalUrl).href]
           : inDirs(custom.replace(/^\.\//, ""));
 
+    // Only the sitemap location depends on robots.txt; every other file is fetched alongside it,
+    // so a slow or hanging robots.txt delays the sitemap alone. Created after the synchronous
+    // URL work above, so a throw there cannot leave these promises unobserved.
+    const robotsP = get(at(ROBOTS_PATH));
+    const sitemapP = robotsP.then((robots) => {
+      const listed = isOk(robots) ? parseRobots(robots.body).sitemaps[0] : undefined;
+      return getSameOrigin((listed && tryResolveUrl(listed, page.finalUrl)) || at(SITEMAP_PATH));
+    });
     const [robots, sitemap, llmsTxt, markdown, agentMap] = await Promise.all([
       robotsP,
       sitemapP,

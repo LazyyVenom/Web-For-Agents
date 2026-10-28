@@ -28,9 +28,12 @@ export interface FetchOptions {
   maxBytes?: number;
   userAgent?: string;
   accept?: string;
-  /** Refuse (instead of follow) a redirect from a public host to a private address. Default false. */
+  /**
+   * Refuse (instead of follow) a redirect from a public host to a private address. Default false.
+   * Not DNS-rebinding safe: the host is resolved for the check and again by fetch() to connect.
+   */
   blockPrivateRedirects?: boolean;
-  /** Classifies a URL hostname as private. Default: IP ranges, "localhost" and a DNS lookup. */
+  /** Classifies a URL hostname as private. Default: isPrivateHost. Callers may pass a cached one. */
   isPrivateHost?: (hostname: string) => Promise<boolean>;
 }
 
@@ -84,12 +87,7 @@ export async function fetchText(url: string, opts: FetchOptions): Promise<FetchR
   try {
     const signal = AbortSignal.timeout(opts.timeoutMs);
     const classify = opts.isPrivateHost ?? isPrivateHost;
-    const known = new Map<string, Promise<boolean>>();
-    const isPrivate = (host: string): Promise<boolean> => {
-      let p = known.get(host);
-      if (!p) known.set(host, (p = classify(host)));
-      return abortable(p, signal);
-    };
+    const isPrivate = (host: string): Promise<boolean> => abortable(classify(host), signal);
     // Redirects are followed by hand so each hop can be checked for a public -> private crossing.
     let current = url;
     let res: Response;

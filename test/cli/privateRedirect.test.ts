@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseCliArgs } from "../../src/cli/args";
-import { audit } from "../../src/cli/audit";
+import { audit, auditWithHooks } from "../../src/cli/audit";
+import * as cliEntry from "../../src/cli/index";
 import { fetchText } from "../../src/cli/fetch";
 import { isPrivateHost, isPrivateIp } from "../../src/cli/privateAddress";
 import { formatText } from "../../src/cli/report";
@@ -25,6 +26,11 @@ describe("isPrivateIp / isPrivateHost", () => {
     expect(await isPrivateHost("localhost")).toBe(true);
     expect(await isPrivateHost("app.localhost")).toBe(true);
     expect(await isPrivateHost("[::1]")).toBe(true);
+    // WHATWG URL writes IPv4-mapped addresses in hex: http://[::ffff:127.0.0.1]/ has hostname [::ffff:7f00:1].
+    expect(new URL("http://[::ffff:127.0.0.1]/").hostname).toBe("[::ffff:7f00:1]");
+    expect(await isPrivateHost("[::ffff:7f00:1]")).toBe(true);
+    expect(await isPrivateHost("[::ffff:a9fe:a9fe]")).toBe(true);
+    expect(await isPrivateHost("[::ffff:808:808]")).toBe(false);
     expect(await isPrivateHost("93.184.216.34")).toBe(false);
   });
 });
@@ -63,13 +69,13 @@ describe("redirects from a public host to a private address", () => {
 
   it("add a warning to the audit report, or fail it with blockPrivateRedirects", async () => {
     const { site } = await servers();
-    const report = await audit(site.url + "/", { timeoutMs: 2000, isPrivateHost: fakeClassifier });
+    const report = await auditWithHooks(site.url + "/", { timeoutMs: 2000 }, { isPrivateHost: fakeClassifier });
     expect(report.error).toBeUndefined();
     expect(report.warnings).toHaveLength(1);
     expect(report.warnings![0]).toMatch(/^followed a redirect from public 127\.0\.0\.1:\d+ to private address http:\/\/localhost/);
     expect(formatText(report)).toContain("\nWarning: followed a redirect from public 127.0.0.1:");
 
-    const blocked = await audit(site.url + "/", { timeoutMs: 2000, isPrivateHost: fakeClassifier, blockPrivateRedirects: true });
+    const blocked = await auditWithHooks(site.url + "/", { timeoutMs: 2000, blockPrivateRedirects: true }, { isPrivateHost: fakeClassifier });
     expect(blocked.error).toMatch(/blocked redirect/);
     expect(blocked.warnings![0]).toMatch(/^blocked a redirect from public/);
   });
@@ -82,5 +88,10 @@ describe("redirects from a public host to a private address", () => {
   it("--no-private-redirects sets blockPrivateRedirects", () => {
     expect(parseCliArgs(["audit", "a.com", "--no-private-redirects"]).blockPrivateRedirects).toBe(true);
     expect(parseCliArgs(["audit", "a.com"]).blockPrivateRedirects).toBeUndefined();
+  });
+
+  it("keeps the classifier hook out of the public entry point", () => {
+    expect(cliEntry).not.toHaveProperty("auditWithHooks");
+    expect(cliEntry.audit).toBe(audit);
   });
 });
