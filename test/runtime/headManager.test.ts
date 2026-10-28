@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { applyHeadTags, removeHeadTag } from "../../src/runtime/headManager";
 import { HEAD_OWNED_ATTR } from "../../src/shared/conventions";
 import type { HeadTag } from "../../src/runtime/types";
@@ -73,5 +73,24 @@ describe("headManager", () => {
     removeHeadTag("title");
     expect(document.title).toBe("T");
     expect(document.querySelectorAll("title")).toHaveLength(1);
+  });
+
+  it("a repeated apply writes nothing to the DOM", () => {
+    const tags: HeadTag[] = [
+      { kind: "title", key: "title", text: "T" },
+      ogTitle("Hi"),
+      { kind: "link", key: "rel:canonical", attrs: { rel: "canonical", href: "https://a.com/" } },
+    ];
+    applyHeadTags(tags);
+    const setAttribute = vi.spyOn(Element.prototype, "setAttribute");
+    const appendChild = vi.spyOn(Node.prototype, "appendChild");
+    const observer = new MutationObserver(() => {});
+    observer.observe(document.head, { subtree: true, attributes: true, childList: true, characterData: true });
+    applyHeadTags(tags);
+    expect(observer.takeRecords()).toEqual([]);
+    observer.disconnect();
+    expect(setAttribute).not.toHaveBeenCalled();
+    expect(appendChild).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
   });
 });

@@ -1,11 +1,11 @@
-import { CONTENT_ATTR, EXCLUDE_ATTR } from "./conventions";
+import { CONTENT_ATTR, EXCLUDE_ATTR, HIDDEN_SELECTOR } from "./conventions";
 
 export type ContentSource = "marker" | "selector" | "body";
 
 /** Default for `markdown.contentSelector`. */
 export const DEFAULT_CONTENT_SELECTOR = "main";
 
-const STRIP = `script, style, noscript, template, nav, [${EXCLUDE_ATTR}], [hidden], [aria-hidden="true"]`;
+const STRIP = `script, style, noscript, template, nav, [${EXCLUDE_ATTR}], ${HIDDEN_SELECTOR}`;
 const BODY_STRIP = "header, nav, footer, aside";
 
 /**

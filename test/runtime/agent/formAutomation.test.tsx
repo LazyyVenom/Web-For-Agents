@@ -190,4 +190,164 @@ describe("runFormAction", () => {
     expect((document.getElementById("a") as HTMLInputElement).value).toBe("new");
     expect((document.getElementById("b") as HTMLInputElement).value).toBe("keep");
   });
+
+  it("never fills a hidden, inert or aria-hidden field", async () => {
+    const f = mount(
+      `<form><input name="q"><div inert><input name="to" value="keep"></div><input name="h" hidden value="keep"><div aria-hidden="true"><input name="a" value="keep"></div></form>`,
+    );
+    f.addEventListener("submit", (e) => e.preventDefault());
+    for (const name of ["to", "h", "a"]) {
+      expect(await run(f, { q: "x", [name]: "evil" })).toEqual({
+        status: "invalid",
+        errors: [{ field: name, message: "is not an allowed field" }],
+      });
+      expect((f.elements.namedItem(name) as HTMLInputElement).value).toBe("keep");
+    }
+  });
+
+  it("does not submit when the default button is disabled", async () => {
+    for (const html of [
+      `<form><input name="q"><button disabled>Send</button></form>`,
+      `<form><input name="q"><fieldset disabled><input type="submit"></fieldset></form>`,
+      `<fieldset disabled><form><input name="q"><button>Send</button></form></fieldset>`,
+    ]) {
+      const f = mount(html);
+      const submitted = vi.fn((e: Event) => e.preventDefault());
+      f.addEventListener("submit", submitted);
+      const r = html.startsWith("<fieldset") ? await run(f, {}) : await run(f, { q: "x" });
+      expect(r).toEqual({ status: "error", message: "form submit is disabled" });
+      expect(submitted).not.toHaveBeenCalled();
+    }
+  });
+
+  it("submits when only a later, non-default button is disabled", async () => {
+    const f = mount(`<form><input name="q"><button>Send</button><button disabled>Other</button></form>`);
+    f.addEventListener("submit", (e) => e.preventDefault());
+    expect((await run(f, { q: "x" })).status).toBe("submitted");
+  });
+
+  it("sets a hidden checkbox operated through its visible label", async () => {
+    const f = mount(`<form><input type="checkbox" name="terms" id="t" hidden><label for="t">I agree</label></form>`);
+    f.addEventListener("submit", (e) => e.preventDefault());
+    expect((await run(f, { terms: true })).status).toBe("submitted");
+    expect((f.elements.namedItem("terms") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("does not submit a concealed form or one whose default button is concealed", async () => {
+    for (const html of [
+      `<dialog><form><input name="q"><button>Send</button></form></dialog>`,
+      `<form><input name="q"><button hidden>Send</button></form>`,
+      `<form><input name="q"><div inert><button>Send</button></div></form>`,
+    ]) {
+      const f = mount(html);
+      const submitted = vi.fn((e: Event) => e.preventDefault());
+      f.addEventListener("submit", submitted);
+      const r = html.startsWith("<dialog") ? await run(f, {}) : await run(f, { q: "x" });
+      expect(r).toEqual({ status: "error", message: "form is hidden or inert" });
+      expect(submitted).not.toHaveBeenCalled();
+    }
+  });
+
+  it("submits through the default button, counting image and form= buttons", async () => {
+    const cases: Array<[string, string]> = [
+      [`<form id="f"><input name="q"><button name="op" value="save">Save</button><button name="op" value="del">Del</button></form>`, "save"],
+      [`<form id="f"><input name="q"><input type="image" name="img" alt="go"><button name="op" value="b">B</button></form>`, "img"],
+      [`<form id="f"><input name="q"></form><button form="f" name="op" value="outside">Out</button>`, "outside"],
+    ];
+    for (const [html, expected] of cases) {
+      const f = mount(html);
+      let submitter: Element | null | undefined;
+      f.addEventListener("submit", (e) => {
+        e.preventDefault();
+        submitter = (e as SubmitEvent).submitter;
+      });
+      expect((await run(f, { q: "x" })).status).toBe("submitted");
+      const s = submitter as HTMLButtonElement;
+      expect(s.value === expected || s.name === expected).toBe(true);
+    }
+  });
+
+  it("refuses a disabled image or form= default button", async () => {
+    for (const html of [
+      `<form id="f"><input name="q"><input type="image" alt="go" disabled><button>B</button></form>`,
+      `<form id="f"><input name="q"></form><button form="f" disabled>Out</button>`,
+    ]) {
+      const f = mount(html);
+      expect(await run(f, { q: "x" })).toEqual({ status: "error", message: "form submit is disabled" });
+    }
+  });
+
+  it("a submit button in the first legend of a disabled fieldset is enabled", async () => {
+    const f = mount(`<form><input name="q"><fieldset disabled><legend><button>Go</button></legend></fieldset></form>`);
+    f.addEventListener("submit", (e) => e.preventDefault());
+    expect((await run(f, { q: "x" })).status).toBe("submitted");
+  });
+
+  describe("fields revealed while filling", () => {
+    function revealing(): HTMLFormElement {
+      const f = mount(`<form>
+        <div hidden id="extra"><input name="company" maxlength="5"></div>
+        <input type="checkbox" name="business">
+      </form>`);
+      const box = f.elements.namedItem("business") as HTMLInputElement;
+      box.addEventListener("change", () => (document.getElementById("extra")!.hidden = !box.checked));
+      f.addEventListener("submit", (e) => e.preventDefault());
+      return f;
+    }
+
+    it("fills a field revealed by an earlier write in the same call", async () => {
+      const f = revealing();
+      expect((await run(f, { business: true, company: "Acme" })).status).toBe("submitted");
+      expect((f.elements.namedItem("company") as HTMLInputElement).value).toBe("Acme");
+    });
+
+    it("validates a revealed field's value against its schema", async () => {
+      const f = revealing();
+      expect(await run(f, { business: true, company: "Too long" })).toEqual({
+        status: "invalid",
+        errors: [{ field: "company", message: "must be at most 5 characters" }],
+      });
+      expect((f.elements.namedItem("company") as HTMLInputElement).value).toBe("");
+    });
+
+    it("rejects a key naming no form element before writing anything", async () => {
+      const f = revealing();
+      expect(await run(f, { business: true, nothing: "x" })).toEqual({
+        status: "invalid",
+        errors: [{ field: "nothing", message: "is not an allowed field" }],
+      });
+      expect((f.elements.namedItem("business") as HTMLInputElement).checked).toBe(false);
+    });
+
+    it("submits through requestSubmit with the default button", async () => {
+      const f = mount(`<form><input name="q"><button id="go">Go</button></form>`);
+      f.addEventListener("submit", (e) => e.preventDefault());
+      const spy = vi.spyOn(f, "requestSubmit");
+      expect((await run(f, { q: "x" })).status).toBe("submitted");
+      expect(spy).toHaveBeenCalledWith(document.getElementById("go"));
+    });
+
+    it("rejects a name whose field never appears, without submitting", async () => {
+      const f = revealing();
+      const submitted = vi.fn();
+      f.addEventListener("submit", submitted);
+      expect(await run(f, { company: "Acme" })).toEqual({
+        status: "invalid",
+        errors: [{ field: "company", message: "is not an allowed field" }],
+      });
+      expect(submitted).not.toHaveBeenCalled();
+      expect((f.elements.namedItem("company") as HTMLInputElement).value).toBe("");
+    });
+
+    it("still reports unknown keys alongside other validation errors", async () => {
+      const f = mount(`<form><input name="a" required></form>`);
+      expect(await run(f, { nope: 1 })).toEqual({
+        status: "invalid",
+        errors: [
+          { field: "a", message: "is required" },
+          { field: "nope", message: "is not an allowed field" },
+        ],
+      });
+    });
+  });
 });

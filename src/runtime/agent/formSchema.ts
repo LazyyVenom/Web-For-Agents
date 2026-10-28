@@ -2,7 +2,9 @@ import {
   ACTION_PARAM_ATTR,
   WEBMCP_TOOLPARAMDESCRIPTION_ATTR,
 } from "../../shared/conventions";
+import { hasOwn } from "../../shared/object";
 import { collapseWhitespace as clean } from "../../shared/text";
+import { inDisabledFieldset, isConcealed } from "./dom";
 import type { JsonSchema } from "./types";
 
 export const EMPTY_OBJECT_SCHEMA: JsonSchema = Object.freeze({
@@ -19,14 +21,16 @@ function isAgentField(e: Element): e is Field {
   const tag = e.tagName;
   if (tag !== "INPUT" && tag !== "SELECT" && tag !== "TEXTAREA") return false;
   if (!e.getAttribute("name")) return false;
-  if (e.hasAttribute("disabled") || e.hasAttribute("readonly") || e.closest("fieldset[disabled]")) return false;
-  return !(tag === "INPUT" && EXCLUDED_TYPES.has((e.getAttribute("type") ?? "text").toLowerCase()));
+  if (e.hasAttribute("disabled") || e.hasAttribute("readonly") || inDisabledFieldset(e)) return false;
+  if (tag === "INPUT" && EXCLUDED_TYPES.has((e.getAttribute("type") ?? "text").toLowerCase())) return false;
+  return !isConcealed(e);
 }
 
 /**
  * The fields an agent may see and write, grouped by name in document order. The single
  * predicate for both the advertised schema and form filling: excludes hidden/password/file and
- * button-like inputs, disabled, readonly, inside fieldset[disabled], and unnamed fields.
+ * button-like inputs, disabled, readonly, inside fieldset[disabled], unnamed fields, and concealed
+ * fields (see isConcealed).
  */
 export function agentFields(form: HTMLFormElement): Map<string, Field[]> {
   const groups = new Map<string, Field[]>();
@@ -41,12 +45,8 @@ export function agentFields(form: HTMLFormElement): Map<string, Field[]> {
 }
 
 function labelText(el: Field): string {
-  const labels: HTMLLabelElement[] = [];
-  if (el.id) {
-    for (const l of Array.from(el.ownerDocument.querySelectorAll("label"))) {
-      if (l.getAttribute("for") === el.id) labels.push(l);
-    }
-  }
+  // el.labels: associated labels without scanning every label in the document per field.
+  const labels: HTMLLabelElement[] = el.labels ? Array.from(el.labels) : [];
   if (labels.length === 0) {
     const wrap = el.closest("label");
     if (wrap) labels.push(wrap);
@@ -116,7 +116,7 @@ function withDescription(s: JsonSchema, desc: string): JsonSchema {
 
 function selectSchema(sel: HTMLSelectElement, desc: string): JsonSchema {
   const opts = Array.from(sel.querySelectorAll("option"))
-    .filter((o) => !o.hasAttribute("disabled"))
+    .filter((o) => !o.hasAttribute("disabled") && !o.hasAttribute("hidden") && !o.closest("optgroup[disabled]"))
     .map((o) => ({ value: o.getAttribute("value") ?? clean(o.textContent), label: clean(o.textContent) }))
     .filter((o) => o.value !== "");
   const values = opts.map((o) => o.value);
@@ -156,9 +156,14 @@ export function schemaFromForm(form: HTMLFormElement): JsonSchema {
   return out;
 }
 
-const hasOwn = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
+/**
+ * Longest string run through a pattern or format regex. This bounds polynomial backtracking
+ * (O(n^2), O(n^3) patterns stay fast at 10k chars); it does not make exponential patterns such as
+ * `(a+)+$` safe, which can hang on far shorter input.
+ */
+const MAX_REGEX_INPUT = 10_000;
 
-type Errors = Array<{ field: string; message: string }>;
+export type Errors = Array<{ field: string; message: string }>;
 
 function checkValue(s: JsonSchema, v: unknown, field: string, errors: Errors): void {
   const bad = (message: string): void => {
@@ -191,6 +196,9 @@ function checkValue(s: JsonSchema, v: unknown, field: string, errors: Errors): v
   if (typeof v === "string") {
     if (s.minLength !== undefined && v.length < s.minLength) bad(`must be at least ${s.minLength} characters`);
     if (s.maxLength !== undefined && v.length > s.maxLength) bad(`must be at most ${s.maxLength} characters`);
+    if ((s.pattern !== undefined || s.format === "email") && v.length > MAX_REGEX_INPUT) {
+      return bad(`must be at most ${MAX_REGEX_INPUT} characters to be checked`);
+    }
     if (s.pattern !== undefined) {
       let ok = false;
       try {
@@ -249,4 +257,17 @@ export function validateInput(
   const errors: Errors = [];
   checkObject(schema, input, "", errors);
   return errors.length ? { ok: false, errors } : { ok: true, value: input };
+}
+
+/**
+ * Input for a form action. Like validateInput against the form's current schema, except that
+ * top-level keys with no field yet are let through when nothing else is wrong: filling may reveal
+ * their field, and fill() validates them then (or rejects them if it never appears).
+ */
+export function validateFormInput(
+  schema: JsonSchema,
+  input: unknown,
+): { ok: true; value: Record<string, unknown> } | { ok: false; errors: Errors } {
+  const r = validateInput({ ...schema, additionalProperties: true }, input);
+  return r.ok ? r : validateInput(schema, input);
 }

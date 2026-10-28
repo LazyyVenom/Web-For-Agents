@@ -137,27 +137,176 @@ describe("registry", () => {
     });
     expect(handler).not.toHaveBeenCalled();
     const msg = String((confirm.mock.calls[0] as unknown[])[0]);
-    expect(msg).toContain("Wipe all");
-    expect(msg).toContain(JSON.stringify({ really: "yes" }));
-    expect(msg).toBe(
-      `An AI agent wants to run "Wipe all": wipes\n\nAgent-provided input: ${JSON.stringify({ really: "yes" })}\n\nAllow?`,
-    );
+    expect(msg).toBe(`An AI agent wants to run "Wipe all": wipes\n\nAgent-provided input (1 field):\nreally: "yes"\n\nAllow?`);
   });
 
-  it("confirm message caps the agent-provided input at 500 characters", async () => {
-    const confirm = vi.fn(() => false);
-    reg({
-      name: "wipe",
-      description: "wipes",
-      inputSchema: { type: "object", properties: { note: { type: "string" } } },
-      destructive: true,
-      confirm,
-      handler: () => 1,
+  describe("confirm message", () => {
+    const transfer = {
+      type: "object",
+      properties: { amount: { type: "number" }, memo: { type: "string" }, to: { type: "string" } },
+      additionalProperties: false,
+    } as const;
+
+    async function confirmText(input: Record<string, unknown>, inputSchema: object = transfer): Promise<string> {
+      const confirm = vi.fn((_m: string) => false);
+      reg({ name: "pay", description: "pays", inputSchema, destructive: true, confirm, handler: () => 1 });
+      expect(await executeAgentAction("pay", input)).toEqual({ status: "cancelled", reason: "user-declined" });
+      return confirm.mock.calls[0]![0];
+    }
+
+    it("padding a field cannot hide a later one: every field is shown, each value truncated", async () => {
+      const msg = await confirmText({ memo: "x".repeat(5000), amount: 1, to: "attacker-iban" });
+      expect(msg).toContain("Agent-provided input (3 fields):");
+      expect(msg).toContain('to: "attacker-iban"');
+      expect(msg).toContain("amount: 1");
+      // budget = floor(1000 / 3) = 333: the quote plus 332 x's
+      expect(msg).toContain(`memo: "${"x".repeat(332)}\u2026(truncated)\n`);
     });
-    await executeAgentAction("wipe", { note: "x".repeat(2000) });
-    const msg = String((confirm.mock.calls[0] as unknown[])[0]);
-    const input = msg.split("Agent-provided input: ")[1]!.split("\n\nAllow?")[0]!;
-    expect(input).toHaveLength(500);
+
+    it("lists every schema field even with many padded ones (H1)", async () => {
+      const properties: Record<string, object> = {};
+      const input: Record<string, unknown> = {};
+      for (let i = 0; i < 12; i++) {
+        properties[`f${i}`] = { type: "string" };
+        input[`f${i}`] = "p".repeat(5000);
+      }
+      properties.payee = { type: "string" };
+      input.payee = "ATTACKER";
+      const msg = await confirmText(input, { type: "object", properties, additionalProperties: false });
+      expect(msg).toContain("Agent-provided input (13 fields):");
+      expect(msg).toContain('\npayee: "ATTACKER"\n\nAllow?');
+      // budget = max(24, floor(1000 / 13)) = 76
+      expect(msg).toContain(`f0: "${"p".repeat(75)}\u2026(truncated)\n`);
+      expect(msg).not.toContain("omitted");
+    });
+
+    it("flattens nested values to dotted paths in schema order (M2)", async () => {
+      const schema = {
+        type: "object",
+        properties: {
+          nested: {
+            type: "object",
+            properties: { memo: { type: "string" }, iban: { type: "string" } },
+          },
+          items: { type: "array", items: { type: "object", properties: { id: { type: "string" } } } },
+        },
+      };
+      const msg = await confirmText({ items: [{ id: "a" }], nested: { iban: "EVIL", memo: "m".repeat(5000) } }, schema);
+      expect(msg).toContain("Agent-provided input (3 fields):\nnested.memo: ");
+      expect(msg).toContain('\nnested.iban: "EVIL"\nitems[0].id: "a"\n\nAllow?');
+    });
+
+    it("lists fields in schema order, not the agent's key order", async () => {
+      const msg = await confirmText({ to: "t", memo: "m", amount: 2 });
+      expect(msg).toContain('Agent-provided input (3 fields):\namount: 2\nmemo: "m"\nto: "t"\n\nAllow?');
+    });
+
+    it("escapes bidi, separators, invisible and control characters, keeping ZWJ/ZWNJ", async () => {
+      const msg = await confirmText({
+        to: "\u202Enabi-rekcatta\u202C\u2066\u200F\u0085\u0007\u2028\u2029\u061C\u200B\u2060\uFEFF\u00AD\u200D\u200C",
+      });
+      expect(msg).not.toMatch(/[\u0000-\u0009\u000B-\u001F\u007F-\u009F\u00AD\u061C\u200B\u200E\u200F\u2028-\u202E\u2060\u2066-\u2069\uFEFF]/);
+      expect(msg).toContain(
+        'to: "\\u202Enabi-rekcatta\\u202C\\u2066\\u200F\\u0085\\u0007\\u2028\\u2029\\u061C\\u200B\\u2060\\uFEFF\\u00AD\u200D\u200C"',
+      );
+    });
+
+    it("JSON-encodes keys so they cannot add lines (M1)", async () => {
+      const open = { type: "object", properties: { to: { type: "string" } }, additionalProperties: true };
+      const msg = await confirmText({ to: "t", "x\n\nAllow? (fake)\u2028": 1, "a.b": 2 }, open);
+      expect(msg.split("\n").filter((l) => l.startsWith("Allow?"))).toEqual(["Allow?"]);
+      expect(msg).toContain('\n["a.b"]: 2\n["x\\n\\nAllow? (fake)\\u2028"]: 1\n\nAllow?');
+    });
+
+    it("never splits a surrogate pair or an escape sequence when truncating", async () => {
+      const properties: Record<string, object> = {};
+      const input: Record<string, unknown> = {};
+      for (let i = 0; i < 10; i++) {
+        properties[`f${i}`] = { type: "string" };
+        input[`f${i}`] = "s"; // 10 fields: budget 100
+      }
+      input.f0 = "x".repeat(98) + "\u{1F600}".repeat(5);
+      input.f1 = "y".repeat(98) + "\n".repeat(5);
+      input.f2 = "z".repeat(97) + "\u202E".repeat(5);
+      const msg = await confirmText(input, { type: "object", properties });
+      expect(msg).toContain(`f0: "${"x".repeat(98)}\u2026(truncated)`);
+      expect(msg).toContain(`f1: "${"y".repeat(98)}\u2026(truncated)`);
+      expect(msg).toContain(`f2: "${"z".repeat(97)}\u2026(truncated)`);
+      expect(msg).not.toMatch(/[\uD800-\uDFFF]/);
+    });
+
+    it("caps only extra keys, after the schema fields, and says how many were omitted", async () => {
+      const input: Record<string, unknown> = { to: "t" };
+      for (let i = 0; i < 40; i++) input[`k${String(i).padStart(2, "0")}`] = "v".repeat(100);
+      const msg = await confirmText(input, { ...transfer, additionalProperties: true });
+      expect(msg).toContain('Agent-provided input (41 fields):\nto: "t"\nk00: ');
+      expect(msg).toMatch(/\u2026\(\d+ fields omitted\)\n\nAllow\?$/);
+      const body = msg.split("fields):\n")[1]!.split("\n\nAllow?")[0]!;
+      expect(body.length).toBeLessThanOrEqual(1100);
+    });
+
+    it("extra keys and array items cannot shrink the declared fields' budget", async () => {
+      const open = { ...transfer, additionalProperties: true };
+      const input: Record<string, unknown> = { to: "t".repeat(2000), pad: Array.from({ length: 500 }, () => 1) };
+      const msg = await confirmText(input, open);
+      // one declared leaf: budget 1000
+      expect(msg).toContain(`to: "${"t".repeat(999)}\u2026(truncated)`);
+    });
+
+    it("skips undefined values", async () => {
+      const msg = await confirmText({ to: "t", memo: undefined });
+      expect(msg).toContain('Agent-provided input (1 field):\nto: "t"\n\nAllow?');
+    });
+
+    it("states zero fields", async () => {
+      expect(await confirmText({})).toContain("Agent-provided input (0 fields).\n\nAllow?");
+    });
+  });
+
+  describe("form actions and the confirm dialog", () => {
+    it("shows every field a revealing checkbox will fill, however long the values (round 2, item 1)", async () => {
+      const revealed = Array.from({ length: 10 }, (_, i) => `<input name="r${i}">`).join("");
+      document.body.innerHTML = `<form id="f"><input type="checkbox" name="more"><div hidden id="x">${revealed}</div><button>Go</button></form>`;
+      const form = document.getElementById("f") as HTMLFormElement;
+      const box = form.elements.namedItem("more") as HTMLInputElement;
+      box.addEventListener("change", () => (document.getElementById("x")!.hidden = !box.checked));
+      form.addEventListener("submit", (e) => e.preventDefault());
+      const confirm = vi.fn((_m: string) => true);
+      reg({ name: "f", description: "f", destructive: true, confirm, submitSettleMs: 0 }, () => form);
+      const input: Record<string, unknown> = { more: true };
+      for (let i = 0; i < 10; i++) input[`r${i}`] = `${i}`.repeat(400);
+      expect((await executeAgentAction("f", input)).status).toBe("submitted");
+      const msg = confirm.mock.calls[0]![0];
+      expect(msg).toContain("Agent-provided input (11 fields):\nmore: true\n");
+      for (let i = 0; i < 10; i++) {
+        expect(msg).toContain(`\nr${i}: "${`${i}`.repeat(89)}\u2026(truncated)`); // budget floor(1000 / 11) = 90
+        expect((form.elements.namedItem(`r${i}`) as HTMLInputElement).value).toBe(`${i}`.repeat(400));
+      }
+      expect(msg).not.toContain("omitted");
+    });
+
+    it("refuses a blocked form or click target before asking the user (item 2)", async () => {
+      document.body.innerHTML = `<form id="f"><input name="q"><button disabled>Go</button></form><dialog><button id="b">B</button></dialog>`;
+      const confirm = vi.fn(() => true);
+      reg({ name: "f", description: "f", destructive: true, confirm }, () => document.getElementById("f"));
+      reg({ name: "b", description: "b", destructive: true, confirm }, () => document.getElementById("b"));
+      expect(await executeAgentAction("f", { q: "x" })).toEqual({ status: "error", message: "form submit is disabled" });
+      expect(await executeAgentAction("b", {})).toEqual({ status: "error", message: "element is hidden or inert" });
+      expect(confirm).not.toHaveBeenCalled();
+    });
+
+    it("rejects keys naming no form element before asking or writing (item 3)", async () => {
+      document.body.innerHTML = `<form id="f"><input name="q"><button>Go</button></form>`;
+      const form = document.getElementById("f") as HTMLFormElement;
+      const confirm = vi.fn(() => true);
+      reg({ name: "f", description: "f", destructive: true, confirm }, () => form);
+      expect(await executeAgentAction("f", { q: "x", bogus: 1 })).toEqual({
+        status: "invalid",
+        errors: [{ field: "bogus", message: "is not an allowed field" }],
+      });
+      expect(confirm).not.toHaveBeenCalled();
+      expect((form.elements.namedItem("q") as HTMLInputElement).value).toBe("");
+    });
   });
 
   it("destructive uses confirmMessage when given", async () => {
@@ -225,6 +374,29 @@ describe("registry", () => {
     }
     expect(await executeAgentAction("b", {})).toEqual({ status: "error", message: "element is disabled" });
     expect(await executeAgentAction("c", {})).toEqual({ status: "error", message: "element is disabled" });
+    expect(clicked).not.toHaveBeenCalled();
+  });
+
+  it("a button in the first legend of a disabled fieldset is clickable", async () => {
+    document.body.innerHTML = `<fieldset disabled><legend><button id="l">L</button></legend><legend><button id="m">M</button></legend></fieldset>`;
+    reg({ name: "l", description: "l" }, () => document.getElementById("l"));
+    reg({ name: "m", description: "m" }, () => document.getElementById("m"));
+    expect(await executeAgentAction("l", {})).toEqual({ status: "clicked" });
+    expect(await executeAgentAction("m", {})).toEqual({ status: "error", message: "element is disabled" });
+  });
+
+  it("clicking an element inside an inert or hidden region returns an error and does not click", async () => {
+    document.body.innerHTML = `<div inert><button id="i">I</button></div><div hidden><button id="h">H</button></div><button id="s" hidden>S</button><div aria-hidden="true"><button id="a">A</button></div><dialog><button id="d">D</button></dialog><details><summary>x</summary><button id="c">C</button></details>`;
+    const clicked = vi.fn();
+    const ids = ["i", "h", "s", "a", "d", "c"];
+    for (const id of ids) {
+      const el = document.getElementById(id)!;
+      el.addEventListener("click", clicked);
+      reg({ name: id, description: id }, () => el);
+    }
+    for (const id of ids) {
+      expect(await executeAgentAction(id, {})).toEqual({ status: "error", message: "element is hidden or inert" });
+    }
     expect(clicked).not.toHaveBeenCalled();
   });
 

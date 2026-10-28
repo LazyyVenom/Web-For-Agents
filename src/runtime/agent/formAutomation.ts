@@ -1,4 +1,6 @@
-import { agentFields, schemaFromForm, validateInput, type Field } from "./formSchema";
+import { hasOwn } from "../../shared/object";
+import { inDisabledFieldset, isConcealed, isDisabled } from "./dom";
+import { agentFields, schemaFromForm, validateFormInput, validateInput, type Errors, type Field } from "./formSchema";
 import type { AgentActionResult } from "./types";
 
 const MESSAGE_SELECTOR = '[role="alert"], [role="status"], [aria-live]';
@@ -15,35 +17,62 @@ function notify(el: Element): void {
   el.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
-/** Writes only to agentFields(form): the same fields the schema advertises. */
-function fill(form: HTMLFormElement, values: Record<string, unknown>): void {
-  for (const [name, els] of agentFields(form)) {
-    if (!Object.prototype.hasOwnProperty.call(values, name)) continue;
-    const value = values[name];
-    if (value === undefined) continue;
-    for (const el of els) {
-      if (el instanceof HTMLSelectElement) {
-        if (el.multiple) {
-          const wanted = new Set(Array.isArray(value) ? value.map(String) : []);
-          for (const o of Array.from(el.options)) o.selected = wanted.has(o.value);
-        } else {
-          nativeSet(el, "value", String(value));
-        }
-        notify(el);
-        continue;
-      }
-      const type = el instanceof HTMLInputElement ? el.type : "text";
-      if (type === "checkbox") {
-        const on = Array.isArray(value) ? value.map(String).includes(el.value) : value === true;
-        if ((el as HTMLInputElement).checked !== on) el.click();
-      } else if (type === "radio") {
-        if (String(value) === el.value && !(el as HTMLInputElement).checked) el.click();
-      } else {
-        nativeSet(el, "value", String(value));
-        notify(el);
+function write(el: Field, value: unknown): void {
+  if (el instanceof HTMLSelectElement) {
+    if (el.multiple) {
+      const wanted = new Set(Array.isArray(value) ? value.map(String) : []);
+      for (const o of Array.from(el.options)) o.selected = wanted.has(o.value);
+    } else {
+      nativeSet(el, "value", String(value));
+    }
+    notify(el);
+    return;
+  }
+  const type = el instanceof HTMLInputElement ? el.type : "text";
+  if (type === "checkbox") {
+    const on = Array.isArray(value) ? value.map(String).includes(el.value) : value === true;
+    if ((el as HTMLInputElement).checked !== on) el.click();
+  } else if (type === "radio") {
+    if (String(value) === el.value && !(el as HTMLInputElement).checked) el.click();
+  } else {
+    nativeSet(el, "value", String(value));
+    notify(el);
+  }
+}
+
+/**
+ * Writes only to agentFields(form), recomputed after every write so a field revealed by an
+ * earlier write (a "company" box behind a checkbox) is filled too. A name that had no field
+ * when the input was validated is validated against its field's schema when it appears.
+ * Returns errors for invalid revealed values and for names whose field never appeared.
+ */
+function fill(form: HTMLFormElement, values: Record<string, unknown>): Errors {
+  const known = new Set(agentFields(form).keys());
+  const used = new Set<string>();
+  const done = new Set<Element>();
+  for (;;) {
+    let next: [string, Field] | undefined;
+    for (const [name, els] of agentFields(form)) {
+      const el = hasOwn(values, name) && values[name] !== undefined ? els.find((e) => !done.has(e)) : undefined;
+      if (el) {
+        next = [name, el];
+        break;
       }
     }
+    if (!next) break;
+    const [name, el] = next;
+    if (!known.has(name) && !used.has(name)) {
+      const field = { type: "object", properties: { [name]: schemaFromForm(form).properties![name]! } } as const;
+      const checked = validateInput(field, { [name]: values[name] });
+      if (!checked.ok) return checked.errors;
+    }
+    used.add(name);
+    done.add(el);
+    write(el, values[name]);
   }
+  return Object.keys(values)
+    .filter((k) => values[k] !== undefined && !used.has(k))
+    .map((field) => ({ field, message: known.has(field) ? "is no longer available" : "is not an allowed field" }));
 }
 
 function settle(ms: number, signal?: AbortSignal): Promise<boolean> {
@@ -61,16 +90,6 @@ function settle(ms: number, signal?: AbortSignal): Promise<boolean> {
   });
 }
 
-function submit(form: HTMLFormElement): void {
-  if (typeof form.requestSubmit === "function") {
-    form.requestSubmit();
-    return;
-  }
-  const ev = new Event("submit", { bubbles: true, cancelable: true });
-  form.dispatchEvent(ev);
-  if (!ev.defaultPrevented) form.submit();
-}
-
 export interface FormActionOptions {
   settleMs?: number;
   signal?: AbortSignal;
@@ -82,20 +101,57 @@ export async function runFormAction(
   input: unknown,
   opts: FormActionOptions = {},
 ): Promise<AgentActionResult> {
-  const checked = validateInput(schemaFromForm(form), input);
+  const checked = validateFormInput(schemaFromForm(form), input);
   if (!checked.ok) return { status: "invalid", errors: checked.errors };
   return submitFormAction(form, checked.value, opts);
 }
 
-/** Fills and submits already-validated input (the caller ran validateInput(schemaFromForm(form))). */
+type Submitter = HTMLButtonElement | HTMLInputElement;
+
+/** The form's default button: its first submit or image button in tree order, `form=` owners included. */
+function defaultButton(form: HTMLFormElement): Submitter | null {
+  const root = form.getRootNode() as ParentNode;
+  const scope = typeof root.querySelectorAll === "function" ? root : form;
+  for (const el of Array.from(scope.querySelectorAll<Submitter>("button, input"))) {
+    if (el.form === form && /^(submit|image)$/.test(el.type)) return el;
+  }
+  return null;
+}
+
+/** A field element, or a RadioNodeList of same-named elements (which always holds one). */
+const isNamedField = (n: Element | RadioNodeList | null): boolean =>
+  !!n && (!(n instanceof Element) || /^(INPUT|SELECT|TEXTAREA)$/.test(n.tagName));
+
+/**
+ * Why the form action cannot run now, or null. Checked before any confirm dialog and again before
+ * filling: a hidden or inert form or default button, a disabled default button or fieldset, and
+ * keys that name no element of the form at all (so a partial fill only happens when a real field
+ * stays concealed).
+ */
+export function checkFormAction(form: HTMLFormElement, value: Record<string, unknown>): AgentActionResult | null {
+  const button = defaultButton(form);
+  if (isConcealed(form) || (button && isConcealed(button))) return { status: "error", message: "form is hidden or inert" };
+  if (inDisabledFieldset(form) || (button && isDisabled(button))) {
+    return { status: "error", message: "form submit is disabled" };
+  }
+  const errors = Object.keys(value)
+    .filter((k) => value[k] !== undefined && !isNamedField(form.elements.namedItem(k)))
+    .map((field) => ({ field, message: "is not an allowed field" }));
+  return errors.length ? { status: "invalid", errors } : null;
+}
+
+/** Fills and submits already-validated input (the caller ran validateFormInput(schemaFromForm(form))). */
 export async function submitFormAction(
   form: HTMLFormElement,
   value: Record<string, unknown>,
   opts: FormActionOptions = {},
 ): Promise<AgentActionResult> {
   if (opts.signal?.aborted) return { status: "error", message: "aborted" };
+  const blocked = checkFormAction(form, value);
+  if (blocked) return blocked;
 
-  fill(form, value);
+  const fillErrors = fill(form, value);
+  if (fillErrors.length) return { status: "invalid", errors: fillErrors };
 
   if (!form.checkValidity()) {
     const errors = Array.from(form.elements)
@@ -104,7 +160,8 @@ export async function submitFormAction(
     return { status: "invalid", errors };
   }
 
-  submit(form);
+  // Through the default button, so its name/value, formaction and formmethod apply.
+  form.requestSubmit(defaultButton(form) ?? undefined);
 
   if (!(await settle(opts.settleMs ?? 300, opts.signal))) return { status: "error", message: "aborted" };
 

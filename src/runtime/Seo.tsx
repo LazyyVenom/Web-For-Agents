@@ -172,9 +172,11 @@ export function useSeo(props: SeoProps): void {
   }, []);
 
   useIsoLayoutEffect(() => {
-    if (entryRef.current) {
-      entryRef.current.props = props;
-      entryRef.current.defaults = defaults;
+    const entry = entryRef.current;
+    // On mount (and StrictMode or Activity remounts) the entry already holds these props: no second flush.
+    if (entry && (entry.props !== props || entry.defaults !== defaults)) {
+      entry.props = props;
+      entry.defaults = defaults;
       flush(document);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

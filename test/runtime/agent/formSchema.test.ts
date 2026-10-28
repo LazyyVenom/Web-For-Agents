@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { EMPTY_OBJECT_SCHEMA, agentFields, schemaFromForm, validateInput } from "../../../src/runtime/agent/formSchema";
 
 function form(html: string): HTMLFormElement {
@@ -87,6 +87,15 @@ describe("schemaFromForm", () => {
     expect(p.w!.description).toBe("W3");
     expect(p.d!.description).toBe("D4");
     expect(p.e!.description).toBe("E5");
+  });
+
+  it("uses every associated label, including one outside the form, without a document-wide label scan", () => {
+    document.body.innerHTML = `<label for="x">Outer</label><form><label for="x">Inner</label><input id="x" name="x"></form>`;
+    const scan = vi.spyOn(document, "querySelectorAll");
+    const s = schemaFromForm(document.querySelector("form")!);
+    expect(s.properties!.x!.description).toBe("Outer Inner");
+    expect(scan.mock.calls.filter(([sel]) => sel === "label")).toEqual([]);
+    scan.mockRestore();
   });
 });
 
@@ -208,6 +217,74 @@ describe("agentFields", () => {
       <select name="s" id="s"><option>x</option></select>`);
     const ids = Object.fromEntries(Array.from(agentFields(f), ([k, els]) => [k, els.map((e) => e.id)]));
     expect(ids).toEqual({ q: ["q1"], r: ["r1", "r2"], t: ["t"], s: ["s"] });
+  });
+});
+
+describe("regex input cap", () => {
+  it("rejects over-long input before running an author pattern (bounds polynomial backtracking)", () => {
+    const schema = { type: "object", properties: { p: { type: "string", pattern: "^a*a*b$" } } } as const;
+    const start = Date.now();
+    const r = validateInput(schema, { p: "a".repeat(1_000_000) });
+    expect(Date.now() - start).toBeLessThan(100);
+    expect(r).toEqual({ ok: false, errors: [{ field: "p", message: "must be at most 10000 characters to be checked" }] });
+    expect(validateInput(schema, { p: "a".repeat(9_999) + "b" }).ok).toBe(true);
+  });
+});
+
+describe("concealed fields", () => {
+  it("excludes fields concealed by markup: hidden, inert, aria-hidden, closed dialog, closed details", () => {
+    const f = form(`
+      <input name="ok">
+      <input name="h" hidden>
+      <div hidden><input name="hp"></div>
+      <div inert><input name="inert"></div>
+      <div aria-hidden="true"><textarea name="aria"></textarea></div>
+      <div aria-hidden="false"><input name="shown"></div>
+      <dialog><input name="dlg"></dialog>
+      <dialog open><input name="dlgOpen"></dialog>
+      <details><summary><input name="sum"></summary><div><input name="det"></div></details>
+      <details open><summary>s</summary><input name="detOpen"></details>
+      <input name="styled" style="display:none">`);
+    const visible = ["ok", "shown", "dlgOpen", "sum", "detOpen", "styled"];
+    expect(Object.keys(schemaFromForm(f).properties!)).toEqual(visible);
+    expect([...agentFields(f).keys()]).toEqual(visible);
+  });
+
+  it("keeps a hidden checkbox or radio reachable through a visible, enabled label", () => {
+    const f = form(`
+      <input type="checkbox" name="terms" id="t" hidden><label for="t">I agree</label>
+      <label><input type="radio" name="plan" value="pro" hidden> Pro</label>
+      <input type="checkbox" name="peer" id="p" class="peer hidden"><label for="p">Peer</label>
+      <input type="checkbox" name="noLabel" hidden>
+      <input type="checkbox" name="hiddenLabel" id="hl" hidden><label for="hl" hidden>x</label>
+      <input type="checkbox" name="ariaToo" id="a" hidden aria-hidden="true"><label for="a">a</label>
+      <input type="checkbox" name="ariaOnly" id="ao" aria-hidden="true"><label for="ao">ao</label>
+      <input type="checkbox" name="inertToo" id="it" hidden inert><label for="it">it</label>
+      <div hidden><input type="checkbox" name="inHidden" id="ih"></div><label for="ih">ih</label>
+      <input type="text" name="text" id="tx" hidden><label for="tx">tx</label>`);
+    expect(Object.keys(schemaFromForm(f).properties!)).toEqual(["terms", "plan", "peer"]);
+  });
+
+  it("exempts the first legend of a disabled fieldset", () => {
+    const f = form(`<fieldset disabled>
+      <legend><input name="first"></legend>
+      <legend><input name="second"></legend>
+      <input name="body">
+    </fieldset>`);
+    expect(Object.keys(schemaFromForm(f).properties!)).toEqual(["first"]);
+  });
+
+  it("excludes options in a disabled optgroup and hidden options from the enum", () => {
+    const s = schemaFromForm(
+      form(`<select name="s">
+        <option value="a">A</option>
+        <optgroup label="g" disabled><option value="b">B</option></optgroup>
+        <optgroup label="h"><option value="c">C</option></optgroup>
+        <option value="d" hidden>D</option>
+      </select>`),
+    );
+    expect(s.properties!.s!.enum).toEqual(["a", "c"]);
+    expect(validateInput(s, { s: "b" }).ok).toBe(false);
   });
 });
 
