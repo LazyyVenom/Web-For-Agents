@@ -1,4 +1,6 @@
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -140,6 +142,52 @@ describe("preloaded classic scripts", { timeout: 60_000 }, () => {
       expect(warnings[0]).toContain("too large to preload");
     } finally {
       await server.close();
+    }
+  });
+
+  it("warns once per oversized script", async () => {
+    const shell = prepareShell(bigShell("/classic.js") + '<script src="/classic.js#again"></script><script src="/classic.js"></script>', { relativeBase: false });
+    const server = await startStaticServer({ dir: staticApp, base: "/", shell });
+    try {
+      const { warnings } = await loadClassicScripts(server.origin + "/", { script: 10, total: 10 });
+      expect(warnings).toHaveLength(1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("gives up on a prefetch that does not answer within the timeout, with one warning", async () => {
+    const hanging = createServer(() => {});
+    await new Promise<void>((res) => hanging.listen(0, "127.0.0.1", res));
+    try {
+      const t = Date.now();
+      const { resources, warnings } = await loadClassicScripts(
+        `http://127.0.0.1:${(hanging.address() as AddressInfo).port}/`,
+        undefined,
+        300,
+      );
+      expect(Date.now() - t).toBeLessThan(2000);
+      expect(resources).toEqual({});
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("the classic scripts in index.html were not preloaded");
+      expect(warnings[0]).toContain("within 300ms");
+    } finally {
+      hanging.closeAllConnections();
+      await new Promise((res) => hanging.close(res));
+    }
+  });
+
+  it.skipIf(!permission)("keeps the preload warnings in the error when renders fail", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "wfa-huge-"));
+    cpSync(staticApp, dir, { recursive: true });
+    writeFileSync(path.join(dir, "huge.js"), `/*${"x".repeat(5 * 1024 * 1024)}*/`);
+    try {
+      const err = (await prerender(bigShell("/huge.js"), ["/"], "/", dir).catch((e: unknown) => e)) as Error;
+      expect(err.message).toContain("prerender failed for 1 route(s)");
+      expect(err.message).toContain("the classic script /huge.js");
+      expect(err.message).toContain("too large to preload");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 

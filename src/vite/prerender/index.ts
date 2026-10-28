@@ -6,6 +6,7 @@ import { PrerenderInterruptedError, crawlRoutes, formatFailures, type CrawlResul
 import { assertExtensionNames, inPageExpression, type PrerenderExtension } from "./extensions";
 import { mountPath } from "../../shared/url";
 import { parseHtml } from "./dom";
+import { createDeadline, errorMessage } from "./renderCore";
 import { isFullUrlBase, isRelativeBase, publicMdUrl } from "./paths";
 import { prepareShell } from "./probe";
 import { RenderError, createRendererPool, type InPageScripts } from "./renderers";
@@ -52,7 +53,7 @@ export async function prerenderSite(input: {
   });
   try {
     const prefetched = mayUseHappyDom(pr)
-      ? await loadClassicScripts(server.origin + mountPath(mount) + "/")
+      ? await loadClassicScripts(server.origin + mountPath(mount) + "/", undefined, pr.timeoutMs)
       : { resources: {}, warnings: [] };
     const syncResources = prefetched.resources;
     const pool = createRendererPool({
@@ -88,7 +89,11 @@ export async function prerenderSite(input: {
         if (e instanceof RenderError && e.interrupted) throw new PrerenderInterruptedError(e.message);
         throw e;
       });
-      if (result.failures.length > 0) throw new Error(formatFailures(result.failures, pr.fallback));
+      if (result.failures.length > 0) {
+        // The preload warnings often explain the failures, so they go with them.
+        const notes = prefetched.warnings.map((w) => `${LOG_PREFIX} ${w}`).join("\n");
+        throw new Error(formatFailures(result.failures, pr.fallback) + (notes ? "\n" + notes : ""));
+      }
       return prefetched.warnings.length > 0 ? { ...result, warnings: prefetched.warnings } : result;
     } finally {
       await pool.closeAll();
@@ -129,32 +134,51 @@ export const MAX_PREFETCH_TOTAL_BYTES = 10 * 1024 * 1024;
 export async function loadClassicScripts(
   base: string,
   caps = { script: MAX_PREFETCH_SCRIPT_BYTES, total: MAX_PREFETCH_TOTAL_BYTES },
+  timeoutMs = 15_000,
 ): Promise<{ resources: Record<string, { body: string; contentType: string }>; warnings: string[] }> {
   const origin = new URL(base).origin;
   const resources: Record<string, { body: string; contentType: string }> = {};
   const warnings: string[] = [];
-  let shell: string;
+  const deadline = createDeadline(timeoutMs);
+  const abort = new AbortController();
+  const get = async (url: string | URL) => {
+    const res = await deadline.race(fetch(url, { signal: abort.signal }), `no answer within ${timeoutMs}ms`);
+    return { res, text: await deadline.race(res.text(), `no answer within ${timeoutMs}ms`) };
+  };
   try {
-    shell = await (await fetch(base)).text();
-  } catch {
-    return { resources, warnings };
-  }
-  let total = 0;
-  for (const src of classicScriptSrcs(shell)) {
-    let url: URL;
+    let shell: string;
     try {
-      url = new URL(src, base);
-    } catch {
-      continue;
+      shell = (await get(base)).text;
+    } catch (e) {
+      warnings.push(
+        `the classic scripts in index.html were not preloaded for happy-dom (${errorMessage(e)}); ` +
+          `pages that load them synchronously may fail`,
+      );
+      return { resources, warnings };
     }
-    if (url.origin !== origin) continue;
-    url.hash = "";
-    if (resources[url.href]) continue;
-    try {
-      const res = await fetch(url);
-      if (!res.ok) continue;
-      const body = await res.text();
-      const size = Buffer.byteLength(body);
+    let total = 0;
+    const seen = new Set<string>();
+    for (const src of classicScriptSrcs(shell)) {
+      let url: URL;
+      try {
+        url = new URL(src, base);
+      } catch {
+        continue;
+      }
+      if (url.origin !== origin) continue;
+      url.hash = "";
+      if (seen.has(url.href)) continue;
+      seen.add(url.href);
+      let got: Awaited<ReturnType<typeof get>>;
+      try {
+        got = await get(url);
+      } catch (e) {
+        warnings.push(`the classic script ${url.pathname} was not preloaded for happy-dom (${errorMessage(e)})`);
+        if (deadline.remaining() === 0) break;
+        continue;
+      }
+      if (!got.res.ok) continue;
+      const size = Buffer.byteLength(got.text);
       if (size > caps.script || total + size > caps.total) {
         warnings.push(
           `the classic script ${url.pathname} (${Math.ceil(size / 1024)} KiB) is too large to preload for happy-dom ` +
@@ -164,10 +188,10 @@ export async function loadClassicScripts(
         continue;
       }
       total += size;
-      resources[url.href] = { body, contentType: res.headers.get("content-type") ?? "text/javascript" };
-    } catch {
-      // left to the renderer, which then explains the failed load
+      resources[url.href] = { body: got.text, contentType: got.res.headers.get("content-type") ?? "text/javascript" };
     }
+    return { resources, warnings };
+  } finally {
+    abort.abort();
   }
-  return { resources, warnings };
 }
