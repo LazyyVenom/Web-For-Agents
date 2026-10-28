@@ -1,8 +1,17 @@
 // @vitest-environment happy-dom
 import React, { StrictMode } from "react";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, cleanup } from "@testing-library/react";
 import { Seo, SeoProvider, useSeo } from "../../src/runtime/Seo";
+import * as headManager from "../../src/runtime/headManager";
+
+vi.mock("../../src/runtime/headManager", async (importOriginal) => {
+  const m = await importOriginal<typeof import("../../src/runtime/headManager")>();
+  return { ...m, applyHeadTags: vi.fn(m.applyHeadTags) };
+});
+
+/** applyHeadTags runs once per flush. */
+const flushes = vi.mocked(headManager.applyHeadTags);
 
 const meta = (sel: string) => document.head.querySelector(sel)?.getAttribute("content");
 
@@ -104,6 +113,45 @@ describe("Seo", () => {
     expect(document.title).toBe("Strict");
     expect(document.head.querySelectorAll('meta[property="og:title"]')).toHaveLength(1);
     expect(document.querySelectorAll("title")).toHaveLength(1);
+  });
+
+  it("mounting a provider and a Seo flushes twice, and a prop change once more", () => {
+    flushes.mockClear();
+    const { rerender } = render(
+      <SeoProvider defaults={{ siteName: "Acme" }}>
+        <Seo title="A" />
+      </SeoProvider>,
+    );
+    expect(flushes).toHaveBeenCalledTimes(2);
+    expect(document.title).toBe("A");
+    rerender(
+      <SeoProvider defaults={{ siteName: "Acme" }}>
+        <Seo title="A" />
+      </SeoProvider>,
+    );
+    expect(flushes).toHaveBeenCalledTimes(2);
+    rerender(
+      <SeoProvider defaults={{ siteName: "Acme" }}>
+        <Seo title="B" />
+      </SeoProvider>,
+    );
+    expect(flushes).toHaveBeenCalledTimes(3);
+    expect(document.title).toBe("B");
+  });
+
+  it("StrictMode remount keeps the latest props", () => {
+    const { rerender } = render(
+      <StrictMode>
+        <Seo title="One" />
+      </StrictMode>,
+    );
+    rerender(
+      <StrictMode>
+        <Seo title="Two" />
+      </StrictMode>,
+    );
+    expect(document.title).toBe("Two");
+    expect(document.head.querySelectorAll('meta[property="og:title"]')).toHaveLength(1);
   });
 
   it("nested Seo: child wins on first mount and after swap; unmount restores parent", () => {
