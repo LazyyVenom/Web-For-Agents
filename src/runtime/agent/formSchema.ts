@@ -161,6 +161,9 @@ export function schemaFromForm(form: HTMLFormElement): JsonSchema {
 
 const hasOwn = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
 
+/** Longest string run through a pattern or format regex: bounds catastrophic backtracking in author patterns. */
+const MAX_REGEX_INPUT = 10_000;
+
 type Errors = Array<{ field: string; message: string }>;
 
 function checkValue(s: JsonSchema, v: unknown, field: string, errors: Errors): void {
@@ -194,6 +197,9 @@ function checkValue(s: JsonSchema, v: unknown, field: string, errors: Errors): v
   if (typeof v === "string") {
     if (s.minLength !== undefined && v.length < s.minLength) bad(`must be at least ${s.minLength} characters`);
     if (s.maxLength !== undefined && v.length > s.maxLength) bad(`must be at most ${s.maxLength} characters`);
+    if ((s.pattern !== undefined || s.format === "email") && v.length > MAX_REGEX_INPUT) {
+      return bad(`must be at most ${MAX_REGEX_INPUT} characters to be checked`);
+    }
     if (s.pattern !== undefined) {
       let ok = false;
       try {
