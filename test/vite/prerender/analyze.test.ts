@@ -67,5 +67,8 @@ describe("analyzePage", () => {
     expect(run(page(`<div id="root"></div><script>x</script>`)).hasText).toBe(false);
     expect(run(page(`<noscript>enable js</noscript><template>t</template>`)).hasText).toBe(false);
     expect(run(page(`<p>hi</p>`)).hasText).toBe(true);
+    expect(run(page(`<div> \n\t<span>&nbsp;</span><!-- comment --></div>`)).hasText).toBe(false);
+    expect(run(page(`<script>x</script><div><style>s</style><p><b>deep</b></p></div>`)).hasText).toBe(true);
+    expect(run(page(`<noscript><p>inside</p></noscript>tail`)).hasText).toBe(true);
   });
 });

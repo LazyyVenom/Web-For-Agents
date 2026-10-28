@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { finalizeHtml } from "../../../src/vite/prerender/finalize";
+import { analyzePage } from "../../../src/vite/prerender/analyze";
+import { finalizeHtml, finalizePage } from "../../../src/vite/prerender/finalize";
 import { parseHtml } from "../../../src/vite/prerender/dom";
 
 const base = (head: string, body = "<div id=root></div>") =>
@@ -153,5 +154,22 @@ describe("finalizeHtml", () => {
       const out = finalizeHtml(leaked("/"), { route: "/a", relativeBase: false });
       expect(out).toContain(`href="${origin}/assets/Post.js"`);
     });
+  });
+});
+
+describe("finalizePage", () => {
+  const pages = [
+    base(`<title>T</title><script data-wfa-probe>x</script>`, `<header>h</header><main><h1>Hi</h1><a href="/a">a</a></main>`),
+    base(`<meta name="description" content="d">`, `<div data-wfa-content>One</div><p>x</p><div data-wfa-content>Two <a href="b">b</a></div>`),
+    base(`<meta name="robots" content="noindex">`, `<nav><a href="/n">n</a></nav><p>body only</p><script>s</script>`),
+    base("", `<div id="root"></div>`),
+  ];
+  it.each(pages.map((p, i) => [i, p] as const))("matches finalizeHtml then analyzePage (page %i)", (_i, html) => {
+    const fOpts = { route: "/x/y", relativeBase: true, origin: "http://127.0.0.1:9", markdownUrl: "https://s/x/y.md" };
+    const aOpts = { pageUrl: "http://127.0.0.1:9/x/y", contentSelector: "main", route: "/x/y" };
+    const expected = finalizeHtml(html, fOpts);
+    const got = finalizePage(html, fOpts, aOpts);
+    expect(got.html).toBe(expected);
+    expect(got.info).toEqual(analyzePage(expected, aOpts));
   });
 });

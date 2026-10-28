@@ -1,8 +1,8 @@
 import { normalizeRoute } from "../../shared/conventions";
 import { errorMessage, LOG_PREFIX } from "../../shared/errors";
 import { isExcluded, type RendererName } from "../options";
-import { analyzePage, type PageInfo } from "./analyze";
-import { finalizeHtml } from "./finalize";
+import type { PageInfo } from "./analyze";
+import { finalizePage } from "./finalize";
 import { mountPath } from "../../shared/url";
 import { byRoute, isRouteTooLong, isSafeRoute, linkToRoute } from "./paths";
 import type { InPageScripts, RenderResult } from "./renderCore";
@@ -104,14 +104,17 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
     const url = opts.origin + mount + route;
     const result = await render(url, renderer, opts.timeoutMs, opts.inPage);
     const markdownUrl = opts.markdownUrl?.(route);
-    const html = finalizeHtml(result.html, {
-      route,
-      relativeBase: opts.relativeBase,
-      origin: opts.origin,
-      ...(opts.fullBase !== undefined ? { fullBase: opts.fullBase } : {}),
-      ...(markdownUrl !== undefined ? { markdownUrl } : {}),
-    });
-    const info = analyzePage(html, { pageUrl: url, contentSelector: opts.contentSelector, route });
+    const { html, info } = finalizePage(
+      result.html,
+      {
+        route,
+        relativeBase: opts.relativeBase,
+        origin: opts.origin,
+        ...(opts.fullBase !== undefined ? { fullBase: opts.fullBase } : {}),
+        ...(markdownUrl !== undefined ? { markdownUrl } : {}),
+      },
+      { pageUrl: url, contentSelector: opts.contentSelector, route },
+    );
     if (!info.hasText) throw new Error("rendered no content");
     return { result, html, info, url };
   };

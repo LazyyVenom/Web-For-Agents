@@ -1,4 +1,5 @@
 import { PRERENDERED_ATTR, MARKDOWN_MIME } from "../../shared/conventions";
+import { analyzeDocument, type AnalyzeOptions, type PageInfo } from "./analyze";
 import { parseHtml } from "./dom";
 import { routeDepth, trimTrailingSlash } from "./paths";
 import { PROBE_ATTR, REL_SRC_ATTR, TEMP_BASE_ATTR } from "./probe";
@@ -47,62 +48,81 @@ function rewriteUrls(document: Document, fn: (url: string) => string, attrs = UR
 export function finalizeHtml(html: string, opts: FinalizeOptions): string {
   const { document, dispose } = parseHtml(html);
   try {
-    document.querySelectorAll(`[${PROBE_ATTR}], [${TEMP_BASE_ATTR}]`).forEach((el) => el.remove());
-    document.documentElement.setAttribute(PRERENDERED_ATTR, "");
-    document.querySelectorAll(`script[${REL_SRC_ATTR}]`).forEach((el) => {
-      const src = el.getAttribute("src");
-      if (src?.startsWith("/")) el.setAttribute("src", "." + src);
-      el.removeAttribute(REL_SRC_ATTR);
-    });
-
-    if (opts.origin) {
-      // The server mounts an absolute base at its path, so the URL path already carries the base;
-      // with a relative base it mounts at "/", and "./" paths are made route-relative below.
-      const origin = trimTrailingSlash(opts.origin);
-      // With a full-URL base the app's own JS may emit the base anywhere (e.g. BASE_URL links), so anchors are mapped too.
-      const attrs = opts.fullBase ? [...URL_ATTRS, ["a", "href"] as const] : URL_ATTRS;
-      rewriteUrls(document, (u) => {
-        if (!u.startsWith(origin)) return u;
-        const rest = u.slice(origin.length);
-        if (rest !== "" && !/^[/?#]/.test(rest)) return u; // another port or host
-        const path = rest.startsWith("/") ? rest : "/" + rest;
-        if (opts.fullBase) return trimTrailingSlash(opts.fullBase) + "/" + path.slice(1);
-        return opts.relativeBase ? "." + path : path;
-      }, attrs);
-    }
-
-    if (opts.relativeBase) {
-      const depth = routeDepth(opts.route);
-      if (depth > 0) {
-        const up = "../".repeat(depth);
-        rewriteUrls(document, (u) => (u.startsWith("./") ? up + u.slice(2) : u));
-      }
-    }
-
-    // Rewriting can make a runtime-inserted link identical to one from the shell.
-    const seen = new Set<string>();
-    // Only asset links are deduped; other rels (hreflang alternates, icons) legitimately repeat an href.
-    document.querySelectorAll("link[href]").forEach((el) => {
-      const rel = el.getAttribute("rel") ?? "";
-      if (!DEDUPE_RELS.has(rel)) return;
-      const key = [rel, el.getAttribute("href"), el.getAttribute("as"), el.getAttribute("media"), el.getAttribute("type")].join("\n");
-      if (seen.has(key)) el.remove();
-      else seen.add(key);
-    });
-
-    if (opts.markdownUrl) {
-      let link = document.head.querySelector(`link[rel="alternate"][type="${MARKDOWN_MIME}"]`);
-      if (!link) {
-        link = document.createElement("link");
-        link.setAttribute("rel", "alternate");
-        link.setAttribute("type", MARKDOWN_MIME);
-        document.head.appendChild(link);
-      }
-      link.setAttribute("href", opts.markdownUrl);
-    }
-
-    return "<!DOCTYPE html>" + document.documentElement.outerHTML;
+    return finalizeDocument(document, opts);
   } finally {
     dispose();
   }
+}
+
+/**
+ * finalizeHtml plus analyzePage on the finalized document, with one parse: the page is analyzed
+ * on the same document after it is serialized (the content region is then moved out of it).
+ */
+export function finalizePage(html: string, opts: FinalizeOptions, analyze: AnalyzeOptions): { html: string; info: PageInfo } {
+  const { document, dispose } = parseHtml(html);
+  try {
+    const out = finalizeDocument(document, opts);
+    return { html: out, info: analyzeDocument(document, analyze, { inPlace: true }) };
+  } finally {
+    dispose();
+  }
+}
+
+/** Applies finalizeHtml's changes to `document` and returns its serialization. */
+function finalizeDocument(document: Document, opts: FinalizeOptions): string {
+  document.querySelectorAll(`[${PROBE_ATTR}], [${TEMP_BASE_ATTR}]`).forEach((el) => el.remove());
+  document.documentElement.setAttribute(PRERENDERED_ATTR, "");
+  document.querySelectorAll(`script[${REL_SRC_ATTR}]`).forEach((el) => {
+    const src = el.getAttribute("src");
+    if (src?.startsWith("/")) el.setAttribute("src", "." + src);
+    el.removeAttribute(REL_SRC_ATTR);
+  });
+
+  if (opts.origin) {
+    // The server mounts an absolute base at its path, so the URL path already carries the base;
+    // with a relative base it mounts at "/", and "./" paths are made route-relative below.
+    const origin = trimTrailingSlash(opts.origin);
+    // With a full-URL base the app's own JS may emit the base anywhere (e.g. BASE_URL links), so anchors are mapped too.
+    const attrs = opts.fullBase ? [...URL_ATTRS, ["a", "href"] as const] : URL_ATTRS;
+    rewriteUrls(document, (u) => {
+      if (!u.startsWith(origin)) return u;
+      const rest = u.slice(origin.length);
+      if (rest !== "" && !/^[/?#]/.test(rest)) return u; // another port or host
+      const path = rest.startsWith("/") ? rest : "/" + rest;
+      if (opts.fullBase) return trimTrailingSlash(opts.fullBase) + "/" + path.slice(1);
+      return opts.relativeBase ? "." + path : path;
+    }, attrs);
+  }
+
+  if (opts.relativeBase) {
+    const depth = routeDepth(opts.route);
+    if (depth > 0) {
+      const up = "../".repeat(depth);
+      rewriteUrls(document, (u) => (u.startsWith("./") ? up + u.slice(2) : u));
+    }
+  }
+
+  // Rewriting can make a runtime-inserted link identical to one from the shell.
+  const seen = new Set<string>();
+  // Only asset links are deduped; other rels (hreflang alternates, icons) legitimately repeat an href.
+  document.querySelectorAll("link[href]").forEach((el) => {
+    const rel = el.getAttribute("rel") ?? "";
+    if (!DEDUPE_RELS.has(rel)) return;
+    const key = [rel, el.getAttribute("href"), el.getAttribute("as"), el.getAttribute("media"), el.getAttribute("type")].join("\n");
+    if (seen.has(key)) el.remove();
+    else seen.add(key);
+  });
+
+  if (opts.markdownUrl) {
+    let link = document.head.querySelector(`link[rel="alternate"][type="${MARKDOWN_MIME}"]`);
+    if (!link) {
+      link = document.createElement("link");
+      link.setAttribute("rel", "alternate");
+      link.setAttribute("type", MARKDOWN_MIME);
+      document.head.appendChild(link);
+    }
+    link.setAttribute("href", opts.markdownUrl);
+  }
+
+  return "<!DOCTYPE html>" + document.documentElement.outerHTML;
 }
