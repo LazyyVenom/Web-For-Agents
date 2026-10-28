@@ -2,8 +2,9 @@ import { AGENT_MAP_VERSION, type AgentMap } from "../shared/agent";
 import { AI_BOTS } from "../shared/bots";
 import { AGENT_MAP_PATH, LLMS_TXT_PATH, MARKDOWN_MIME, ROBOTS_PATH, SITEMAP_PATH } from "../shared/conventions";
 import { errorMessage } from "../shared/errors";
-import { jsonLdTypes } from "../shared/jsonLd";
+import { jsonLdNodes, jsonLdTypes } from "../shared/jsonLd";
 import { DESCRIPTION_MAX_CHARS, DESCRIPTION_MIN_CHARS, TITLE_MAX_CHARS } from "../shared/metaLength";
+import { checkSchemaNodes, SCHEMA_RULES } from "../shared/schemaRules";
 import { stripBom } from "../shared/text";
 import { hasScheme, trimTrailingSlash, tryResolveUrl } from "../shared/url";
 import { isOk, looksLikeHtml, MAX_BODY_BYTES, type FetchResult } from "./fetch";
@@ -66,6 +67,8 @@ export const CHECK_WEIGHTS: Record<CheckId, number> = {
 
 const CONTENT_MIN_CHARS = 200;
 const CONTENT_WARN_CHARS = 50;
+/** Missing structured data fields listed in the JSON-LD message; the rest are counted. */
+const SCHEMA_ISSUES_SHOWN = 3;
 const MAX_BODY_LABEL = `${MAX_BODY_BYTES / (1024 * 1024)} MiB`;
 
 type Outcome = Omit<CheckResult, "id" | "title" | "weight" | "points">;
@@ -210,6 +213,17 @@ function checkJsonLd({ html }: AuditInputs): Outcome {
   }
   if (!parsed.some((p) => jsonLdTypes(p).length > 0)) {
     return warn("JSON-LD parses but has no @type", "Add an @type (for example Organization) to your JSON-LD.");
+  }
+  const { issues, total } = checkSchemaNodes(parsed.flatMap(jsonLdNodes), SCHEMA_ISSUES_SHOWN);
+  if (total > 0) {
+    const shown = issues.map((i) => `${i.type} ${i.path}`).join("; ");
+    const more = total > issues.length ? `; +${total - issues.length} more` : "";
+    const rules = [...new Set(issues.map((i) => SCHEMA_RULES[i.type]!))];
+    const notes = rules.flatMap((r) => (r.note !== undefined ? [` ${r.note}`] : [])).join("");
+    return warn(
+      `Missing required structured data fields: ${shown}${more}`,
+      `Add the missing properties; Google requires them for rich results (${rules.map((r) => r.docs).join(", ")}).${notes}`,
+    );
   }
   return pass(`${parsed.length} JSON-LD block${parsed.length === 1 ? " parses" : "s parse"} with an @type`);
 }

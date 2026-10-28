@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { jsonLdTypes } from "../../src/shared/jsonLd";
+import { jsonLdNodes, jsonLdTypes } from "../../src/shared/jsonLd";
 
 describe("jsonLdTypes", () => {
   it("collects string @type values", () => {
@@ -39,5 +39,14 @@ describe("jsonLdTypes", () => {
     let huge: unknown = { "@type": "Lost" };
     for (let i = 0; i < 150_000; i++) huge = [huge];
     expect(jsonLdTypes(huge)).toEqual([]);
+  });
+});
+
+describe("jsonLdNodes", () => {
+  it("returns top-level, array and @graph objects in document order, not property values", () => {
+    const a = { "@type": "A", author: { "@type": "Person" } };
+    const c = { name: "untyped" };
+    const b = { "@graph": [c] };
+    expect(jsonLdNodes([a, b, "x", null, 1])).toEqual([a, b, c]);
   });
 });

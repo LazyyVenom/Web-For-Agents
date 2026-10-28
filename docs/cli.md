@@ -38,6 +38,23 @@ Checks and weights (total 100):
 
 The title check warns above 60 characters, and the meta description check warns outside 50 to 160 characters. The build and `generate` use the same limits for their warnings.
 
+The JSON-LD check fails when there is no JSON-LD or none of it parses. It warns when a block does not parse, when nothing has an `@type`, or when a node is missing a property that Google requires for that type's rich result. Every node is checked: top-level nodes, array members and `@graph` members. `{"@id": ...}` references to another node in the page are followed. The message lists the first three missing properties with their paths, such as `FAQPage mainEntity[0].acceptedAnswer.text`, followed by `+N more`. Where Google accepts alternatives, they are shown as `aggregateRating (or review)`.
+
+| Type | Required |
+| --- | --- |
+| `BreadcrumbList` | `itemListElement`; each item has `position`, `name` (not needed when `item` is an object) and `item` (not needed on the last item) |
+| `Event` | `name`, `startDate`, `location`; `location.address` when the location is a `Place` |
+| `FAQPage` | `mainEntity`; each question has `name` and `acceptedAnswer`; each answer has `text` |
+| `Product` | `name`; one of `offers`, `aggregateRating` or `review`; an `Offer` has `price` (or `priceSpecification.price`); an `AggregateOffer` has `lowPrice` and `priceCurrency` |
+| `ProfilePage` | `mainEntity`, which has `name` (or `alternateName`) |
+| `Recipe` | `name`, `image` |
+| `SoftwareApplication`, `MobileApplication`, `WebApplication` | `name`, `offers` with `price` (`0` for free apps), and `aggregateRating` or `review` |
+| `WebSite` | `name`, `url` |
+
+`Article`, `NewsArticle`, `BlogPosting`, `Organization` and `Person` have no required properties, so they are never flagged. Other types are not checked. Google stopped showing FAQ rich results on 7 May 2026. It still reads `FAQPage` markup, so the check still uses Google's last documented FAQ requirements.
+
+The rules, with Google's recommended properties and a documentation link per type, live as plain data in `SCHEMA_RULES` in `src/shared/schemaRules.ts` (internal, not a package export).
+
 A passing check earns its full weight, a warning half, a failure none. Each non-passing check prints a `Fix:` line.
 
 Exit codes: `0` ok, `1` score below `--min-score`, `2` usage error or fatal error (unreachable page, non-2xx status, not HTML, timeout).
