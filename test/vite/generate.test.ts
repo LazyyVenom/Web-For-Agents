@@ -131,14 +131,17 @@ describe("generateAgentFiles", () => {
     expect(t.read("robots.txt")).toContain("Sitemap:");
   });
 
-  it("keeps an existing markdown link and honours linkMarkdown: false", async () => {
+  it("updates an existing markdown link in place and honours linkMarkdown: false", async () => {
     const own = page("About", "<p>x</p>", '<link rel="alternate" type="text/markdown" href="/mine.md">\n');
     const t = setup({ "index.html": SITE["index.html"]!, "about.html": own });
     await t.run({ linkMarkdown: false });
     expect(t.read("index.html")).toBe(SITE["index.html"]);
-    await t.run();
     expect(t.read("about.html")).toBe(own);
+    await t.run();
+    expect(t.read("about.html")).toBe(own.replace('href="/mine.md"', 'href="https://me.dev/about.md"'));
     expect(t.read("index.html")).toContain("https://me.dev/index.md");
+    const r = await t.run();
+    expect(r.written).not.toContain("about.html");
   });
 
   it("applies markdown.transform and names the route on errors, writing nothing", async () => {

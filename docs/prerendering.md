@@ -178,7 +178,7 @@ await generateAgentFiles({
 
 It takes the same `siteUrl`, `robots`, `exclude`, `sitemap`, `markdown` (including `transform`), `llms` and `agentMap` options as the plugin, plus:
 
-- `linkMarkdown` (default `true`) adds `<link rel="alternate" type="text/markdown">` to each page's `<head>`. A page that already has one is left alone, so running `generate` twice adds the link only once.
+- `linkMarkdown` (default `true`) adds `<link rel="alternate" type="text/markdown">` to each page's `<head>`. It goes just before the real `</head>`: a `</head>` inside a comment, a `<script>` or `<style>` body or an attribute value is skipped. Without a `</head>` it goes after the `<head>` tag, else before `<body>`, else at the top. If the head already has a markdown link, only its `href` is updated, so running `generate` twice adds the link only once.
 - `overwrite` (default `false`) replaces an existing `robots.txt`, `sitemap.xml`, `llms.txt`, `llms-full.txt` or agent map whose content differs. Without it, such a file (for example your own `public/robots.txt`, copied into `dist`) is kept and a warning is logged.
 
 How pages are found: every `.html` file in `outDir` is a page. `index.html` is `/`, and both `about.html` and `about/index.html` are `/about`, so flat, directory and mixed layouts all work. If both exist, the first one in sorted order is used and a warning names both. File names become URLs the way a browser writes them: `c++.html` is `/c++`, `a b.html` is `/a%20b`.
@@ -196,7 +196,7 @@ These are skipped:
 
 Pages with `<meta name="robots" content="noindex">` get a `.md` file but stay out of `llms.txt`, the sitemap and `agents.json`.
 
-Your HTML is changed only to add the markdown link. The file's encoding is detected (BOM, else `<meta charset>`, else UTF-8) and every other byte is left as it was, so a `windows-1252` page stays `windows-1252`. UTF-16 files are read but not changed. An existing `.md` file with different content is replaced, with a warning. Nothing is ever written through a symbolic link, so nothing lands outside `outDir`.
+Your HTML is changed only to add or update the markdown link. The file's encoding is detected (BOM, else `<meta charset>`, else UTF-8) and every other byte is left as it was, so a `windows-1252` page stays `windows-1252`. UTF-16 files are read but not changed. An existing `.md` file with different content is replaced, with a warning. Nothing is ever written through a symbolic link, so nothing lands outside `outDir`.
 
 The result lists the pages, the detected layout (`"flat"`, `"directory"` or `"mixed"`), the files written and the files kept. Nothing is written if any page fails, for example when `markdown.transform` throws.
 

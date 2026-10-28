@@ -1,4 +1,5 @@
 import { MARKDOWN_MIME, PRERENDERED_ATTR } from "../shared/conventions";
+import { scanHtml } from "../shared/htmlScan";
 
 export interface HtmlFacts {
   title: string | null;
@@ -79,19 +80,6 @@ function decode(s: string): string {
   });
 }
 
-const isSpace = (c: number): boolean => c === 32 || c === 9 || c === 10 || c === 12 || c === 13;
-const isAlpha = (c: number): boolean => (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
-
-/** Index of the first case-insensitive `</name` at or after `from`, or -1. */
-function findRawEnd(html: string, name: string, from: number): number {
-  let i = html.indexOf("</", from);
-  while (i !== -1) {
-    if (html.slice(i + 2, i + 2 + name.length).toLowerCase() === name) return i;
-    i = html.indexOf("</", i + 2);
-  }
-  return -1;
-}
-
 export function extractHtmlFacts(html: string): HtmlFacts {
   const metas: Array<Record<string, string>> = [];
   const links: Array<Record<string, string>> = [];
@@ -102,92 +90,31 @@ export function extractHtmlFacts(html: string): HtmlFacts {
   let prerendered = false;
   const depth: Record<string, number> = {};
   let excluded = 0;
-  const n = html.length;
-  let i = 0;
+  /** End of the last token: text runs from here to the next one. */
+  let pos = 0;
+  /** Attributes of the last start tag, for the raw-text token that follows it. */
+  let lastAttrs: Record<string, string> = {};
 
-  while (i < n) {
-    const lt = html.indexOf("<", i);
-    if (lt === -1) {
-      if (excluded === 0) chunks.push(decode(html.slice(i)));
-      break;
-    }
-    if (lt > i && excluded === 0) chunks.push(decode(html.slice(i, lt)));
-    const c1 = lt + 1 < n ? html.charCodeAt(lt + 1) : 0;
-    if (c1 === 33 /* ! */ || c1 === 63 /* ? */) {
-      if (html.startsWith("<!--", lt)) {
-        const end = html.indexOf("-->", lt + 4);
-        i = end === -1 ? n : end + 3;
-      } else {
-        const end = html.indexOf(">", lt + 2);
-        i = end === -1 ? n : end + 1;
-      }
-      continue;
-    }
-    const closing = c1 === 47; /* / */
-    const nameStart = lt + (closing ? 2 : 1);
-    if (!isAlpha(nameStart < n ? html.charCodeAt(nameStart) : 0)) {
-      // Stray "<" is literal text.
-      if (excluded === 0) chunks.push("<");
-      i = lt + 1;
-      continue;
-    }
-    let p = nameStart;
-    while (p < n) {
-      const c = html.charCodeAt(p);
-      if (isSpace(c) || c === 62 || c === 47) break;
-      p++;
-    }
-    const name = html.slice(nameStart, p).toLowerCase();
-
-    // Attributes (start tags) / skip to ">" (end tags).
-    const attrs: Record<string, string> = {};
-    let selfClosing = false;
-    while (p < n) {
-      const c = html.charCodeAt(p);
-      if (isSpace(c)) {
-        p++;
-        continue;
-      }
-      if (c === 62) {
-        p++;
-        break;
-      }
-      if (c === 47) {
-        selfClosing = p + 1 < n && html.charCodeAt(p + 1) === 62;
-        p++;
-        continue;
-      }
-      const as = p;
-      while (p < n) {
-        const d = html.charCodeAt(p);
-        if (isSpace(d) || d === 62 || d === 47 || d === 61) break;
-        p++;
-      }
-      if (p === as) {
-        p++;
-        continue;
-      } // stray "=" etc.
-      const aname = html.slice(as, p).toLowerCase();
-      while (p < n && isSpace(html.charCodeAt(p))) p++;
-      let value = "";
-      if (p < n && html.charCodeAt(p) === 61) {
-        p++;
-        while (p < n && isSpace(html.charCodeAt(p))) p++;
-        const q = p < n ? html[p] : "";
-        if (q === '"' || q === "'") {
-          const end = html.indexOf(q, p + 1);
-          const stop = end === -1 ? n : end;
-          value = html.slice(p + 1, stop);
-          p = end === -1 ? n : end + 1;
-        } else {
-          const vs = p;
-          while (p < n && !isSpace(html.charCodeAt(p)) && html.charCodeAt(p) !== 62) p++;
-          value = html.slice(vs, p);
+  for (const t of scanHtml(html, RAW_TEXT)) {
+    if (t.start > pos && excluded === 0) chunks.push(decode(html.slice(pos, t.start)));
+    pos = t.end;
+    if (t.type === "comment") continue;
+    if (t.type === "raw") {
+      const raw = html.slice(t.start, t.end);
+      if (t.name === "title") {
+        if (title === null && (depth.svg ?? 0) === 0) {
+          title = decode(raw).replace(/\s+/g, " ").trim();
         }
+      } else if (t.name === "script") {
+        const type = (lastAttrs.type ?? "").split(";")[0].trim().toLowerCase();
+        if (type === "application/ld+json") jsonLd.push(raw);
       }
-      if (!(aname in attrs) && !closing) attrs[aname] = decode(value);
+      continue; // the closing tag is its own token
     }
-    i = p;
+
+    const { name, closing, selfClosing } = t;
+    const attrs: Record<string, string> = {};
+    if (!closing) for (const a of t.attrs) if (!(a.name in attrs)) attrs[a.name] = decode(a.value);
 
     if (closing) {
       if (EXCLUDED.has(name) && (depth[name] ?? 0) > 0) {
@@ -197,6 +124,7 @@ export function extractHtmlFacts(html: string): HtmlFacts {
       if (excluded === 0 && !INLINE.has(name)) chunks.push(" ");
       continue;
     }
+    lastAttrs = attrs;
 
     // </head> is optional: the first non-head element ends an unclosed head.
     if ((depth.head ?? 0) > 0 && excluded === depth.head && !HEAD_OK.has(name)) {
@@ -212,21 +140,8 @@ export function extractHtmlFacts(html: string): HtmlFacts {
       links.push(attrs);
     }
 
-    if (RAW_TEXT.has(name) && !selfClosing) {
-      const end = findRawEnd(html, name, i);
-      const raw = html.slice(i, end === -1 ? n : end);
-      i = end === -1 ? n : end;
-      if (name === "title") {
-        if (title === null && (depth.svg ?? 0) === 0) {
-          title = decode(raw).replace(/\s+/g, " ").trim();
-        }
-      } else if (name === "script") {
-        const type = (attrs.type ?? "").split(";")[0].trim().toLowerCase();
-        if (type === "application/ld+json") jsonLd.push(raw);
-      }
-      if (EXCLUDED.has(name) && end === -1) break;
-      continue; // the closing tag is handled by the main loop
-    }
+    // Raw-text contents come next as their own token; they never change depth.
+    if (RAW_TEXT.has(name) && !selfClosing) continue;
 
     if (EXCLUDED.has(name) && !selfClosing) {
       depth[name] = (depth[name] ?? 0) + 1;
@@ -234,6 +149,7 @@ export function extractHtmlFacts(html: string): HtmlFacts {
     }
     if (excluded === 0 && !INLINE.has(name)) chunks.push(" ");
   }
+  if (pos < html.length && excluded === 0) chunks.push(decode(html.slice(pos)));
 
   return {
     title,

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { CONTENT_ATTR, LLMS_FULL_TXT_PATH, LLMS_TXT_PATH, MARKDOWN_MIME, ROBOTS_PATH, SITEMAP_PATH } from "../shared/conventions";
+import { CONTENT_ATTR, LLMS_FULL_TXT_PATH, LLMS_TXT_PATH, ROBOTS_PATH, SITEMAP_PATH } from "../shared/conventions";
 import { LOG_PREFIX, withPrefix } from "../shared/errors";
 import { compareStrings } from "../shared/sort";
 import { agentMapExtension, type AgentPageData } from "./agentMap";
@@ -18,7 +18,7 @@ import {
 import { analyzeDocument } from "./prerender/analyze";
 import { parseHtml } from "./prerender/dom";
 import { byRoute, isSafeRoute, publicMdUrl, publicUrl, routeMdFile, routeOfHtmlFile, shortRoute } from "./prerender/paths";
-import { decodeHtml, insertMarkdownLink } from "./generateHtml";
+import { decodeHtml, setMarkdownLink } from "./generateHtml";
 import { buildRobots } from "./robots";
 import { buildSitemap } from "./sitemap";
 
@@ -94,8 +94,6 @@ function htmlFiles(outDir: string, warn: (m: string) => void): string[] {
   walk(outDir, "");
   return out.sort(compareStrings);
 }
-
-const MARKDOWN_LINK = `link[rel~="alternate"][type="${MARKDOWN_MIME}"]`;
 
 /** Keys GenerateOptions has; others in a config file are reported, to catch typos. */
 export const GENERATE_OPTION_KEYS: readonly string[] = [
@@ -195,7 +193,7 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
   const result: GeneratedPage[] = [];
   const mdByRoute = new Map<string, string>();
   const bodyFallback: string[] = [];
-  const noHead: string[] = [];
+  const utf16: string[] = [];
   // "/index" (index/index.html) would write index.md, the markdown of "/".
   const routes = dropFileCollisions(
     [...fileByRoute].map(([route, file]) => ({ route, file })).sort(byRoute),
@@ -209,10 +207,8 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
     const url = publicUrl(siteUrl, route);
     const { document, dispose } = parseHtml(html);
     let page: SitePage;
-    let hasLink: boolean;
     try {
       const actions = resolved.agentMap ? staticActions(document) : [];
-      hasLink = document.head?.querySelector(MARKDOWN_LINK) != null;
       const info = analyzeDocument(document, {
         pageUrl: url,
         contentSelector: markdown ? markdown.contentSelector : "main",
@@ -236,10 +232,10 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
       logger.warn(`${LOG_PREFIX} ${mdFile} already exists with different content; replacing it with the markdown of ${shortRoute(route)}`);
     }
     guarded.stage(mdFile, md);
-    if (linkMarkdown && !hasLink) {
-      const next = insertMarkdownLink(bytes, charset, publicMdUrl(siteUrl, route));
-      if (next === null) noHead.push(file);
-      else guarded.stage(file, next);
+    if (linkMarkdown) {
+      const edit = setMarkdownLink(bytes, charset, publicMdUrl(siteUrl, route));
+      if (edit === null) utf16.push(file);
+      else if (edit.action !== "unchanged") guarded.stage(file, edit.bytes);
     }
   }
 
@@ -262,8 +258,8 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
         "content was taken from <body> minus header, nav, footer, aside",
     );
   }
-  if (noHead.length > 0) {
-    logger.warn(`${LOG_PREFIX} no </head> (or a UTF-16 file) in ${noHead.join(", ")}; the markdown link was not added`);
+  if (utf16.length > 0) {
+    logger.warn(`${LOG_PREFIX} ${utf16.join(", ")} ${utf16.length === 1 ? "is" : "are"} UTF-16; the markdown link was not added`);
   }
   for (const w of pageLengthWarnings(listed)) logger.warn(w);
   base.info(`${LOG_PREFIX} generated agent files for ${pages.length} pages (${listed.length} listed) in ${outDir}`);
