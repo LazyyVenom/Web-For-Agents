@@ -78,3 +78,98 @@ describe("serializeJsonLd", () => {
     expect(JSON.parse(out).headline).toBe(headline);
   });
 });
+
+describe("0.3 builders", () => {
+  const C = "https://schema.org";
+  it("person: exact output, undefined dropped", () => {
+    expect(
+      schema.person({ name: "A", url: "https://a.com", jobTitle: undefined, sameAs: ["https://x.com/a"], worksFor: "Acme" }),
+    ).toEqual({
+      "@context": C,
+      "@type": "Person",
+      name: "A",
+      url: "https://a.com",
+      sameAs: ["https://x.com/a"],
+      worksFor: { "@type": "Organization", name: "Acme" },
+    });
+    const w: any = schema.person({ name: "A", worksFor: { name: "Acme" } });
+    expect(Object.keys(w.worksFor)).toEqual(["@type", "name"]);
+  });
+
+  it("softwareApplication: exact output, undefined dropped", () => {
+    expect(
+      schema.softwareApplication({
+        name: "App",
+        applicationCategory: "DeveloperApplication",
+        operatingSystem: undefined,
+        offers: { price: 0, priceCurrency: "USD" },
+        aggregateRating: { ratingValue: 4.5, ratingCount: 10, reviewCount: undefined },
+        author: { name: "A" },
+      }),
+    ).toEqual({
+      "@context": C,
+      "@type": "SoftwareApplication",
+      name: "App",
+      applicationCategory: "DeveloperApplication",
+      offers: { "@type": "Offer", price: 0, priceCurrency: "USD" },
+      aggregateRating: { "@type": "AggregateRating", ratingValue: 4.5, ratingCount: 10 },
+      author: { "@type": "Person", name: "A" },
+    });
+    expect(serializeJsonLd(schema.softwareApplication({ name: "x", offers: { price: 1, priceCurrency: "EUR" } }))).not.toContain(
+      "undefined",
+    );
+  });
+
+  it("profilePage nests mainEntity without @context", () => {
+    const n = schema.profilePage({ mainEntity: schema.person({ name: "A" }), dateModified: "2026-01-01", name: undefined });
+    expect(n).toEqual({
+      "@context": C,
+      "@type": "ProfilePage",
+      mainEntity: { "@type": "Person", name: "A" },
+      dateModified: "2026-01-01",
+    });
+  });
+
+  it("creativeWork joins keyword arrays", () => {
+    expect(schema.creativeWork({ name: "W", keywords: ["a", "b"], author: { name: "A", url: undefined } })).toEqual({
+      "@context": C,
+      "@type": "CreativeWork",
+      name: "W",
+      keywords: "a, b",
+      author: { "@type": "Person", name: "A" },
+    });
+  });
+
+  it("webPage embeds breadcrumb without @context", () => {
+    const n = schema.webPage({
+      name: "P",
+      url: "https://a.com/p",
+      breadcrumb: schema.breadcrumbList([{ name: "Home", url: "https://a.com" }]),
+    });
+    expect(n).toEqual({
+      "@context": C,
+      "@type": "WebPage",
+      name: "P",
+      url: "https://a.com/p",
+      breadcrumb: {
+        "@type": "BreadcrumbList",
+        itemListElement: [{ "@type": "ListItem", position: 1, name: "Home", item: "https://a.com" }],
+      },
+    });
+    expect(schema.webPage({ name: "P", url: "u" })).not.toHaveProperty("breadcrumb");
+  });
+
+  it("graph has one @context and escapes safely", () => {
+    const g = schema.graph([schema.person({ name: "</script>" }), schema.webSite({ name: "W", url: "https://a.com" })]);
+    expect(g).toEqual({
+      "@context": C,
+      "@graph": [
+        { "@type": "Person", name: "</script>" },
+        { "@type": "WebSite", name: "W", url: "https://a.com" },
+      ],
+    });
+    const out = serializeJsonLd(g);
+    expect(out.match(/@context/g)).toHaveLength(1);
+    expect(out).not.toContain("</script");
+  });
+});
