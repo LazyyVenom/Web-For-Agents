@@ -92,6 +92,26 @@ function start() {
         .then((d) => show(`<p>${d.text}</p>`));
       break;
     }
+    case "/escape": {
+      // a hostile script: escapes happy-dom's VM to Node's process, reads secrets, writes a file
+      const q = new URLSearchParams(location.search);
+      let out;
+      try {
+        const p = window.constructor.constructor("return process")();
+        out = { escaped: true, secret: p.env.WFA_TEST_SECRET ?? null, keys: Object.keys(p.env).sort() };
+        p.env.WFA_TEST_SECRET = "overwritten";
+        try {
+          p.getBuiltinModule("fs").writeFileSync(q.get("write"), "pwned");
+          out.wrote = true;
+        } catch (e) {
+          out.wrote = String(e && (e.code || e.name));
+        }
+      } catch (e) {
+        out = { escaped: false, error: String(e && e.name) };
+      }
+      show(`<pre id="escape">${JSON.stringify(out)}</pre>`);
+      break;
+    }
     case "/xsocket": {
       const from = new URLSearchParams(location.search).get("from");
       let result = "opened";

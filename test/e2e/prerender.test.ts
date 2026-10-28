@@ -255,7 +255,8 @@ async function spyHosts<T>(run: () => Promise<T>): Promise<{ hosts: string[]; va
 describe("full-URL base", () => {
   it.each(["https://cdn.example.com/app/", "//cdn.example.com/app/"])("makes no non-local requests with base %s", async (base) => {
     const { hosts, value: dist } = await spyHosts(async () => (await buildFixture({ base })).dist);
-    expect(hosts.length).toBeGreaterThan(0); // the spy sees the local requests
+    // happy-dom renders in a child process the spy cannot see; there the hermetic network blocks
+    // other origins (see the "hermetic network" tests, which count hits on a real second origin).
     expect(hosts.filter((h) => h !== "127.0.0.1")).toEqual([]);
     const html = read(dist, "blog/hello/index.html");
     expect(html).toMatch(new RegExp(`src="${base}assets/`));

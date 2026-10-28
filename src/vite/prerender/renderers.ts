@@ -1,10 +1,11 @@
 import type { RendererName } from "../options";
 import { createChromeRenderer } from "./chrome";
-import { createHappyDomRenderer } from "./happyDom";
+import { createIsolatedHappyDomRenderer } from "./happyDomProcess";
 import type { Renderer } from "./renderCore";
 
 export { createChromeRenderer } from "./chrome";
 export { createHappyDomRenderer } from "./happyDom";
+export { createIsolatedHappyDomRenderer } from "./happyDomProcess";
 export {
   RenderError,
   errorMessage,
@@ -29,7 +30,7 @@ export function createRendererPool(opts: { executablePath?: string; allowOrigins
       if (!r) {
         r =
           name === "happy-dom"
-            ? Promise.resolve(createHappyDomRenderer({ allowOrigins: opts.allowOrigins ?? [] }))
+            ? Promise.resolve(createIsolatedHappyDomRenderer({ allowOrigins: opts.allowOrigins ?? [] }))
             : createChromeRenderer(name, {
                 ...(opts.executablePath !== undefined ? { executablePath: opts.executablePath } : {}),
                 allowOrigins: opts.allowOrigins ?? [],

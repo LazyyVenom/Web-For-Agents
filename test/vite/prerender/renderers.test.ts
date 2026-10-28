@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
@@ -9,6 +11,7 @@ import {
   RenderError,
   createChromeRenderer,
   createHappyDomRenderer,
+  createIsolatedHappyDomRenderer,
   createRendererPool,
   waitForReady,
   type Renderer,
@@ -288,6 +291,82 @@ const suite = (name: RendererName, make: (opts?: { allowOrigins?: string[] }) =>
 
 describe("happy-dom renderer", { timeout: SUITE_TIMEOUT_MS }, () => {
   suite("happy-dom", async (opts) => createHappyDomRenderer(opts));
+});
+
+describe("isolated happy-dom renderer (child process)", { timeout: SUITE_TIMEOUT_MS }, () => {
+  suite("happy-dom", async (opts) => createIsolatedHappyDomRenderer(opts));
+});
+
+describe("happy-dom render process isolation", { timeout: SUITE_TIMEOUT_MS }, () => {
+  const SECRET = "wfa-test-secret-value";
+  let tmp: string;
+  beforeAll(() => {
+    process.env.WFA_TEST_SECRET = SECRET;
+    tmp = mkdtempSync(join(tmpdir(), "wfa-escape-"));
+  });
+  afterAll(() => {
+    delete process.env.WFA_TEST_SECRET;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const escape = async (r: Renderer, target: string) => {
+    try {
+      const res = await r.render(server.origin + "/escape?write=" + encodeURIComponent(target), RENDER_MS);
+      const json = /<pre id="escape">(.*?)<\/pre>/.exec(res.html)?.[1];
+      return JSON.parse(json!.replace(/&quot;/g, '"')) as Record<string, unknown>;
+    } finally {
+      await r.close();
+    }
+  };
+
+  it("cannot build code from strings, so the constructor escape fails", async () => {
+    const target = join(tmp, "a.txt");
+    const out = await escape(createIsolatedHappyDomRenderer(), target);
+    expect(out).toEqual({ escaped: false, error: "EvalError" });
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it("an escaped script sees no secrets and cannot change the build's environment", async () => {
+    const target = join(tmp, "b.txt");
+    const out = await escape(createIsolatedHappyDomRenderer({}, { allowCodeGeneration: true }), target);
+    expect(out.escaped).toBe(true);
+    expect(out.secret).toBe(null);
+    const kept = ["PATH", "HOME", "TMPDIR", "TMP", "TEMP", "NODE_ENV", "WFA_RENDER_CHILD", "WFA_RENDER_OPTIONS", "SystemRoot", "SYSTEMROOT", "windir", "USERPROFILE"];
+    // macOS adds __CF_USER_TEXT_ENCODING to every process.
+    expect((out.keys as string[]).filter((k) => !kept.includes(k) && !k.startsWith("__CF_"))).toEqual([]);
+    expect(process.env.WFA_TEST_SECRET).toBe(SECRET);
+    if (process.allowedNodeEnvironmentFlags.has("--permission")) {
+      // the permission model: no writes outside what the child was granted (nothing)
+      expect(out.wrote).toBe("ERR_ACCESS_DENIED");
+      expect(existsSync(target)).toBe(false);
+    }
+  });
+
+  it("the in-process renderer is what the escape would reach without isolation", async () => {
+    // documents the threat: in-process, the escape reaches the build's own process
+    const target = join(tmp, "c.txt");
+    const out = await escape(createHappyDomRenderer(), target);
+    expect(out.escaped).toBe(true);
+    expect(out.secret).toBe(SECRET);
+    process.env.WFA_TEST_SECRET = SECRET;
+  });
+
+  it("reports a crashed render process and recovers", async () => {
+    const r = createIsolatedHappyDomRenderer();
+    try {
+      await r.render(server.origin + "/fetch", RENDER_MS);
+      const pending = r.render(server.origin + "/held", RENDER_MS);
+      r.childProcess()!.kill("SIGKILL");
+      const err = await pending.catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(RenderError);
+      expect((err as Error).message).toContain("killed by SIGKILL");
+      expect((err as Error).message).toContain("lower prerender.concurrency");
+      const again = await r.render(server.origin + "/fetch", RENDER_MS);
+      expect(again.html).toContain("Fetched data text");
+    } finally {
+      await r.close();
+    }
+  });
 });
 
 describe.skipIf(!chromeAvailable)("chrome renderer", { timeout: SUITE_TIMEOUT_MS }, () => {
