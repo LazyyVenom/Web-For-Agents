@@ -257,6 +257,20 @@ describe("registry", () => {
     expect(clicked).not.toHaveBeenCalled();
   });
 
+  it("clicking an element inside an inert or hidden region returns an error and does not click", async () => {
+    document.body.innerHTML = `<div inert><button id="i">I</button></div><div hidden><button id="h">H</button></div><button id="s" hidden>S</button>`;
+    const clicked = vi.fn();
+    for (const id of ["i", "h", "s"]) {
+      const el = document.getElementById(id)!;
+      el.addEventListener("click", clicked);
+      reg({ name: id, description: id }, () => el);
+    }
+    for (const id of ["i", "h", "s"]) {
+      expect(await executeAgentAction(id, {})).toEqual({ status: "error", message: "element is hidden or inert" });
+    }
+    expect(clicked).not.toHaveBeenCalled();
+  });
+
   it("form action without a handler: form schema only, author inputSchema ignored with one warning", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     document.body.innerHTML = `<form id="f"><input name="email" required></form>`;

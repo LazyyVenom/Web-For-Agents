@@ -211,6 +211,41 @@ describe("agentFields", () => {
   });
 });
 
+describe("concealed fields", () => {
+  it("excludes hidden, inert, aria-hidden and display:none fields from the schema and agentFields", () => {
+    const f = form(`
+      <input name="ok">
+      <input name="h" hidden>
+      <div hidden><input name="hp"></div>
+      <div inert><input name="inert"></div>
+      <div aria-hidden="true"><textarea name="aria"></textarea></div>
+      <div aria-hidden="false"><input name="shown"></div>
+      <input name="none" style="display:none">
+      <div style="display: none"><select name="nonep"><option>a</option></select></div>`);
+    expect(Object.keys(schemaFromForm(f).properties!)).toEqual(["ok", "shown"]);
+    expect([...agentFields(f).keys()]).toEqual(["ok", "shown"]);
+  });
+
+  it("keeps fields of a detached form", () => {
+    const f = document.createElement("form");
+    f.innerHTML = `<input name="a">`;
+    expect(Object.keys(schemaFromForm(f).properties!)).toEqual(["a"]);
+  });
+
+  it("excludes options in a disabled optgroup and hidden options from the enum", () => {
+    const s = schemaFromForm(
+      form(`<select name="s">
+        <option value="a">A</option>
+        <optgroup label="g" disabled><option value="b">B</option></optgroup>
+        <optgroup label="h"><option value="c">C</option></optgroup>
+        <option value="d" hidden>D</option>
+      </select>`),
+    );
+    expect(s.properties!.s!.enum).toEqual(["a", "c"]);
+    expect(validateInput(s, { s: "b" }).ok).toBe(false);
+  });
+});
+
 describe("nested validation", () => {
   const nested = {
     type: "object",

@@ -1,3 +1,4 @@
+import { isDisabled } from "./dom";
 import { agentFields, schemaFromForm, validateInput, type Field } from "./formSchema";
 import type { AgentActionResult } from "./types";
 
@@ -87,6 +88,16 @@ export async function runFormAction(
   return submitFormAction(form, checked.value, opts);
 }
 
+/** The form's default button: its first submit button, or null. */
+function defaultButton(form: HTMLFormElement): Element | null {
+  for (const el of Array.from(form.elements)) {
+    if ((el.tagName === "BUTTON" || el.tagName === "INPUT") && /^(submit|image)$/.test((el as HTMLInputElement).type)) {
+      return el;
+    }
+  }
+  return null;
+}
+
 /** Fills and submits already-validated input (the caller ran validateInput(schemaFromForm(form))). */
 export async function submitFormAction(
   form: HTMLFormElement,
@@ -94,6 +105,10 @@ export async function submitFormAction(
   opts: FormActionOptions = {},
 ): Promise<AgentActionResult> {
   if (opts.signal?.aborted) return { status: "error", message: "aborted" };
+  const button = defaultButton(form);
+  if (form.closest("fieldset[disabled]") || (button && isDisabled(button))) {
+    return { status: "error", message: "form submit is disabled" };
+  }
 
   fill(form, value);
 

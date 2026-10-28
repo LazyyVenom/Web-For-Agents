@@ -190,4 +190,39 @@ describe("runFormAction", () => {
     expect((document.getElementById("a") as HTMLInputElement).value).toBe("new");
     expect((document.getElementById("b") as HTMLInputElement).value).toBe("keep");
   });
+
+  it("never fills a hidden, inert or aria-hidden field", async () => {
+    const f = mount(
+      `<form><input name="q"><div inert><input name="to" value="keep"></div><input name="h" hidden value="keep"><div aria-hidden="true"><input name="a" value="keep"></div></form>`,
+    );
+    f.addEventListener("submit", (e) => e.preventDefault());
+    for (const name of ["to", "h", "a"]) {
+      expect(await run(f, { q: "x", [name]: "evil" })).toEqual({
+        status: "invalid",
+        errors: [{ field: name, message: "is not an allowed field" }],
+      });
+      expect((f.elements.namedItem(name) as HTMLInputElement).value).toBe("keep");
+    }
+  });
+
+  it("does not submit when the default button is disabled", async () => {
+    for (const html of [
+      `<form><input name="q"><button disabled>Send</button></form>`,
+      `<form><input name="q"><fieldset disabled><input type="submit"></fieldset></form>`,
+      `<fieldset disabled><form><input name="q"><button>Send</button></form></fieldset>`,
+    ]) {
+      const f = mount(html);
+      const submitted = vi.fn((e: Event) => e.preventDefault());
+      f.addEventListener("submit", submitted);
+      const r = html.startsWith("<fieldset") ? await run(f, {}) : await run(f, { q: "x" });
+      expect(r).toEqual({ status: "error", message: "form submit is disabled" });
+      expect(submitted).not.toHaveBeenCalled();
+    }
+  });
+
+  it("submits when only a later, non-default button is disabled", async () => {
+    const f = mount(`<form><input name="q"><button>Send</button><button disabled>Other</button></form>`);
+    f.addEventListener("submit", (e) => e.preventDefault());
+    expect((await run(f, { q: "x" })).status).toBe("submitted");
+  });
 });
