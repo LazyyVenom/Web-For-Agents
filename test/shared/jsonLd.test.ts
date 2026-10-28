@@ -25,4 +25,19 @@ describe("jsonLdTypes", () => {
     expect(jsonLdTypes(42)).toEqual([]);
     expect(jsonLdTypes({ "@graph": "x" })).toEqual([]);
   });
+  it("walks very deep nesting without overflowing the stack", () => {
+    const depth = 50_000;
+    let arrays: unknown = { "@type": "Deep" };
+    for (let i = 0; i < depth; i++) arrays = [arrays];
+    expect(jsonLdTypes(arrays)).toEqual(["Deep"]);
+    let graphs: unknown = { "@type": "Leaf" };
+    for (let i = 0; i < depth; i++) graphs = { "@type": "N", "@graph": graphs };
+    const types = jsonLdTypes(graphs);
+    expect(types.length).toBeGreaterThan(1000);
+    expect(types[0]).toBe("N");
+    // Past the node budget the walk stops instead of running on.
+    let huge: unknown = { "@type": "Lost" };
+    for (let i = 0; i < 150_000; i++) huge = [huge];
+    expect(jsonLdTypes(huge)).toEqual([]);
+  });
 });

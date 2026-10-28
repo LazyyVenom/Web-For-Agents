@@ -256,6 +256,13 @@ describe("checks", () => {
     expect(byId(inputs({ src: pageHtml({ head: ld }) }), "json-ld").status).toBe("warn");
   });
 
+  it("deeply nested JSON-LD does not abort the audit", () => {
+    const depth = 50_000;
+    const deep = `{"@graph":${"[".repeat(depth)}{"@type":"Thing"}${"]".repeat(depth)}}`;
+    const ld = `<script type="application/ld+json">${deep}</script>`;
+    expect(byId(inputs({ src: pageHtml({ head: ld }) }), "json-ld").status).toBe("pass");
+  });
+
   it("title limit is inclusive", () => {
     const t = (n: number) => byId(inputs({ src: pageHtml({ head: `<title>${"t".repeat(n)}</title>` }) }), "title");
     expect(t(70).status).toBe("pass");
