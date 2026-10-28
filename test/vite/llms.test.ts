@@ -44,3 +44,22 @@ describe("buildLlmsFullTxt", () => {
     expect(buildLlmsFullTxt(site, [{ route: "/z", title: "Z", url: "https://a.com/z" }])).toBe("# Acme\n\n> Tools for people\n");
   });
 });
+
+describe("markdown injection through metadata", () => {
+  const T = "Foo](http://evil)\n# Owned <img src=x onerror=alert(1)>";
+  const SAFE = "Foo\\]\\(http://evil\\) \\# Owned";
+  const hostile: LlmsPage[] = [
+    { route: "/", title: T, description: T, url: "https://a.com/", mdUrl: "https://a.com/index.md", markdown: "x\n" },
+  ];
+
+  it("llms.txt escapes titles and descriptions in headings and list items", () => {
+    expect(buildLlmsTxt({ title: T, description: T }, hostile)).toBe(
+      `# ${SAFE}\n\n> ${SAFE}\n\n## Pages\n\n- [${SAFE}](https://a.com/index.md): ${SAFE}\n`,
+    );
+  });
+  it("llms-full.txt escapes the site header", () => {
+    const out = buildLlmsFullTxt({ title: T, description: T }, hostile);
+    expect(out).toBe(`# ${SAFE}\n\n> ${SAFE}\n\nSource: https://a.com/\n\nx\n`);
+    expect(out).not.toContain("<img");
+  });
+});

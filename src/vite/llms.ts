@@ -1,4 +1,4 @@
-import { collapseWhitespace } from "../shared/text";
+import { escapeLinkTarget, escapeMarkdownInline } from "../shared/markdown";
 import { byRoute } from "./prerender/paths";
 
 export interface LlmsSection {
@@ -17,9 +17,14 @@ export interface LlmsPage {
 
 type Site = { title: string; description?: string };
 
+/**
+ * Titles and descriptions are page metadata interpolated into markdown structure (headings, list
+ * items, link text), so they go through escapeMarkdownInline: no raw HTML, no newlines, and no
+ * markdown syntax of their own. Page bodies (`markdown`) are already escaped by htmlToMarkdown.
+ */
 function header(site: Site): string[] {
-  const blocks = [`# ${site.title}`];
-  const desc = collapseWhitespace(site.description);
+  const blocks = [`# ${escapeMarkdownInline(site.title)}`];
+  const desc = escapeMarkdownInline(site.description);
   if (desc) blocks.push(`> ${desc}`);
   return blocks;
 }
@@ -27,9 +32,9 @@ function header(site: Site): string[] {
 export function buildLlmsTxt(site: Site, pages: LlmsPage[], sections: LlmsSection[] = []): string {
   const blocks = header(site);
   const lines = [...pages].sort(byRoute).map((p) => {
-    const title = collapseWhitespace(p.title).replace(/[[\]]/g, "\\$&");
-    const desc = collapseWhitespace(p.description);
-    return `- [${title}](${p.mdUrl ?? p.url})${desc ? `: ${desc}` : ""}`;
+    const title = escapeMarkdownInline(p.title);
+    const desc = escapeMarkdownInline(p.description);
+    return `- [${title}](${escapeLinkTarget(p.mdUrl ?? p.url)})${desc ? `: ${desc}` : ""}`;
   });
   blocks.push(["## Pages", ...(lines.length ? ["", ...lines] : [])].join("\n"));
   for (const s of sections) {
@@ -43,6 +48,6 @@ export function buildLlmsFullTxt(site: Site, pages: LlmsPage[]): string {
   const blocks = [...pages]
     .sort(byRoute)
     .filter((p) => p.markdown !== undefined)
-    .map((p) => `Source: ${p.url}\n\n${p.markdown!.trim()}`);
+    .map((p) => `Source: ${escapeLinkTarget(p.url)}\n\n${p.markdown!.trim()}`);
   return [head, blocks.join("\n\n---\n\n")].filter(Boolean).join("\n\n") + "\n";
 }

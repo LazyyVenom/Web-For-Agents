@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPageMarkdown, htmlToMarkdown } from "../../src/shared/markdown";
+import { buildPageMarkdown, escapeMarkdownInline, htmlToMarkdown } from "../../src/shared/markdown";
 
 describe("htmlToMarkdown", () => {
   it("converts structure", () => {
@@ -44,5 +44,41 @@ describe("buildPageMarkdown", () => {
     expect(buildPageMarkdown("About", "<p>x</p>")).toBe("# About\n\nx\n");
     expect(buildPageMarkdown("About", "<h1>Hi</h1><p>x</p>")).not.toContain("# About");
     expect(buildPageMarkdown("", "<p>x</p>")).toBe("x\n");
+  });
+});
+
+const HOSTILE_TITLE = "Foo](http://evil)\n# Owned <img src=x onerror=alert(1)>";
+
+describe("escapeMarkdownInline", () => {
+  it("strips tags, collapses newlines and escapes markdown syntax", () => {
+    expect(escapeMarkdownInline(HOSTILE_TITLE)).toBe("Foo\\]\\(http://evil\\) \\# Owned");
+    expect(escapeMarkdownInline("> *a* _b_ `c` [d] \\ < x <b")).toBe("\\> \\*a\\* \\_b\\_ \\`c\\` \\[d\\] \\\\ \\< x");
+    expect(escapeMarkdownInline("a < b, c > d")).toBe("a \\< b, c \\> d");
+    expect(escapeMarkdownInline("Plain title, 2026")).toBe("Plain title, 2026");
+    expect(escapeMarkdownInline(undefined)).toBe("");
+  });
+});
+
+describe("markdown injection", () => {
+  it("buildPageMarkdown keeps a hostile title on one inert heading line", () => {
+    const md = buildPageMarkdown(HOSTILE_TITLE, "<p>x</p>");
+    expect(md).toBe("# Foo\\]\\(http://evil\\) \\# Owned\n\nx\n");
+    expect(md.split("\n").filter((l) => l.startsWith("#"))).toHaveLength(1);
+    expect(md).not.toContain("<img");
+  });
+  it("text that looks like HTML is escaped, not emitted live", () => {
+    const md = htmlToMarkdown("<p>&lt;script&gt;alert(1)&lt;/script&gt; &lt;img src=x onerror=alert(1)&gt; a &lt; b</p>");
+    expect(md).toBe("\\<script>alert(1)\\</script> \\<img src=x onerror=alert(1)> a < b\n");
+    expect(md).not.toMatch(/(^|[^\\])<(script|img)/);
+  });
+  it("text-node markdown syntax is escaped", () => {
+    expect(htmlToMarkdown("<p>[x](http://evil) # h *a* _b_ `c`</p>")).toBe("\\[x\\](http://evil) # h \\*a\\* \\_b\\_ \\`c\\`\n");
+    expect(htmlToMarkdown("<p># Owned</p><p>&gt; quote</p>")).toBe("\\# Owned\n\n\\> quote\n");
+  });
+  it("drops script and style elements", () => {
+    expect(htmlToMarkdown("<p>a</p><script>alert(2)</script><style>p{}</style><noscript>n</noscript>")).toBe("a\n");
+  });
+  it("escapes image alt text", () => {
+    expect(htmlToMarkdown('<img src="a.png" alt="x](http://evil)">')).toBe("![x\\]\\(http://evil\\)](a.png)\n");
   });
 });
