@@ -121,13 +121,14 @@ export const schema = {
       ...rest,
       potentialAction: searchUrlTemplate
         ? {
-        "@type": "SearchAction",
-        target: searchUrlTemplate,
-        "query-input": "required name=search_term_string",
-      }
+            "@type": "SearchAction",
+            target: searchUrlTemplate,
+            "query-input": "required name=search_term_string",
+          }
         : undefined,
     });
-  },  person(i: {
+  },
+  person(i: {
     name: string;
     url?: string;
     image?: string;
