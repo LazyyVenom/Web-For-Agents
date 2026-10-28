@@ -102,6 +102,28 @@ describe("registry sync cost", () => {
       expect(registerTool).toHaveBeenCalledTimes(3);
     });
 
+    it("retries once when a forced re-register fails", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      let failNext = false;
+      const { calls, registerTool } = installFakeModelContext(() => {
+        if (failNext) {
+          failNext = false;
+          return Promise.reject(new Error("busy"));
+        }
+      });
+      document.body.innerHTML = `<form id="a"><input name="q"><dialog id="d"><input name="iban"></dialog></form>`;
+      registerAgentAction(() => ({ name: "pay", description: "p" }), () => document.getElementById("a"));
+      await flush();
+      document.getElementById("d")!.setAttribute("open", "");
+      failNext = true;
+      refreshAgentActions({ force: true });
+      for (let i = 0; i < 6; i++) await flush();
+      expect(registerTool).toHaveBeenCalledTimes(3);
+      expect(calls[2]!.signal.aborted).toBe(false);
+      expect(Object.keys(calls[2]!.tool.inputSchema.properties!)).toEqual(["q", "iban"]);
+      vi.restoreAllMocks();
+    });
+
     it("revokes an exposed form action whose schema starts throwing", async () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       const { calls } = installFakeModelContext();

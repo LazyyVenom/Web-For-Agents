@@ -245,8 +245,67 @@ describe("registry", () => {
       expect(body.length).toBeLessThanOrEqual(1100);
     });
 
+    it("extra keys and array items cannot shrink the declared fields' budget", async () => {
+      const open = { ...transfer, additionalProperties: true };
+      const input: Record<string, unknown> = { to: "t".repeat(2000), pad: Array.from({ length: 500 }, () => 1) };
+      const msg = await confirmText(input, open);
+      // one declared leaf: budget 1000
+      expect(msg).toContain(`to: "${"t".repeat(999)}\u2026(truncated)`);
+    });
+
+    it("skips undefined values", async () => {
+      const msg = await confirmText({ to: "t", memo: undefined });
+      expect(msg).toContain('Agent-provided input (1 field):\nto: "t"\n\nAllow?');
+    });
+
     it("states zero fields", async () => {
       expect(await confirmText({})).toContain("Agent-provided input (0 fields).\n\nAllow?");
+    });
+  });
+
+  describe("form actions and the confirm dialog", () => {
+    it("shows every field a revealing checkbox will fill, however long the values (round 2, item 1)", async () => {
+      const revealed = Array.from({ length: 10 }, (_, i) => `<input name="r${i}">`).join("");
+      document.body.innerHTML = `<form id="f"><input type="checkbox" name="more"><div hidden id="x">${revealed}</div><button>Go</button></form>`;
+      const form = document.getElementById("f") as HTMLFormElement;
+      const box = form.elements.namedItem("more") as HTMLInputElement;
+      box.addEventListener("change", () => (document.getElementById("x")!.hidden = !box.checked));
+      form.addEventListener("submit", (e) => e.preventDefault());
+      const confirm = vi.fn((_m: string) => true);
+      reg({ name: "f", description: "f", destructive: true, confirm, submitSettleMs: 0 }, () => form);
+      const input: Record<string, unknown> = { more: true };
+      for (let i = 0; i < 10; i++) input[`r${i}`] = `${i}`.repeat(400);
+      expect((await executeAgentAction("f", input)).status).toBe("submitted");
+      const msg = confirm.mock.calls[0]![0];
+      expect(msg).toContain("Agent-provided input (11 fields):\nmore: true\n");
+      for (let i = 0; i < 10; i++) {
+        expect(msg).toContain(`\nr${i}: "${`${i}`.repeat(89)}\u2026(truncated)`); // budget floor(1000 / 11) = 90
+        expect((form.elements.namedItem(`r${i}`) as HTMLInputElement).value).toBe(`${i}`.repeat(400));
+      }
+      expect(msg).not.toContain("omitted");
+    });
+
+    it("refuses a blocked form or click target before asking the user (item 2)", async () => {
+      document.body.innerHTML = `<form id="f"><input name="q"><button disabled>Go</button></form><dialog><button id="b">B</button></dialog>`;
+      const confirm = vi.fn(() => true);
+      reg({ name: "f", description: "f", destructive: true, confirm }, () => document.getElementById("f"));
+      reg({ name: "b", description: "b", destructive: true, confirm }, () => document.getElementById("b"));
+      expect(await executeAgentAction("f", { q: "x" })).toEqual({ status: "error", message: "form submit is disabled" });
+      expect(await executeAgentAction("b", {})).toEqual({ status: "error", message: "element is hidden or inert" });
+      expect(confirm).not.toHaveBeenCalled();
+    });
+
+    it("rejects keys naming no form element before asking or writing (item 3)", async () => {
+      document.body.innerHTML = `<form id="f"><input name="q"><button>Go</button></form>`;
+      const form = document.getElementById("f") as HTMLFormElement;
+      const confirm = vi.fn(() => true);
+      reg({ name: "f", description: "f", destructive: true, confirm }, () => form);
+      expect(await executeAgentAction("f", { q: "x", bogus: 1 })).toEqual({
+        status: "invalid",
+        errors: [{ field: "bogus", message: "is not an allowed field" }],
+      });
+      expect(confirm).not.toHaveBeenCalled();
+      expect((form.elements.namedItem("q") as HTMLInputElement).value).toBe("");
     });
   });
 

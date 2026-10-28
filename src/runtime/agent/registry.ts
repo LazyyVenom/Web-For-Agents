@@ -4,7 +4,7 @@ import { errorMessage, withPrefix } from "../../shared/errors";
 import { hasOwn } from "../../shared/object";
 import { compareStrings } from "../../shared/sort";
 import { isConcealed, isDisabled } from "./dom";
-import { submitFormAction } from "./formAutomation";
+import { checkFormAction, submitFormAction } from "./formAutomation";
 import { EMPTY_OBJECT_SCHEMA, schemaFromForm, validateFormInput, validateInput } from "./formSchema";
 import type {
   AgentActionDescriptor,
@@ -159,13 +159,17 @@ const plural = (n: number): string => `${n} field${n === 1 ? "" : "s"}`;
 /** [path, JSON value, path made only of schema properties] */
 type Leaf = [string, string, boolean];
 
-/** Leaves as dotted paths: schema properties in schema order, then other keys sorted; array items in order. */
-function flatten(s: JsonSchema | undefined, v: unknown, path: string, declared: boolean, out: Leaf[]): void {
+/**
+ * Leaves as dotted paths: schema properties in schema order, then other keys sorted; array items in
+ * order; undefined values skipped. `flat` (form actions) stops at the top level and counts every
+ * top-level key as declared: each names a field that will be filled, possibly one revealed while filling.
+ */
+function flatten(s: JsonSchema | undefined, v: unknown, path: string, declared: boolean, flat: boolean, out: Leaf[]): void {
   const props = s?.properties ?? {};
   const o = v as Record<string, unknown>;
   const arr = Array.isArray(v);
   const keys =
-    !v || typeof v !== "object"
+    !v || typeof v !== "object" || (flat && path)
       ? []
       : arr
         ? Object.keys(v)
@@ -177,22 +181,23 @@ function flatten(s: JsonSchema | undefined, v: unknown, path: string, declared: 
     return;
   }
   for (const k of keys) {
-    const own = !arr && hasOwn(props, k);
+    if (o[k] === undefined) continue;
+    const own = !arr && (flat || hasOwn(props, k));
     const seg = arr ? `[${k}]` : /^[A-Za-z_$][\w$]*$/.test(k) ? (path && ".") + k : `[${JSON.stringify(k)}]`;
-    flatten(arr ? s?.items : own ? props[k] : undefined, o[k], path + seg, declared && own, out);
+    flatten(arr ? s?.items : hasOwn(props, k) ? props[k] : undefined, o[k], path + seg, declared && own, flat, out);
   }
 }
 
 /**
- * Every schema field as `path: value`, in schema order, whatever the agent's key order or padding;
- * names and values cut to max(24, 1000 / fields). Fields outside the schema follow, capped at about
+ * Every declared field as `path: value`, in schema order, whatever the agent's key order or padding;
+ * names and values cut to max(24, 1000 / declared fields). Other fields follow, capped at about
  * 1000 characters in total, with a count of any left out.
  */
-function describeInput(schema: JsonSchema, value: Record<string, unknown>): string {
+function describeInput(schema: JsonSchema, value: Record<string, unknown>, flat: boolean): string {
   const leaves: Leaf[] = [];
-  flatten(schema, value, "", true, leaves);
+  flatten(schema, value, "", true, flat, leaves);
   const n = leaves.length;
-  const budget = Math.max(24, Math.floor(CONFIRM_BUDGET / n));
+  const budget = Math.max(24, Math.floor(CONFIRM_BUDGET / (leaves.filter((l) => l[2]).length || 1)));
   const lines: string[] = [];
   let extra = 0;
   for (const [path, v, declared] of leaves) {
@@ -203,10 +208,11 @@ function describeInput(schema: JsonSchema, value: Record<string, unknown>): stri
   return `Agent-provided input (${plural(n)})${n ? ":\n" + lines.join("\n") : "."}`;
 }
 
-function confirmMessage(name: string, spec: AgentActionSpec, schema: JsonSchema, value: Record<string, unknown>): string {
+function confirmMessage(name: string, r: Resolved, schema: JsonSchema, value: Record<string, unknown>): string {
+  const { spec } = r;
   if (spec.confirmMessage !== undefined) return spec.confirmMessage;
   const what = neutralize(`"${spec.title ?? name}": ${spec.description}`);
-  return `An AI agent wants to run ${what}\n\n${describeInput(schema, value)}\n\nAllow?`;
+  return `An AI agent wants to run ${what}\n\n${describeInput(schema, value, r.kind === "form")}\n\nAllow?`;
 }
 
 /** Asks the user. Null to proceed, or the result to return instead. */
@@ -214,17 +220,22 @@ async function confirmAction(
   name: string,
   id: number,
   entry: Entry,
-  spec: AgentActionSpec,
+  r: Resolved,
   schema: JsonSchema,
   value: Record<string, unknown>,
 ): Promise<AgentActionResult | null> {
-  const confirm = spec.confirm ?? ((m: string) => window.confirm(m));
-  if (!(await confirm(confirmMessage(name, spec, schema, value)))) return { status: "cancelled", reason: "user-declined" };
+  const confirm = r.spec.confirm ?? ((m: string) => window.confirm(m));
+  if (!(await confirm(confirmMessage(name, r, schema, value)))) return { status: "cancelled", reason: "user-declined" };
   // The entry may have unmounted or been superseded while the dialog was open.
   if (entries.get(id) !== entry || activeEntries().get(name)?.[0] !== id) {
     return { status: "error", message: "action was removed" };
   }
   return null;
+}
+
+function clickBlocked(el: Element): AgentActionResult | null {
+  if (isDisabled(el)) return { status: "error", message: "element is disabled" };
+  return isConcealed(el) ? { status: "error", message: "element is hidden or inert" } : null;
 }
 
 /** Runs an exposed action with `input`. Never throws; failures are reported in the result. */
@@ -244,9 +255,12 @@ export async function executeAgentAction(
     const checked = (r.kind === "form" ? validateFormInput : validateInput)(schema, input);
     if (!checked.ok) return { status: "invalid", errors: checked.errors };
     const value = checked.value;
+    // Fail before asking the user to approve something that would then error.
+    const blocked = r.kind === "form" ? checkFormAction(r.el, value) : r.kind === "click" ? clickBlocked(r.el) : null;
+    if (blocked) return blocked;
 
     if (spec.destructive) {
-      const stop = await confirmAction(name, id, entry, spec, schema, value);
+      const stop = await confirmAction(name, id, entry, r, schema, value);
       if (stop) return stop;
     }
 
@@ -255,11 +269,12 @@ export async function executeAgentAction(
         return { status: "ok", result: await spec.handler!(value, { signal: signal ?? new AbortController().signal }) };
       case "form":
         return await submitFormAction(r.el, value, { settleMs: spec.submitSettleMs, signal });
-      case "click":
-        if (isDisabled(r.el)) return { status: "error", message: "element is disabled" };
-        if (isConcealed(r.el)) return { status: "error", message: "element is hidden or inert" };
+      case "click": {
+        const late = clickBlocked(r.el);
+        if (late) return late;
         (r.el as HTMLElement).click();
         return { status: "clicked" };
+      }
     }
   } catch (err) {
     return { status: "error", message: errorMessage(err) };
@@ -368,7 +383,8 @@ function warnDuplicates(): void {
 function exposeNew(active: Active, fresh: Map<string, WebMcpTool | null>): void {
   for (const [name, [id, entry]] of active) {
     if (exposed.has(name)) continue;
-    const tool = fresh.has(name) ? fresh.get(name)! : buildTool(name, entry);
+    const reregister = fresh.has(name);
+    const tool = reregister ? fresh.get(name)! : buildTool(name, entry);
     if (!tool) continue;
     const controller = new AbortController();
     exposed.set(name, { id, controller, tool });
@@ -377,7 +393,10 @@ function exposeNew(active: Active, fresh: Map<string, WebMcpTool | null>): void 
     };
     void exposeTool(tool, controller.signal).then(
       (status) => {
-        if (status === "failed") unmark();
+        if (status !== "failed") return;
+        unmark();
+        // The old tool is already gone: retry once (a plain sync, which does not reschedule itself).
+        if (reregister) scheduleSync();
       },
       (err: unknown) => {
         console.warn(withPrefix(`could not expose agent action "${name}": ${errorMessage(err)}`));
