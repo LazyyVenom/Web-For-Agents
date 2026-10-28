@@ -214,18 +214,24 @@ function checkJsonLd({ html }: AuditInputs): Outcome {
   if (!parsed.some((p) => jsonLdTypes(p).length > 0)) {
     return warn("JSON-LD parses but has no @type", "Add an @type (for example Organization) to your JSON-LD.");
   }
-  const { issues, total } = checkSchemaNodes(parsed.flatMap(jsonLdNodes), SCHEMA_ISSUES_SHOWN);
-  if (total > 0) {
-    const shown = issues.map((i) => `${i.type} ${i.path}`).join("; ");
-    const more = total > issues.length ? `; +${total - issues.length} more` : "";
-    const rules = [...new Set(issues.map((i) => SCHEMA_RULES[i.type]!))];
-    const notes = rules.flatMap((r) => (r.note !== undefined ? [` ${r.note}`] : [])).join("");
+  const { issues, total, scored } = checkSchemaNodes(parsed.flatMap(jsonLdNodes), SCHEMA_ISSUES_SHOWN);
+  const more = (sep: string) => (total > issues.length ? `${sep}+${total - issues.length} more` : "");
+  const rules = [...new Set(issues.map((i) => SCHEMA_RULES[i.type]!))];
+  if (scored > 0) {
+    const notes = rules.flatMap((r) => (r.note !== undefined ? [` ${r.note}.`] : [])).join("");
     return warn(
-      `Missing required structured data fields: ${shown}${more}`,
+      `Missing required structured data fields: ${issues.map((i) => `${i.type} ${i.path}`).join("; ")}${more("; ")}`,
       `Add the missing properties; Google requires them for rich results (${rules.map((r) => r.docs).join(", ")}).${notes}`,
     );
   }
-  return pass(`${parsed.length} JSON-LD block${parsed.length === 1 ? " parses" : "s parse"} with an @type`);
+  const base = `${parsed.length} JSON-LD block${parsed.length === 1 ? " parses" : "s parse"} with an @type`;
+  if (total === 0) return pass(base);
+  // Only retired rich results (FAQPage) have gaps: report them without lowering the score.
+  const byType = new Map<string, string[]>();
+  for (const i of issues) byType.set(i.type, [...(byType.get(i.type) ?? []), i.path]);
+  const listed = [...byType].map(([type, paths]) => `${type}: ${paths.join(", ")}`).join("; ");
+  const notes = rules.flatMap((r) => (r.note !== undefined ? [r.note] : [])).join("; ");
+  return pass(`${base}; ${listed}${more(", ")} missing${notes ? ` (${notes})` : ""}`);
 }
 
 function checkRobots({ page, robots }: AuditInputs): Outcome {

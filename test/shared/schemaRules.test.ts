@@ -34,7 +34,9 @@ describe("schemaRules", () => {
     expect(missing({ "@type": "FAQPage", mainEntity: { "@type": "Question", name: "Q" } })).toEqual([
       "FAQPage mainEntity.acceptedAnswer",
     ]);
-    expect(SCHEMA_RULES.FAQPage!.note).toMatch(/7 May 2026/);
+    expect(SCHEMA_RULES.FAQPage!.retired).toBe(true);
+    const r = checkSchemaNodes(jsonLdNodes([faq, { "@type": "WebSite" }]));
+    expect([r.total, r.scored]).toEqual([6, 2]);
   });
 
   it("BreadcrumbList: position, name and item, except item on the last element", () => {

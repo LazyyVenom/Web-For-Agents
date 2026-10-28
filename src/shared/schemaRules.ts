@@ -36,6 +36,8 @@ export interface SchemaRule {
   nested?: readonly NestedRule[];
   /** Caveat shown with issues for this type. */
   note?: string;
+  /** Google no longer shows this rich result: issues are informational and should not lower a score. */
+  retired?: boolean;
 }
 
 const DOCS = "https://developers.google.com/search/docs/appearance/structured-data/";
@@ -86,7 +88,8 @@ export const SCHEMA_RULES: Readonly<Record<string, SchemaRule>> = {
         nested: [{ prop: "acceptedAnswer", required: [req("text")] }],
       },
     ],
-    note: "Google stopped showing FAQ rich results on 7 May 2026, but still reads FAQPage markup; these are its last documented requirements.",
+    note: "Google no longer shows FAQ rich results; answer engines may still use it",
+    retired: true,
   },
   Organization: {
     docs: `${DOCS}organization`,
@@ -141,6 +144,8 @@ export interface SchemaCheck {
   issues: SchemaIssue[];
   /** Every issue found, including those beyond `limit`. */
   total: number;
+  /** Issues from rules that are not `retired`, including those beyond `limit`. */
+  scored: number;
 }
 
 /** A property counts as present unless it is absent, null, a blank string or an empty array. */
@@ -187,10 +192,12 @@ export function checkSchemaNodes(nodes: readonly JsonLdObject[], limit = Infinit
   for (const n of nodes) if (typeof n["@id"] === "string" && !byId.has(n["@id"])) byId.set(n["@id"], n);
   const issues: SchemaIssue[] = [];
   let total = 0;
+  let scored = 0;
   let budget = MAX_JSON_LD_NODES;
 
   const report = (type: string, path: string): void => {
     total++;
+    if (SCHEMA_RULES[type]!.retired !== true) scored++;
     if (issues.length < limit) issues.push({ type, path });
   };
 
@@ -238,5 +245,5 @@ export function checkSchemaNodes(nodes: readonly JsonLdObject[], limit = Infinit
       apply(type, node, "", rule.required, rule.nested, true);
     }
   }
-  return { issues, total };
+  return { issues, total, scored };
 }

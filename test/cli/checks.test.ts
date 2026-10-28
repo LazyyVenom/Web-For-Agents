@@ -287,7 +287,7 @@ describe("checks", () => {
     );
     expect(many.fix).toBe(
       "Add the missing properties; Google requires them for rich results (https://developers.google.com/search/docs/appearance/structured-data/faqpage, https://developers.google.com/search/docs/appearance/structured-data/breadcrumb, https://developers.google.com/search/docs/appearance/site-names). " +
-        "Google stopped showing FAQ rich results on 7 May 2026, but still reads FAQPage markup; these are its last documented requirements.",
+        "Google no longer shows FAQ rich results; answer engines may still use it.",
     );
     // Complete markup and unknown types still pass.
     const [home, project] = crumbs.itemListElement;
@@ -295,6 +295,28 @@ describe("checks", () => {
     expect(run(ld({ "@type": "MadeUpType" })).message).toBe("1 JSON-LD block parses with an @type");
     // Parse errors and a missing @type still take precedence.
     expect(run(ld({ "@type": "Recipe" }) + '<script type="application/ld+json">{bad</script>').message).toMatch(/do not parse/);
+  });
+
+  it("json-ld FAQPage-only gaps pass at full weight with a note", () => {
+    const ld = (v: unknown) => `<script type="application/ld+json">${JSON.stringify(v)}</script>`;
+    const run = (head: string) => byId(inputs({ src: pageHtml({ head }) }), "json-ld");
+    const q = (answer: object) => ({ "@type": "Question", name: "Q", acceptedAnswer: { "@type": "Answer", ...answer } });
+    const one = run(ld({ "@type": "FAQPage", mainEntity: [q({})] }));
+    expect(one.status).toBe("pass");
+    expect(one.points).toBe(CHECK_WEIGHTS["json-ld"]);
+    expect(one.message).toBe(
+      "1 JSON-LD block parses with an @type; FAQPage: mainEntity[0].acceptedAnswer.text missing (Google no longer shows FAQ rich results; answer engines may still use it)",
+    );
+    const five = run(ld({ "@graph": [{ "@type": "FAQPage", mainEntity: [q({}), q({}), q({}), q({}), q({ text: "ok" }), q({})] }] }));
+    expect(five.status).toBe("pass");
+    expect(five.message).toBe(
+      "1 JSON-LD block parses with an @type; FAQPage: mainEntity[0].acceptedAnswer.text, mainEntity[1].acceptedAnswer.text, mainEntity[2].acceptedAnswer.text, +2 more missing (Google no longer shows FAQ rich results; answer engines may still use it)",
+    );
+    // Any other type's gap still warns, and the FAQ gap is listed with it.
+    const mixed = run(ld({ "@type": "FAQPage", mainEntity: [q({})] }) + ld({ "@type": "WebSite", name: "S" }));
+    expect(mixed.status).toBe("warn");
+    expect(mixed.points).toBe(CHECK_WEIGHTS["json-ld"] / 2);
+    expect(mixed.message).toBe("Missing required structured data fields: FAQPage mainEntity[0].acceptedAnswer.text; WebSite url");
   });
 
   it("deeply nested JSON-LD does not abort the audit", () => {
