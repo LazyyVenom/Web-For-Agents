@@ -1,6 +1,6 @@
 import { fork, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -50,34 +50,38 @@ function nodeModulesRoot(file: string): string {
 
 /**
  * The file to fork. Built, it is the bundle chunk holding renderChild. Run from source (tests, the
- * repo's demo), the .ts module is bundled once into node_modules/.cache with esbuild, a dev dependency.
+ * repo's demo), the .ts module is bundled with esbuild (a dev dependency) on every first use, and
+ * written to node_modules/.cache under the hash of the bundle itself, so a cached file is never stale.
  */
+let sourceEntry: Promise<string> | undefined;
 async function childEntryFile(): Promise<string> {
   const { CHILD_ENTRY } = await import("./renderChild");
   const file = fileURLToPath(CHILD_ENTRY);
   if (!file.endsWith(".ts")) return file;
-  const srcDir = path.dirname(file);
-  const repo = path.resolve(srcDir, "../../..");
-  const outDir = path.join(repo, "node_modules", ".cache", "web-for-agents");
-  const hash = createHash("sha256");
-  for (const f of ["renderChild.ts", "happyDom.ts", "renderCore.ts", "probe.ts", "../../shared/errors.ts", "../../shared/conventions.ts"]) {
-    const p = path.join(srcDir, f);
-    if (existsSync(p)) hash.update(readFileSync(p));
-  }
-  const out = path.join(outDir, `render-child-${hash.digest("hex").slice(0, 12)}.mjs`);
+  return (sourceEntry ??= bundleFromSource(file));
+}
+
+async function bundleFromSource(file: string): Promise<string> {
+  const name = "esbuild"; // not a literal, so the package bundle never includes it
+  const esbuild = (await import(name)) as typeof import("esbuild");
+  const result = await esbuild.build({
+    entryPoints: [file],
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    packages: "external",
+    write: false,
+    logLevel: "silent",
+  });
+  const code = result.outputFiles[0]!.contents;
+  const outDir = path.join(path.resolve(path.dirname(file), "../../.."), "node_modules", ".cache", "web-for-agents");
+  const out = path.join(outDir, `render-child-${createHash("sha256").update(code).digest("hex").slice(0, 16)}.mjs`);
   if (!existsSync(out)) {
     mkdirSync(outDir, { recursive: true });
-    const name = "esbuild"; // not a literal, so the package bundle never includes it
-    const esbuild = (await import(name)) as typeof import("esbuild");
-    await esbuild.build({
-      entryPoints: [file],
-      bundle: true,
-      platform: "node",
-      format: "esm",
-      packages: "external",
-      outfile: out,
-      logLevel: "silent",
-    });
+    // Written aside and renamed, so a concurrent build never forks a half-written file.
+    const tmp = `${out}.${process.pid}.tmp`;
+    writeFileSync(tmp, code);
+    renameSync(tmp, out);
   }
   return out;
 }
