@@ -27,7 +27,9 @@ const warnedIgnoredSchema = new Set<string>();
 let nextId = 1;
 let syncScheduled = false;
 
-const MAX_CONFIRM_INPUT = 500;
+const MAX_CONFIRM_VALUE = 80;
+const MAX_CONFIRM_INPUT = 1000;
+const TRUNCATED = "\u2026(truncated)";
 
 export function assertValidActionName(name: string): void {
   if (!isValidActionName(name)) {
@@ -125,10 +127,47 @@ export function listAgentActions(): AgentActionDescriptor[] {
     .sort((a, b) => compareStrings(a.name, b.name));
 }
 
-function confirmMessage(name: string, spec: AgentActionSpec, value: Record<string, unknown>): string {
+/** Bidi controls, LRM/RLM, and C0/C1 controls except \n, made visible as \u escapes. */
+const UNSAFE_CHARS = /[\u0000-\u0009\u000B-\u001F\u007F-\u009F\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+
+function neutralize(s: string): string {
+  return s.replace(UNSAFE_CHARS, (c) => `\\u${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`);
+}
+
+function clip(s: string): string {
+  return s.length > MAX_CONFIRM_VALUE ? s.slice(0, MAX_CONFIRM_VALUE) + TRUNCATED : s;
+}
+
+/**
+ * Every provided field as `name: value`: schema fields in schema order, then any extra keys
+ * sorted, so the agent's key order and padding cannot push a field out of view.
+ */
+function describeInput(schema: JsonSchema, value: Record<string, unknown>): string {
+  const declared = Object.keys(schema.properties ?? {}).filter((k) => Object.prototype.hasOwnProperty.call(value, k));
+  const known = new Set(declared);
+  const extra = Object.keys(value)
+    .filter((k) => !known.has(k))
+    .sort(compareStrings);
+  const keys = [...declared, ...extra];
+  const n = keys.length;
+  const lines: string[] = [];
+  let total = 0;
+  for (const key of keys) {
+    const v = value[key];
+    const line = `${clip(neutralize(key))}: ${clip(neutralize(v === undefined ? "undefined" : JSON.stringify(v)))}`;
+    if (total + line.length > MAX_CONFIRM_INPUT) break;
+    lines.push(line);
+    total += line.length + 1;
+  }
+  if (lines.length < n) lines.push(`\u2026(${n - lines.length} more field${n - lines.length === 1 ? "" : "s"} omitted)`);
+  const head = `Agent-provided input (${n} field${n === 1 ? "" : "s"})`;
+  return n === 0 ? `${head}.` : `${head}:\n${lines.join("\n")}`;
+}
+
+function confirmMessage(name: string, spec: AgentActionSpec, schema: JsonSchema, value: Record<string, unknown>): string {
   if (spec.confirmMessage !== undefined) return spec.confirmMessage;
-  const input = JSON.stringify(value).slice(0, MAX_CONFIRM_INPUT);
-  return `An AI agent wants to run "${spec.title ?? name}": ${spec.description}\n\nAgent-provided input: ${input}\n\nAllow?`;
+  const what = neutralize(`"${spec.title ?? name}": ${spec.description}`);
+  return `An AI agent wants to run ${what}\n\n${describeInput(schema, value)}\n\nAllow?`;
 }
 
 /** Asks the user. Null to proceed, or the result to return instead. */
@@ -137,10 +176,11 @@ async function confirmAction(
   id: number,
   entry: Entry,
   spec: AgentActionSpec,
+  schema: JsonSchema,
   value: Record<string, unknown>,
 ): Promise<AgentActionResult | null> {
   const confirm = spec.confirm ?? ((m: string) => window.confirm(m));
-  if (!(await confirm(confirmMessage(name, spec, value)))) return { status: "cancelled", reason: "user-declined" };
+  if (!(await confirm(confirmMessage(name, spec, schema, value)))) return { status: "cancelled", reason: "user-declined" };
   // The entry may have unmounted or been superseded while the dialog was open.
   if (entries.get(id) !== entry || activeEntries().get(name)?.[0] !== id) {
     return { status: "error", message: "action was removed" };
@@ -165,12 +205,13 @@ export async function executeAgentAction(
     const r = resolve(entry);
     if (r.kind === null) return { status: "error", message: "action has no handler and no element" };
     const { spec } = r;
-    const checked = validateInput(schemaOf(r), input);
+    const schema = schemaOf(r);
+    const checked = validateInput(schema, input);
     if (!checked.ok) return { status: "invalid", errors: checked.errors };
     const value = checked.value;
 
     if (spec.destructive) {
-      const stop = await confirmAction(name, id, entry, spec, value);
+      const stop = await confirmAction(name, id, entry, spec, schema, value);
       if (stop) return stop;
     }
 

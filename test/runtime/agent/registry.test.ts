@@ -137,27 +137,56 @@ describe("registry", () => {
     });
     expect(handler).not.toHaveBeenCalled();
     const msg = String((confirm.mock.calls[0] as unknown[])[0]);
-    expect(msg).toContain("Wipe all");
-    expect(msg).toContain(JSON.stringify({ really: "yes" }));
-    expect(msg).toBe(
-      `An AI agent wants to run "Wipe all": wipes\n\nAgent-provided input: ${JSON.stringify({ really: "yes" })}\n\nAllow?`,
-    );
+    expect(msg).toBe(`An AI agent wants to run "Wipe all": wipes\n\nAgent-provided input (1 field):\nreally: "yes"\n\nAllow?`);
   });
 
-  it("confirm message caps the agent-provided input at 500 characters", async () => {
-    const confirm = vi.fn(() => false);
-    reg({
-      name: "wipe",
-      description: "wipes",
-      inputSchema: { type: "object", properties: { note: { type: "string" } } },
-      destructive: true,
-      confirm,
-      handler: () => 1,
+  describe("confirm message", () => {
+    const transfer = {
+      type: "object",
+      properties: { amount: { type: "number" }, memo: { type: "string" }, to: { type: "string" } },
+      additionalProperties: false,
+    } as const;
+
+    async function confirmText(input: Record<string, unknown>, inputSchema: object = transfer): Promise<string> {
+      const confirm = vi.fn((_m: string) => false);
+      reg({ name: "pay", description: "pays", inputSchema, destructive: true, confirm, handler: () => 1 });
+      expect(await executeAgentAction("pay", input)).toEqual({ status: "cancelled", reason: "user-declined" });
+      return confirm.mock.calls[0]![0];
+    }
+
+    it("padding a field cannot hide a later one: every field is shown, each value truncated", async () => {
+      const msg = await confirmText({ memo: "x".repeat(5000), amount: 1, to: "attacker-iban" });
+      expect(msg).toContain("Agent-provided input (3 fields):");
+      expect(msg).toContain('to: "attacker-iban"');
+      expect(msg).toContain("amount: 1");
+      expect(msg).toContain(`memo: "${"x".repeat(79)}\u2026(truncated)`);
+      expect(msg.length).toBeLessThan(1200);
     });
-    await executeAgentAction("wipe", { note: "x".repeat(2000) });
-    const msg = String((confirm.mock.calls[0] as unknown[])[0]);
-    const input = msg.split("Agent-provided input: ")[1]!.split("\n\nAllow?")[0]!;
-    expect(input).toHaveLength(500);
+
+    it("lists fields in schema order, not the agent's key order", async () => {
+      const msg = await confirmText({ to: "t", memo: "m", amount: 2 });
+      expect(msg).toContain('Agent-provided input (3 fields):\namount: 2\nmemo: "m"\nto: "t"\n\nAllow?');
+    });
+
+    it("escapes bidi and control characters", async () => {
+      const msg = await confirmText({ to: "\u202Enabi-rekcatta\u202C\u2066\u200F\u0085\u0007" });
+      expect(msg).not.toMatch(/[\u0000-\u0009\u000B-\u001F\u007F-\u009F\u200E\u200F\u202A-\u202E\u2066-\u2069]/);
+      expect(msg).toContain('to: "\\u202Enabi-rekcatta\\u202C\\u2066\\u200F\\u0085\\u0007"');
+    });
+
+    it("caps the total, sorts extra keys after schema fields, and says how many were omitted", async () => {
+      const input: Record<string, unknown> = { to: "t" };
+      for (let i = 0; i < 40; i++) input[`k${String(i).padStart(2, "0")}`] = "v".repeat(100);
+      const msg = await confirmText(input, { ...transfer, additionalProperties: true });
+      expect(msg).toContain("Agent-provided input (41 fields):\nto: \"t\"\nk00: ");
+      expect(msg).toMatch(/\u2026\(\d+ more fields omitted\)\n\nAllow\?$/);
+      const body = msg.split("fields):\n")[1]!.split("\n\nAllow?")[0]!;
+      expect(body.length).toBeLessThanOrEqual(1100);
+    });
+
+    it("states zero fields", async () => {
+      expect(await confirmText({})).toContain("Agent-provided input (0 fields).\n\nAllow?");
+    });
   });
 
   it("destructive uses confirmMessage when given", async () => {
