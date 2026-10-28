@@ -44,12 +44,8 @@ export function agentFields(form: HTMLFormElement): Map<string, Field[]> {
 }
 
 function labelText(el: Field): string {
-  const labels: HTMLLabelElement[] = [];
-  if (el.id) {
-    for (const l of Array.from(el.ownerDocument.querySelectorAll("label"))) {
-      if (l.getAttribute("for") === el.id) labels.push(l);
-    }
-  }
+  // el.labels: associated labels without scanning every label in the document per field.
+  const labels: HTMLLabelElement[] = el.labels ? Array.from(el.labels) : [];
   if (labels.length === 0) {
     const wrap = el.closest("label");
     if (wrap) labels.push(wrap);

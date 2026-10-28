@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { EMPTY_OBJECT_SCHEMA, agentFields, schemaFromForm, validateInput } from "../../../src/runtime/agent/formSchema";
 
 function form(html: string): HTMLFormElement {
@@ -87,6 +87,15 @@ describe("schemaFromForm", () => {
     expect(p.w!.description).toBe("W3");
     expect(p.d!.description).toBe("D4");
     expect(p.e!.description).toBe("E5");
+  });
+
+  it("uses every associated label, including one outside the form, without a document-wide label scan", () => {
+    document.body.innerHTML = `<label for="x">Outer</label><form><label for="x">Inner</label><input id="x" name="x"></form>`;
+    const scan = vi.spyOn(document, "querySelectorAll");
+    const s = schemaFromForm(document.querySelector("form")!);
+    expect(s.properties!.x!.description).toBe("Outer Inner");
+    expect(scan.mock.calls.filter(([sel]) => sel === "label")).toEqual([]);
+    scan.mockRestore();
   });
 });
 
