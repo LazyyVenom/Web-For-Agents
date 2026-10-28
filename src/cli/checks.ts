@@ -3,6 +3,7 @@ import { AI_BOTS } from "../shared/bots";
 import { AGENT_MAP_PATH, LLMS_TXT_PATH, MARKDOWN_MIME, ROBOTS_PATH, SITEMAP_PATH } from "../shared/conventions";
 import { errorMessage } from "../shared/errors";
 import { jsonLdTypes } from "../shared/jsonLd";
+import { DESCRIPTION_MAX_CHARS, DESCRIPTION_MIN_CHARS, TITLE_MAX_CHARS } from "../shared/metaLength";
 import { stripBom } from "../shared/text";
 import { hasScheme, trimTrailingSlash, tryResolveUrl } from "../shared/url";
 import { isOk, looksLikeHtml, MAX_BODY_BYTES, type FetchResult } from "./fetch";
@@ -65,9 +66,6 @@ export const CHECK_WEIGHTS: Record<CheckId, number> = {
 
 const CONTENT_MIN_CHARS = 200;
 const CONTENT_WARN_CHARS = 50;
-const TITLE_MAX_CHARS = 70;
-const DESCRIPTION_MIN_CHARS = 50;
-const DESCRIPTION_MAX_CHARS = 160;
 const MAX_BODY_LABEL = `${MAX_BODY_BYTES / (1024 * 1024)} MiB`;
 
 type Outcome = Omit<CheckResult, "id" | "title" | "weight" | "points">;

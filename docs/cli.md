@@ -36,6 +36,8 @@ Checks and weights (total 100):
 | Canonical URL | 5 |
 | Agent map | 4 |
 
+The title check warns above 60 characters, and the meta description check warns outside 50 to 160 characters. The build and `generate` use the same limits for their warnings.
+
 A passing check earns its full weight, a warning half, a failure none. Each non-passing check prints a `Fix:` line.
 
 Exit codes: `0` ok, `1` score below `--min-score`, `2` usage error or fatal error (unreachable page, non-2xx status, not HTML, timeout).
