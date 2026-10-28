@@ -33,7 +33,7 @@ export function applyHeadTags(tags: HeadTag[], doc: Document | undefined = defau
       el = doc.createElement(tag.kind === "title" ? "title" : tag.kind === "meta" ? "meta" : "link");
       doc.head.appendChild(el);
     }
-    el.setAttribute(HEAD_OWNED_ATTR, tag.key);
+    if (el.getAttribute(HEAD_OWNED_ATTR) !== tag.key) el.setAttribute(HEAD_OWNED_ATTR, tag.key);
     if (tag.kind === "title") {
       if (el.textContent !== tag.text) el.textContent = tag.text;
     } else {
