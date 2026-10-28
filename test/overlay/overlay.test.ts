@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mountOverlay, type OverlayHandle } from "../../src/overlay/index";
 
 let handle: OverlayHandle | undefined;
@@ -158,6 +158,33 @@ describe("mountOverlay", () => {
     document.querySelector("main")!.insertAdjacentHTML("beforeend", "<p>Later</p>");
     await wait(400);
     expect(shadow().textContent).toContain("Later");
+  });
+
+  it("refreshes at least once a second on a page that never stops mutating", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    try {
+      document.body.innerHTML = `<main><p id="n">tick 0</p></main>`;
+      handle = mountOverlay({ open: true });
+      const tick = async (n: number) => {
+        document.getElementById("n")!.textContent = `tick ${n}`;
+        await vi.advanceTimersByTimeAsync(200);
+      };
+      // Mutations every 200 ms keep resetting the 250 ms debounce.
+      for (let n = 1; n <= 4; n++) await tick(n);
+      expect(shadow().textContent).toContain("tick 0");
+      await tick(5); // 1000 ms after the first change: the max wait forces a refresh.
+      expect(shadow().textContent).toContain("tick 5");
+      for (let n = 6; n <= 10; n++) await tick(n);
+      expect(shadow().textContent).toContain("tick 10");
+      // Once mutations stop, the plain debounce applies again.
+      document.getElementById("n")!.textContent = "done";
+      await vi.advanceTimersByTimeAsync(249);
+      expect(shadow().textContent).not.toContain("done");
+      await vi.advanceTimersByTimeAsync(1);
+      expect(shadow().textContent).toContain("done");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refresh button re-collects", () => {

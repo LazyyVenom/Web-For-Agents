@@ -1,6 +1,17 @@
 import TurndownService from "turndown";
 import { gfm } from "turndown-plugin-gfm";
+import { collapseWhitespace } from "./text";
 import { resolveUrl } from "./url";
+
+/**
+ * Makes metadata (a title or description) safe to interpolate into markdown structure such as a
+ * heading, a list item or link text: whitespace (newlines included) collapses to single spaces, so
+ * it cannot start a new block, and `\`, `[`, `]` and `<` are backslash-escaped, so it cannot close
+ * link text or open raw HTML. Nothing is removed: "Vec<T> docs" becomes "Vec\<T> docs".
+ */
+export function escapeMarkdownInline(s: string | null | undefined): string {
+  return collapseWhitespace(s).replace(/[\\[\]<]/g, "\\$&");
+}
 
 /** ` "title"` for a markdown link/image, or "" when there is no title attribute. */
 function titleSuffix(el: Element): string {
@@ -8,7 +19,8 @@ function titleSuffix(el: Element): string {
   return title ? ` "${title.replace(/"/g, '\\"')}"` : "";
 }
 
-function escapeLinkTarget(url: string): string {
+/** Percent-encodes the characters that would end or split a markdown link target. */
+export function escapeLinkTarget(url: string): string {
   return url.replace(/\(/g, "%28").replace(/\)/g, "%29").replace(/\s/g, "%20");
 }
 
@@ -20,6 +32,12 @@ function createService(pageUrl?: string): TurndownService {
     emDelimiter: "_",
   });
   service.use(gfm);
+  // Never emit script or style source as text.
+  service.remove(["script", "style", "noscript", "template"]);
+  // Turndown escapes markdown syntax in text nodes but not "<": text such as "&lt;img onerror=...&gt;"
+  // would come out as live HTML. Escape a "<" that could open a tag.
+  const escapeText = service.escape.bind(service);
+  service.escape = (text: string): string => escapeText(text).replace(/<(?=[a-zA-Z/!?])/g, "\\<");
   // Single-space list markers ("- a") instead of turndown's padded "-   a".
   service.addRule("wfaListItem", {
     filter: "li",
@@ -52,7 +70,7 @@ function createService(pageUrl?: string): TurndownService {
       const el = node as Element;
       const src = el.getAttribute("src");
       if (!src) return "";
-      const alt = (el.getAttribute("alt") ?? "").replace(/\s*\n+\s*/g, " ");
+      const alt = escapeMarkdownInline(el.getAttribute("alt"));
       return `![${alt}](${escapeLinkTarget(resolveUrl(src, pageUrl))}${titleSuffix(el)})`;
     },
   });
@@ -65,10 +83,13 @@ export function htmlToMarkdown(contentHtml: string, pageUrl?: string): string {
   return md ? md + "\n" : "";
 }
 
-/** Like htmlToMarkdown, prepending "# title" when the title is non-empty and the content has no <h1>. */
+/**
+ * Like htmlToMarkdown, prepending "# title" when the title is non-empty and the content has no <h1>.
+ * The title is escaped with escapeMarkdownInline.
+ */
 export function buildPageMarkdown(title: string, contentHtml: string, pageUrl?: string): string {
   const body = htmlToMarkdown(contentHtml, pageUrl);
-  const t = title.trim();
+  const t = escapeMarkdownInline(title);
   if (!t || /<h1[\s>]/i.test(contentHtml)) return body;
   return `# ${t}\n\n${body}`.replace(/\n+$/, "\n");
 }

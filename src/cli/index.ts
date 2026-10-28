@@ -2,6 +2,7 @@ import { errorMessage, withPrefix } from "../shared/errors";
 import { audit } from "./audit";
 import { USAGE, parseCliArgs } from "./args";
 import { formatText } from "./report";
+import { safeJson, safeText } from "./terminal";
 
 export { audit } from "./audit";
 export type { AuditOptions, AuditReport } from "./audit";
@@ -34,10 +35,12 @@ export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<num
   const report = await audit(args.url!, {
     timeoutMs: args.timeoutMs,
     ...(args.agentMap === undefined ? {} : { agentMapPath: args.agentMap }),
+    ...(args.blockPrivateRedirects ? { blockPrivateRedirects: true } : {}),
   });
-  io.stdout(args.json ? JSON.stringify(report, null, 2) + "\n" : formatText(report));
+  // --json keeps page data raw; safeJson only writes terminal-active characters as \u escapes.
+  io.stdout(args.json ? safeJson(report, 2) + "\n" : formatText(report));
   if (report.error !== undefined) {
-    io.stderr(withPrefix(`audit failed: ${report.error}\n`));
+    io.stderr(withPrefix(`audit failed: ${safeText(report.error)}\n`));
     return 2;
   }
   if (args.minScore !== undefined && report.score < args.minScore) {

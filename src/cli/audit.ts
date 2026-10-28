@@ -11,6 +11,7 @@ import { hasScheme, tryResolveUrl } from "../shared/url";
 import { isMissing, runChecks, scoreOf, type CheckResult } from "./checks";
 import { DEFAULT_TIMEOUT_MS, fetchText, isOk, looksLikeHtml, notFetched, type FetchResult } from "./fetch";
 import { extractHtmlFacts, markdownAlternate } from "./html";
+import { isPrivateHost } from "./privateAddress";
 import { parseRobots } from "./robots";
 
 export interface AuditOptions {
@@ -23,6 +24,22 @@ export interface AuditOptions {
    * with "/" or a full URL is fetched as is. Default "/agents.json".
    */
   agentMapPath?: string;
+  /**
+   * Refuse redirects from a public host to a private, loopback or link-local address instead of
+   * following them with a warning. Default false. Each hop's host is resolved before the request, so
+   * a DNS-rebinding host that answers differently at connect time is not caught: this is a guard
+   * against accidental internal fetches, not a sandbox.
+   */
+  blockPrivateRedirects?: boolean;
+}
+
+/**
+ * Test hooks for `auditWithHooks`; not part of the public API.
+ * @internal
+ */
+export interface AuditHooks {
+  /** Classifies a URL hostname as private. Default: isPrivateHost (IP ranges, "localhost", DNS). */
+  isPrivateHost?: (hostname: string) => Promise<boolean>;
 }
 
 export interface AuditReport {
@@ -33,6 +50,8 @@ export interface AuditReport {
   maxScore: 100;
   checks: CheckResult[];
   error?: string;
+  /** Redirects that crossed from a public host to a private address. Absent when there were none. */
+  warnings?: string[];
 }
 
 /** At most this many directories (root included) are probed for llms.txt and the agent map. */
@@ -69,11 +88,42 @@ async function probe(get: (u: string) => Promise<FetchResult>, urls: string[]): 
 const sameOrigin = (a: string, b: string): boolean => new URL(a).origin === new URL(b).origin;
 
 /** Audits `url` for AI-agent readiness. Fatal problems are reported in `error`, not thrown. */
-export async function audit(url: string, opts: AuditOptions = {}): Promise<AuditReport> {
+export function audit(url: string, opts: AuditOptions = {}): Promise<AuditReport> {
+  return auditWithHooks(url, opts);
+}
+
+/**
+ * `audit` with test hooks. Not exported from the package entry point.
+ * @internal
+ */
+export async function auditWithHooks(url: string, opts: AuditOptions = {}, hooks: AuditHooks = {}): Promise<AuditReport> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const get = (u: string, accept?: string): Promise<FetchResult> =>
-    fetchText(u, { timeoutMs, userAgent: opts.userAgent, ...(accept ? { accept } : {}) });
+  // One classification per host for the whole audit; fetchText bounds each wait by its timeout.
+  const classify = hooks.isPrivateHost ?? isPrivateHost;
+  const classified = new Map<string, Promise<boolean>>();
+  const isPrivate = (host: string): Promise<boolean> => {
+    let p = classified.get(host);
+    if (!p) classified.set(host, (p = classify(host)));
+    return p;
+  };
   const report: AuditReport = { url, finalUrl: url, redirected: false, score: 0, maxScore: 100, checks: [] };
+  const warnings = new Set<string>();
+  const get = async (u: string, accept?: string): Promise<FetchResult> => {
+    const r = await fetchText(u, {
+      timeoutMs,
+      userAgent: opts.userAgent,
+      isPrivateHost: isPrivate,
+      ...(opts.blockPrivateRedirects ? { blockPrivateRedirects: true } : {}),
+      ...(accept ? { accept } : {}),
+    });
+    if (r.privateRedirect) {
+      const { from, to } = r.privateRedirect;
+      const what = opts.blockPrivateRedirects ? "blocked a redirect" : "followed a redirect";
+      warnings.add(`${what} from public ${new URL(from).host} to private address ${to}`);
+      report.warnings = [...warnings];
+    }
+    return r;
+  };
   try {
     const page = await get(url, "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5");
     report.finalUrl = page.finalUrl;
@@ -95,9 +145,6 @@ export async function audit(url: string, opts: AuditOptions = {}): Promise<Audit
     const getSameOrigin = (u: string, accept?: string): Promise<FetchResult> =>
       sameOrigin(u, page.finalUrl) ? get(u, accept) : Promise.resolve(notFetched(u));
 
-    const robots = await get(at(ROBOTS_PATH));
-    const listed = isOk(robots) ? parseRobots(robots.body).sitemaps[0] : undefined;
-    const sitemapUrl = (listed && tryResolveUrl(listed, page.finalUrl)) || at(SITEMAP_PATH);
     const alt = markdownAlternate(html);
     const altUrl = alt === null ? null : tryResolveUrl(alt, page.finalUrl);
     const pagePath = new URL(page.finalUrl).pathname;
@@ -115,8 +162,17 @@ export async function audit(url: string, opts: AuditOptions = {}): Promise<Audit
           ? [new URL(custom, page.finalUrl).href]
           : inDirs(custom.replace(/^\.\//, ""));
 
-    const [sitemap, llmsTxt, markdown, agentMap] = await Promise.all([
-      getSameOrigin(sitemapUrl),
+    // Only the sitemap location depends on robots.txt; every other file is fetched alongside it,
+    // so a slow or hanging robots.txt delays the sitemap alone. Created after the synchronous
+    // URL work above, so a throw there cannot leave these promises unobserved.
+    const robotsP = get(at(ROBOTS_PATH));
+    const sitemapP = robotsP.then((robots) => {
+      const listed = isOk(robots) ? parseRobots(robots.body).sitemaps[0] : undefined;
+      return getSameOrigin((listed && tryResolveUrl(listed, page.finalUrl)) || at(SITEMAP_PATH));
+    });
+    const [robots, sitemap, llmsTxt, markdown, agentMap] = await Promise.all([
+      robotsP,
+      sitemapP,
       probe(get, inDirs(LLMS_TXT_PATH.slice(1))),
       getSameOrigin(markdownUrl, `${MARKDOWN_MIME},*/*;q=0.5`),
       probe(get, agentMapUrls),

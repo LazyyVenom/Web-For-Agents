@@ -26,6 +26,8 @@ export interface OverlayHandle {
 }
 
 const DEBOUNCE_MS = 250;
+/** A page that keeps mutating still gets a refresh at least this often while the panel is open. */
+const MAX_WAIT_MS = 1000;
 
 const STYLE = `
 :host { all: initial; }
@@ -95,15 +97,22 @@ export function mountOverlay(options: OverlayOptions = {}): OverlayHandle {
   let open = false;
   let disposed = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  /** When the first change of the pending batch was seen; undefined when nothing is pending. */
+  let pendingSince: number | undefined;
   let observer: MutationObserver | undefined;
 
   const refresh = (): void => {
+    clearTimeout(timer);
+    pendingSince = undefined;
     if (disposed || !open) return;
     renderPanel(root, collectPageReport(document, collectOpts));
   };
+  /** Debounces by DEBOUNCE_MS, but never delays a pending refresh past MAX_WAIT_MS. */
   const schedule = (): void => {
+    const now = performance.now();
+    pendingSince ??= now;
     clearTimeout(timer);
-    timer = setTimeout(refresh, DEBOUNCE_MS);
+    timer = setTimeout(refresh, Math.max(0, Math.min(DEBOUNCE_MS, pendingSince + MAX_WAIT_MS - now)));
   };
   const onMutations = (records: MutationRecord[]): void => {
     const outside = records.some((r) => {
@@ -131,6 +140,7 @@ export function mountOverlay(options: OverlayOptions = {}): OverlayHandle {
       observer?.disconnect();
       observer = undefined;
       clearTimeout(timer);
+      pendingSince = undefined;
     }
   };
 

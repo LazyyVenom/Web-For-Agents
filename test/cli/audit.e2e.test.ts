@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runCli } from "../../src/cli/index";
+import { audit, runCli } from "../../src/cli/index";
 import { wellFormedPage } from "../helpers/page";
 import { useTestServers } from "../helpers/server";
 
@@ -222,5 +222,41 @@ describe("audit e2e", () => {
     const { code, out } = await run(["audit", s.url.replace("http://", "") + "/", "--json"]);
     expect(code).toBe(0);
     expect(JSON.parse(out).finalUrl).toBe(s.url + "/");
+  });
+
+  it("a hanging robots.txt delays only the sitemap", async () => {
+    const seen = new Map<string, number>();
+    const t0 = Date.now();
+    const s = await serve({}, (req, res) => {
+      const path = (req.url ?? "/").split("?")[0]!;
+      seen.set(path, Date.now() - t0);
+      if (path === "/robots.txt") return; // never answers
+      if (path === "/") {
+        res.writeHead(200, htmlH);
+        res.end(spaShell);
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+    const timeout = 1500;
+    const { out } = await run(["audit", s.url + "/", "--json", "--timeout", String(timeout)]);
+    expect(JSON.parse(out).checks.find((c: Check) => c.id === "robots").message).toContain("timed out");
+    for (const p of ["/llms.txt", "/agents.json", "/index.md"]) expect(seen.get(p)).toBeLessThan(timeout / 2);
+    expect(seen.get("/sitemap.xml")).toBeGreaterThanOrEqual(timeout);
+  });
+
+  it("fetches no site files when building their URLs throws", async () => {
+    const seen: string[] = [];
+    const s = await serve({}, (req, res) => {
+      seen.push((req.url ?? "/").split("?")[0]!);
+      res.writeHead(200, htmlH);
+      res.end(spaShell);
+    });
+    // The CLI validates --agent-map; the API does not, so a bad URL throws inside audit().
+    const report = await audit(s.url + "/", { timeoutMs: 2000, agentMapPath: "http://[bad" });
+    expect(report.error).toMatch(/^unexpected error: /);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(seen).toEqual(["/"]);
   });
 });

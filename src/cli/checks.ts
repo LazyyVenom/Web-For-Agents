@@ -7,7 +7,7 @@ import { stripBom } from "../shared/text";
 import { hasScheme, trimTrailingSlash, tryResolveUrl } from "../shared/url";
 import { isOk, looksLikeHtml, MAX_BODY_BYTES, type FetchResult } from "./fetch";
 import { getLinks, getMeta, type HtmlFacts } from "./html";
-import { isAllowed, parseRobots } from "./robots";
+import { isAllowed, parseRobots, type ParsedRobots } from "./robots";
 
 export type CheckId =
   | "content"
@@ -225,7 +225,12 @@ function checkRobots({ page, robots }: AuditInputs): Outcome {
   }
   if (isMissing(robots)) return warn(`${ROBOTS_PATH} not found${why(robots)}`, missingFix);
   const parsed = parseRobots(robots.body);
-  const path = pathAndQuery(page.finalUrl);
+  const out = robotsVerdict(parsed, pathAndQuery(page.finalUrl));
+  // A cap was hit: the verdict covers only the rules that were read, so say so.
+  return parsed.truncated ? { ...out, message: `${out.message} (${parsed.truncated})` } : out;
+}
+
+function robotsVerdict(parsed: ParsedRobots, path: string): Outcome {
   if (!isAllowed(parsed, "*", path)) {
     return fail(
       `${ROBOTS_PATH} blocks ${path} for all crawlers`,
