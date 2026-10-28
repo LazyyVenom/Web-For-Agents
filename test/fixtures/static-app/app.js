@@ -194,7 +194,8 @@ function start() {
       document.head.appendChild(script);
       break;
     }
-    case "/syncxhr": {
+    case "/syncxhr":
+    case "/syncxhr2": {
       // a synchronous XHR the page survives (it falls back), and one it does not
       let text = "fallback";
       try {

@@ -184,7 +184,18 @@ export function createBuildPlugin(resolved: ResolvedOptions, extensions: Prerend
         `${LOG_PREFIX} stopped after ${pr.maxRoutes} routes (prerender.maxRoutes); raise it to include more routes`,
       );
     }
-    for (const { route, message } of result.renderWarnings) logger.warn(`${LOG_PREFIX} ${route}: ${message}`);
+    for (const w of result.warnings ?? []) logger.warn(`${LOG_PREFIX} ${w}`);
+    // One line per distinct problem (a refused URL), with the routes it affected.
+    const byMessage = new Map<string, string[]>();
+    for (const { route, message } of result.renderWarnings) {
+      const routes = byMessage.get(message) ?? [];
+      routes.push(route);
+      byMessage.set(message, routes);
+    }
+    for (const [message, routes] of byMessage) {
+      const shown = routes.slice(0, 3).join(", ") + (routes.length > 3 ? ", ..." : "");
+      logger.warn(`${LOG_PREFIX} ${message} (${routes.length} route${routes.length === 1 ? "" : "s"}: ${shown})`);
+    }
     if (result.tooLongRoutes.length > 0) {
       logger.warn(
         `${LOG_PREFIX} skipped ${result.tooLongRoutes.length} route(s) whose file names would be too long ` +

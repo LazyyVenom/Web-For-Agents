@@ -1,6 +1,6 @@
 import { fork, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -104,6 +104,13 @@ async function bundleFromSource(file: string): Promise<string> {
       rmSync(tmp, { recursive: true, force: true }); // another build won the race
     }
   }
+  // Mark the current bundle as in use, so another build's pruning spares it.
+  try {
+    const now = new Date();
+    utimesSync(outDir, now, now);
+  } catch {
+    // best effort
+  }
   // Keep only the current bundle (older ones are stale), sparing any another build just wrote.
   for (const entry of readdirSync(cacheDir)) {
     if (entry === id || !entry.startsWith("render-child-")) continue;
@@ -178,7 +185,12 @@ function exitError(code: number | null, signal: NodeJS.Signals | null, stderr: s
 export function createIsolatedHappyDomRenderer(
   options: HappyDomRendererOptions = {},
   iso: IsolationOptions = {},
-): Renderer & { /** @internal The running child, if any. */ childProcess(): ChildProcess | undefined } {
+): Renderer & {
+  /** @internal The running child, if any. */
+  childProcess(): ChildProcess | undefined;
+  /** @internal The environment the latest child was started with. */
+  childEnv(): Record<string, string> | undefined;
+} {
   interface Pending {
     resolve(r: RenderResult): void;
     reject(e: Error): void;
@@ -192,6 +204,7 @@ export function createIsolatedHappyDomRenderer(
   /** Children replaced by one allowed to reach a new origin: closed once their renders finish. */
   const retiring = new Set<ChildProcess>();
   let current: ChildProcess | undefined;
+  let lastEnv: Record<string, string> | undefined;
 
   const inFlight = (cp: ChildProcess) => [...pending.values()].filter((p) => p.cp === cp).length;
   const closeChild = async (cp: ChildProcess) => {
@@ -218,14 +231,19 @@ export function createIsolatedHappyDomRenderer(
 
   const start = async (origins: string[]): Promise<ChildProcess> => {
     const entry = await childEntryFile();
-    const childOptions: ChildOptions = { ...options, localOrigins: origins };
-    const cp = fork(entry, [], {
-      env: {
+    // The environment carries options only: script bodies could exceed the OS limit on one
+    // environment string (about 128 KiB on Linux, 32 KB on Windows), so they follow over IPC.
+    const { syncResources, ...small } = options;
+    const childOptions: ChildOptions = { ...small, localOrigins: origins };
+    const env = {
         ...scrubbedEnv(),
         ...iso.extraEnv,
         WFA_RENDER_CHILD: "1",
         WFA_RENDER_OPTIONS: JSON.stringify(childOptions),
-      },
+    };
+    lastEnv = env;
+    const cp = fork(entry, [], {
+      env,
       execArgv: execArgv(entry, iso),
       cwd: tmpdir(),
       stdio: ["ignore", "ignore", "pipe", "ipc"],
@@ -254,6 +272,8 @@ export function createIsolatedHappyDomRenderer(
       cp.once("message", () => {
         cp.off("exit", onExit);
         cp.off("error", reject);
+        // Sent before any render, and IPC keeps order, so every render sees them.
+        if (syncResources) cp.send({ type: "resources", syncResources } satisfies ParentMessage);
         resolve();
       });
     });
@@ -278,6 +298,7 @@ export function createIsolatedHappyDomRenderer(
   return {
     name: "happy-dom",
     childProcess: () => current,
+    childEnv: () => lastEnv,
     async render(url: string, timeoutMs: number, inPage?: InPageScripts): Promise<RenderResult> {
       if (closed) {
         const e = new RenderError("happy-dom", "the renderer was closed");

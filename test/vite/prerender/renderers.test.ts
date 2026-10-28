@@ -425,8 +425,8 @@ describe("happy-dom render process isolation", { timeout: SUITE_TIMEOUT_MS }, ()
       if (process.allowedNodeEnvironmentFlags.has("--permission")) {
         expect(res).toBeInstanceOf(RenderError);
         const msg = (res as Error).message;
-        expect(msg).toContain(`${server.origin}/classic.js must load synchronously`);
-        expect(msg).toContain('add type="module" or defer');
+        expect(msg).toContain(`the classic script ${server.origin}/classic.js loads synchronously`);
+        expect(msg).toContain('add type="module" or defer to it');
         expect(msg).toContain("Chrome");
       } else {
         // without the permission model the child may spawn, so the load works

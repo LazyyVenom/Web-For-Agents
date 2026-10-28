@@ -5,6 +5,7 @@ import { isExcluded } from "../options";
 import { PrerenderInterruptedError, crawlRoutes, formatFailures, type CrawlResult } from "./crawl";
 import { assertExtensionNames, inPageExpression, type PrerenderExtension } from "./extensions";
 import { mountPath } from "../../shared/url";
+import { parseHtml } from "./dom";
 import { isFullUrlBase, isRelativeBase, publicMdUrl } from "./paths";
 import { prepareShell } from "./probe";
 import { RenderError, createRendererPool, type InPageScripts } from "./renderers";
@@ -50,7 +51,10 @@ export async function prerenderSite(input: {
     happyDomCompat: mayUseHappyDom(pr),
   });
   try {
-    const syncResources = mayUseHappyDom(pr) ? await loadClassicScripts(shell, server.origin + mountPath(mount) + "/") : {};
+    const prefetched = mayUseHappyDom(pr)
+      ? await loadClassicScripts(server.origin + mountPath(mount) + "/")
+      : { resources: {}, warnings: [] };
+    const syncResources = prefetched.resources;
     const pool = createRendererPool({
       ...(pr.executablePath !== undefined ? { executablePath: pr.executablePath } : {}),
       allowOrigins: pr.allowOrigins,
@@ -85,7 +89,7 @@ export async function prerenderSite(input: {
         throw e;
       });
       if (result.failures.length > 0) throw new Error(formatFailures(result.failures, pr.fallback));
-      return result;
+      return prefetched.warnings.length > 0 ? { ...result, warnings: prefetched.warnings } : result;
     } finally {
       await pool.closeAll();
     }
@@ -96,29 +100,46 @@ export async function prerenderSite(input: {
 
 /** src of each classic script in `html` that a browser runs synchronously (no async, defer or module type). */
 export function classicScriptSrcs(html: string): string[] {
-  const out: string[] = [];
-  for (const m of html.matchAll(/<script\b([^>]*)>/gi)) {
-    const attrs = m[1]!;
-    const attr = (name: string) =>
-      new RegExp(`(?:^|\\s)${name}(?:\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+)))?(?=\\s|$)`, "i").exec(attrs);
-    const src = attr("src");
-    if (!src || attr("async") || attr("defer")) continue;
-    const type = attr("type");
-    const t = (type?.[1] ?? type?.[2] ?? type?.[3] ?? "").trim().toLowerCase();
-    if (type && t !== "" && !/^(text|application)\/(x-)?(java|ecma)script$/.test(t)) continue;
-    const value = src[1] ?? src[2] ?? src[3];
-    if (value) out.push(value);
+  const { document, dispose } = parseHtml(html);
+  try {
+    const out: string[] = [];
+    for (const el of Array.from(document.querySelectorAll("script[src]"))) {
+      if (el.hasAttribute("async") || el.hasAttribute("defer")) continue;
+      const type = (el.getAttribute("type") ?? "").trim().toLowerCase();
+      if (type !== "" && !/^(text|application)\/(x-)?(java|ecma)script$/.test(type)) continue;
+      const src = el.getAttribute("src")!.trim();
+      if (src !== "") out.push(src);
+    }
+    return out;
+  } finally {
+    dispose();
   }
-  return out;
 }
+
+/** Largest classic script served from memory, and the most all of them may take together. */
+export const MAX_PREFETCH_SCRIPT_BYTES = 4 * 1024 * 1024;
+export const MAX_PREFETCH_TOTAL_BYTES = 10 * 1024 * 1024;
 
 /**
  * Loads the shell's classic scripts from the prerender server, so the happy-dom render process can
- * serve its synchronous loads of them from memory (see HappyDomRendererOptions.syncResources).
+ * serve its synchronous loads of them from memory (see HappyDomRendererOptions.syncResources). The
+ * shell is read from the server, so URLs match what pages request (a full-URL base is already
+ * mapped to the server). Scripts over the size caps are left out, with a warning.
  */
-async function loadClassicScripts(shell: string, base: string): Promise<Record<string, { body: string; contentType: string }>> {
+export async function loadClassicScripts(
+  base: string,
+  caps = { script: MAX_PREFETCH_SCRIPT_BYTES, total: MAX_PREFETCH_TOTAL_BYTES },
+): Promise<{ resources: Record<string, { body: string; contentType: string }>; warnings: string[] }> {
   const origin = new URL(base).origin;
-  const out: Record<string, { body: string; contentType: string }> = {};
+  const resources: Record<string, { body: string; contentType: string }> = {};
+  const warnings: string[] = [];
+  let shell: string;
+  try {
+    shell = await (await fetch(base)).text();
+  } catch {
+    return { resources, warnings };
+  }
+  let total = 0;
   for (const src of classicScriptSrcs(shell)) {
     let url: URL;
     try {
@@ -128,13 +149,25 @@ async function loadClassicScripts(shell: string, base: string): Promise<Record<s
     }
     if (url.origin !== origin) continue;
     url.hash = "";
+    if (resources[url.href]) continue;
     try {
-      const res = await fetch(url, { headers: { host: url.host } });
+      const res = await fetch(url);
       if (!res.ok) continue;
-      out[url.href] = { body: await res.text(), contentType: res.headers.get("content-type") ?? "text/javascript" };
+      const body = await res.text();
+      const size = Buffer.byteLength(body);
+      if (size > caps.script || total + size > caps.total) {
+        warnings.push(
+          `the classic script ${url.pathname} (${Math.ceil(size / 1024)} KiB) is too large to preload for happy-dom ` +
+            `(limits: ${caps.script / 1024 / 1024} MiB per script, ${caps.total / 1024 / 1024} MiB in all), so pages that ` +
+            `load it will fail; add type="module" or defer to it, or render with Chrome`,
+        );
+        continue;
+      }
+      total += size;
+      resources[url.href] = { body, contentType: res.headers.get("content-type") ?? "text/javascript" };
     } catch {
       // left to the renderer, which then explains the failed load
     }
   }
-  return out;
+  return { resources, warnings };
 }

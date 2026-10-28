@@ -20,6 +20,7 @@ export interface ChildOptions extends HappyDomRendererOptions {
 
 export type ParentMessage =
   | { type: "render"; id: number; url: string; timeoutMs: number; inPage?: InPageScripts }
+  | { type: "resources"; syncResources: NonNullable<HappyDomRendererOptions["syncResources"]> }
   | { type: "close" };
 
 export type ChildMessage =
@@ -39,7 +40,10 @@ async function runRenderChild(): Promise<void> {
   const { createHappyDomRenderer } = await import("./happyDom");
   const renderer: Renderer = createHappyDomRenderer(options);
   process.on("message", (m: ParentMessage) => {
-    if (m.type === "render") {
+    if (m.type === "resources") {
+      // read by the renderer at request time
+      options.syncResources = m.syncResources;
+    } else if (m.type === "render") {
       renderer.render(m.url, m.timeoutMs, m.inPage).then(
         (r) =>
           send({

@@ -455,6 +455,18 @@ describe("createBuildPlugin", () => {
     );
   }, 30_000);
 
+  it.skipIf(!process.allowedNodeEnvironmentFlags.has("--permission"))(
+    "logs a refused synchronous request once, with the routes it affected",
+    async () => {
+      const t = make({ routes: ["/syncxhr", "/syncxhr2"], prerender: { crawl: false } });
+      await t.run();
+      const lines = t.warnings().filter((w) => w.includes("synchronous XMLHttpRequest"));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("(2 routes: /syncxhr, /syncxhr2)");
+    },
+    30_000,
+  );
+
   it("warns when routes are truncated", async () => {
     const t = make({ prerender: { maxRoutes: 2, concurrency: 1 } });
     await t.run();

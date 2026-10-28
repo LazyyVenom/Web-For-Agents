@@ -37,6 +37,8 @@ export interface CrawlResult {
   tooLongRoutes: string[];
   /** Problems that did not fail a render but may have changed its output, by route. Sorted. */
   renderWarnings: Array<{ route: string; message: string }>;
+  /** Build-wide warnings (not tied to a route). */
+  warnings?: string[];
 }
 
 export interface CrawlOptions {

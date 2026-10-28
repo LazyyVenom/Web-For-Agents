@@ -133,14 +133,25 @@ const BLOCKED_SCHEME = "wfa-blocked:";
 /** False under Node's permission model without --allow-child-process. */
 const canSpawn = (process as { permission?: { has(scope: string): boolean } }).permission?.has("child") ?? true;
 
+/** A synchronous request the render process refused: a classic script's load, or a synchronous XHR. */
+export interface SyncRefusal {
+  url: string;
+  kind: "script" | "xhr";
+}
+
+/** One sentence per refused synchronous request, with the remedy for its kind. */
+export function syncRefusalText(r: SyncRefusal): string {
+  return r.kind === "script"
+    ? `the classic script ${r.url} loads synchronously (no async, defer or type="module"), which the isolated ` +
+        `happy-dom renderer cannot do: add type="module" or defer to it, or render the route with Chrome (prerender.routeRenderers)`
+    : `the synchronous XMLHttpRequest to ${r.url} cannot run in the isolated happy-dom renderer: make the request ` +
+        `asynchronous, or render the route with Chrome (prerender.routeRenderers)`;
+}
+
 /** Text appended to a failed render's message when synchronous requests were refused. */
-export function syncHint(urls: readonly string[]): string {
-  if (urls.length === 0) return "";
-  return (
-    `; ${[...new Set(urls)].slice(0, 3).join(", ")} must load synchronously (a classic <script src> without ` +
-    `async, defer or type="module", or a synchronous XMLHttpRequest), which the isolated happy-dom renderer ` +
-    `cannot do: add type="module" or defer to the script, or render this route with Chrome (prerender.routeRenderers)`
-  );
+export function syncHint(refused: readonly SyncRefusal[]): string {
+  const unique = [...new Map(refused.map((r) => [r.kind + r.url, r])).values()];
+  return unique.slice(0, 3).map((r) => "; " + syncRefusalText(r)).join("");
 }
 
 export function createHappyDomRenderer(opts: HappyDomRendererOptions = {}): Renderer {
@@ -152,7 +163,7 @@ export function createHappyDomRenderer(opts: HappyDomRendererOptions = {}): Rend
     origin: string;
     blocked: string[];
     /** Synchronous requests refused because this process may not spawn (see beforeSyncRequest). */
-    syncRefused: string[];
+    syncRefused: SyncRefusal[];
   }
   const active = new Set<Active>();
   const ownerOf = (window: unknown): Active | undefined => {
@@ -210,7 +221,12 @@ export function createHappyDomRenderer(opts: HappyDomRendererOptions = {}): Rend
             // happy-dom makes synchronous requests by spawning a process, which the render process's
             // permission model forbids: fail them cleanly and explain why.
             if (!canSpawn) {
-              ownerOf(window)?.syncRefused.push(request.url);
+              // A script element whose src is this URL is loading it; otherwise it is a synchronous XHR.
+              const doc = (window as unknown as { document: Document }).document;
+              const isScript = Array.from(doc.querySelectorAll("script[src]")).some(
+                (el) => (el as HTMLScriptElement).src === request.url,
+              );
+              ownerOf(window)?.syncRefused.push({ url: request.url, kind: isScript ? "script" : "xhr" });
               poison(request);
             }
           },
@@ -291,7 +307,9 @@ export function createHappyDomRenderer(opts: HappyDomRendererOptions = {}): Rend
           finalPath,
           inPage: results,
           // The page rendered anyway, but without what the refused requests would have loaded.
-          ...(state.syncRefused.length > 0 ? { warnings: [syncHint(state.syncRefused).slice(2)] } : {}),
+          ...(state.syncRefused.length > 0
+            ? { warnings: [...new Map(state.syncRefused.map((r) => [r.kind + r.url, r])).values()].map(syncRefusalText) }
+            : {}),
         };
       } finally {
         active.delete(state);
