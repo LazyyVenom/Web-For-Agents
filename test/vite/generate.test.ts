@@ -92,6 +92,9 @@ describe("generateAgentFiles", () => {
     ]);
     expect(exp.actions[0].inputSchema.properties.email).toMatchObject({ type: "string", format: "email" });
     expect(exp.actions[0].inputSchema.required).toEqual(["email"]);
+    expect(exp.actions[0].inputSchema.properties.body).toEqual({ type: "string" });
+    // Static collection reads the parsed page only: it never touches globals.
+    expect("HTMLTextAreaElement" in globalThis).toBe(false);
     expect(r.written).toContain("about.html");
     expect(r.kept).toEqual([]);
   });

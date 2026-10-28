@@ -5,14 +5,8 @@ import { jsonLdTypes } from "../shared/jsonLd";
 import { routeOf, trimTrailingSlash } from "../shared/url";
 
 export { routeOf };
-import {
-  ACTION_ATTR,
-  ACTION_DESCRIPTION_ATTR,
-  ACTION_DESTRUCTIVE_ATTR,
-  AGENT_GLOBAL,
-  WEBMCP_TOOLDESCRIPTION_ATTR,
-  WEBMCP_TOOLNAME_ATTR,
-} from "../shared/conventions";
+import { AGENT_GLOBAL } from "../shared/conventions";
+import { markupActions } from "../shared/markupActions";
 import type { ActionKind, AgentGlobal } from "../shared/agent";
 import { errorMessage } from "../shared/errors";
 import { compareStrings } from "../shared/sort";
@@ -98,33 +92,12 @@ function registryActions(doc: Document): OverlayAction[] {
 }
 
 function collectActions(doc: Document): OverlayAction[] {
-  const markup: OverlayAction[] = [];
-  doc.querySelectorAll(`[${ACTION_ATTR}]`).forEach((el) => {
-    const name = el.getAttribute(ACTION_ATTR)?.trim();
-    if (!name) return;
-    markup.push({
-      name,
-      description: el.getAttribute(ACTION_DESCRIPTION_ATTR) || null,
-      kind: el.tagName === "FORM" ? "form" : "click",
-      destructive: el.getAttribute(ACTION_DESTRUCTIVE_ATTR) === "true",
-      source: "markup",
-    });
-  });
-  const declarative: OverlayAction[] = [];
-  doc.querySelectorAll(`form[${WEBMCP_TOOLNAME_ATTR}]`).forEach((el) => {
-    const name = el.getAttribute(WEBMCP_TOOLNAME_ATTR)?.trim();
-    if (!name) return;
-    declarative.push({
-      name,
-      description: el.getAttribute(WEBMCP_TOOLDESCRIPTION_ATTR) || null,
-      kind: "form",
-      destructive: false,
-      source: "webmcp-declarative",
-    });
-  });
+  const markup = markupActions(doc).map(
+    ({ name, description, kind, destructive, source }): OverlayAction => ({ name, description, kind, destructive, source }),
+  );
   const seen = new Set<string>();
   const out: OverlayAction[] = [];
-  for (const a of [...registryActions(doc), ...markup, ...declarative]) {
+  for (const a of [...registryActions(doc), ...markup]) {
     if (seen.has(a.name)) continue;
     seen.add(a.name);
     out.push(a);
