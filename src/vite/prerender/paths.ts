@@ -30,9 +30,14 @@ function decodeSegments(route: string): string[] {
   return segments(normalizeRoute(route)).map((s) => decodeURIComponent(s));
 }
 
-export function routeHtmlFile(route: string): string {
+/**
+ * The HTML file for a route. "directory": "/about" -> "about/index.html". "flat": "/about" ->
+ * "about.html". "/" is "index.html" in both.
+ */
+export function routeHtmlFile(route: string, layout: "directory" | "flat" = "directory"): string {
   const segs = decodeSegments(route);
-  return segs.length === 0 ? "index.html" : segs.join("/") + "/index.html";
+  if (segs.length === 0) return "index.html";
+  return segs.join("/") + (layout === "flat" ? ".html" : "/index.html");
 }
 
 export function routeMdFile(route: string): string {

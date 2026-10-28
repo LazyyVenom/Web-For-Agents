@@ -18,6 +18,10 @@ describe("route file helpers", () => {
     expect(routeHtmlFile("/about")).toBe("about/index.html");
     expect(routeHtmlFile("/blog/post")).toBe("blog/post/index.html");
     expect(routeHtmlFile("/caf%C3%A9")).toBe("café/index.html");
+    expect(routeHtmlFile("/", "flat")).toBe("index.html");
+    expect(routeHtmlFile("/about", "flat")).toBe("about.html");
+    expect(routeHtmlFile("/a/b/", "flat")).toBe("a/b.html");
+    expect(routeHtmlFile("/caf%C3%A9", "flat")).toBe("café.html");
     expect(routeMdFile("/")).toBe("index.md");
     expect(routeMdFile("/about")).toBe("about.md");
     expect(routeMdFile("/blog/post")).toBe("blog/post.md");

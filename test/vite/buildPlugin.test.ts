@@ -137,6 +137,68 @@ describe("createBuildPlugin", () => {
     expect(t.read("robots.txt")).toContain("Sitemap: https://a.com/sitemap.xml");
   }, 30_000);
 
+  it("writes flat HTML files with prerender.fileLayout flat", async () => {
+    const t = make({ routes: ["/fetch"], prerender: { crawl: false, fileLayout: "flat" } });
+    await t.run();
+    expect(t.read("fetch.html")).toContain("Fetched data text");
+    expect(t.has("fetch/index.html")).toBe(false);
+    expect(t.read("index.html")).toContain("data-wfa-prerendered");
+    expect(t.has("fetch.md")).toBe(true);
+    expect(t.read("sitemap.xml")).toContain("<loc>https://a.com/fetch</loc>");
+  }, 30_000);
+
+  it("respects a public flat file with fileLayout flat", async () => {
+    const t = make({ routes: ["/fetch"], prerender: { crawl: false, fileLayout: "flat" } });
+    putPublic(t, "fetch.html", "<p>mine</p>");
+    await t.run();
+    expect(t.read("fetch.html")).toBe("<p>mine</p>");
+    expect(t.warnings()).toContain("[web-for-agents] public/fetch.html exists; skipping generation");
+  }, 30_000);
+
+  it("applies markdown.transform to .md files and llms-full.txt", async () => {
+    const seen: string[] = [];
+    const t = make({
+      routes: ["/fetch"],
+      prerender: { crawl: false },
+      markdown: {
+        transform: async (p) => {
+          seen.push(`${p.route} ${p.url} ${p.title} ${p.html.includes("data-wfa-prerendered")}`);
+          return p.route === "/fetch" ? `${p.markdown}\nEXTRA ${p.route}\n` : undefined;
+        },
+      },
+    });
+    await t.run();
+    expect(seen.sort()).toEqual(["/ https://a.com/ T / true", "/fetch https://a.com/fetch T /fetch true"]);
+    expect(t.read("fetch.md")).toContain("EXTRA /fetch");
+    expect(t.read("index.md")).not.toContain("EXTRA");
+    expect(t.read("llms-full.txt")).toContain("EXTRA /fetch");
+  }, 30_000);
+
+  it("prefixes markdown.transform errors with the route and writes nothing", async () => {
+    const t = make({
+      routes: ["/fetch"],
+      prerender: { crawl: false },
+      markdown: {
+        transform: (p) => {
+          if (p.route === "/fetch") throw new Error("boom");
+          return undefined;
+        },
+      },
+    });
+    await expect(t.run()).rejects.toThrow("[web-for-agents] markdown.transform failed for /fetch: boom");
+    expect(t.has("fetch.md")).toBe(false);
+    const bad = make({ prerender: { crawl: false }, markdown: { transform: () => 1 as never } });
+    await expect(bad.run()).rejects.toThrow("markdown.transform must return a string or undefined (got number for /)");
+  }, 30_000);
+
+  it("warns once, grouped, about long titles", async () => {
+    const t = make({ routes: ["/fetch"], prerender: { crawl: false } });
+    writeFileSync(path.join(t.outDir, "assets/extra.js"), EXTRA.replace('document.title = "T " + p;', 'document.title = "T".repeat(61) + p;'));
+    await t.run();
+    const long = t.warnings().filter((w) => w.includes("Title longer than 60"));
+    expect(long).toEqual(["[web-for-agents] Title longer than 60 characters on / (62), /fetch (67)"]);
+  }, 30_000);
+
   it("skips when writeBundle never ran", async () => {
     const t = make({});
     t.configure();
