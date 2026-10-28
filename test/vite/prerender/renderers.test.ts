@@ -26,6 +26,7 @@ import type { RendererName } from "../../../src/vite/options";
 import { probeChrome } from "../../helpers/chrome";
 import { canObserveModuleLoads, wrappersInstalledBeforeHappyDom } from "../../helpers/childOrder";
 import { childEntryFile } from "../../../src/vite/prerender/happyDomProcess";
+import { isSyncResources } from "../../../src/vite/prerender/renderChild";
 
 const dir = fileURLToPath(new URL("../../fixtures/static-app/", import.meta.url));
 const shell = prepareShell(readFileSync(dir + "index.html", "utf8"), { relativeBase: false });
@@ -455,6 +456,24 @@ describe("happy-dom render process isolation", { timeout: SUITE_TIMEOUT_MS }, ()
       const err = (await pending.catch((e: unknown) => e)) as RenderError;
       expect(err).toBeInstanceOf(RenderError);
       expect(err.interrupted).toBe(true);
+    } finally {
+      await r.close();
+    }
+  });
+
+  it("accepts only well-formed resources messages", async () => {
+    expect(isSyncResources({})).toBe(true);
+    expect(isSyncResources({ "http://x/a.js": { body: "1", contentType: "text/javascript" } })).toBe(true);
+    for (const bad of [null, "x", [], new Map(), { a: { body: 1, contentType: "t" } }, { a: { body: "1" } }, { a: null }]) {
+      expect(isSyncResources(bad), JSON.stringify(bad)).toBe(false);
+    }
+    // a malformed message is ignored: the process keeps rendering
+    const r = createIsolatedHappyDomRenderer();
+    try {
+      await r.render(server.origin + "/fetch", RENDER_MS);
+      r.childProcess()!.send({ type: "resources", syncResources: { a: { body: 1 } } });
+      const res = await r.render(server.origin + "/fetch", RENDER_MS);
+      expect(res.html).toContain("Fetched data text");
     } finally {
       await r.close();
     }

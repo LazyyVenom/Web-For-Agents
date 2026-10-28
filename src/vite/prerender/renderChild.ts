@@ -28,6 +28,22 @@ export type ChildMessage =
   | { type: "result"; id: number; html: string; finalPath: string; inPage: Record<string, unknown>; warnings?: string[] }
   | { type: "error"; id: number; message: string };
 
+type SyncResources = NonNullable<HappyDomRendererOptions["syncResources"]>;
+
+/** A plain object of { body: string, contentType: string } values. */
+export function isSyncResources(v: unknown): v is SyncResources {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
+  const proto = Object.getPrototypeOf(v);
+  if (proto !== Object.prototype && proto !== null) return false;
+  return Object.values(v).every(
+    (r) =>
+      r !== null &&
+      typeof r === "object" &&
+      typeof (r as { body?: unknown }).body === "string" &&
+      typeof (r as { contentType?: unknown }).contentType === "string",
+  );
+}
+
 async function runRenderChild(): Promise<void> {
   const send = (m: ChildMessage) => process.send!(m);
   const options = JSON.parse(process.env[CHILD_OPTIONS_ENV] ?? "{}") as ChildOptions;
@@ -42,7 +58,8 @@ async function runRenderChild(): Promise<void> {
   process.on("message", (m: ParentMessage) => {
     if (m.type === "resources") {
       // read by the renderer at request time
-      options.syncResources = m.syncResources;
+      if (isSyncResources(m.syncResources)) options.syncResources = m.syncResources;
+      else process.stderr.write("render process: ignored a malformed resources message\n");
     } else if (m.type === "render") {
       renderer.render(m.url, m.timeoutMs, m.inPage).then(
         (r) =>
