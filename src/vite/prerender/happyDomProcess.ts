@@ -240,7 +240,9 @@ export function createIsolatedHappyDomRenderer(
       const p = pending.get(m.id);
       if (!p || p.cp !== cp) return;
       settle(m.id);
-      if (m.type === "result") p.resolve({ html: m.html, finalPath: m.finalPath, inPage: m.inPage });
+      if (m.type === "result") {
+        p.resolve({ html: m.html, finalPath: m.finalPath, inPage: m.inPage, ...(m.warnings ? { warnings: m.warnings } : {}) });
+      }
       else p.reject(new RenderError("happy-dom", m.message + codeGenerationHint(m.message, iso)));
     });
     await new Promise<void>((resolve, reject) => {

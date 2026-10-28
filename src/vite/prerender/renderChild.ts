@@ -24,7 +24,7 @@ export type ParentMessage =
 
 export type ChildMessage =
   | { type: "ready" }
-  | { type: "result"; id: number; html: string; finalPath: string; inPage: Record<string, unknown> }
+  | { type: "result"; id: number; html: string; finalPath: string; inPage: Record<string, unknown>; warnings?: string[] }
   | { type: "error"; id: number; message: string };
 
 async function runRenderChild(): Promise<void> {
@@ -41,7 +41,15 @@ async function runRenderChild(): Promise<void> {
   process.on("message", (m: ParentMessage) => {
     if (m.type === "render") {
       renderer.render(m.url, m.timeoutMs, m.inPage).then(
-        (r) => send({ type: "result", id: m.id, html: r.html, finalPath: r.finalPath, inPage: r.inPage }),
+        (r) =>
+          send({
+            type: "result",
+            id: m.id,
+            html: r.html,
+            finalPath: r.finalPath,
+            inPage: r.inPage,
+            ...(r.warnings ? { warnings: r.warnings } : {}),
+          }),
         (e: unknown) => send({ type: "error", id: m.id, message: errorMessage(e) }),
       );
     } else if (m.type === "close") {

@@ -4,6 +4,7 @@ import type { ResolvedOptions, ResolvedPrerender } from "../options";
 import { isExcluded } from "../options";
 import { PrerenderInterruptedError, crawlRoutes, formatFailures, type CrawlResult } from "./crawl";
 import { assertExtensionNames, inPageExpression, type PrerenderExtension } from "./extensions";
+import { mountPath } from "../../shared/url";
 import { isFullUrlBase, isRelativeBase, publicMdUrl } from "./paths";
 import { prepareShell } from "./probe";
 import { RenderError, createRendererPool, type InPageScripts } from "./renderers";
@@ -40,20 +41,22 @@ export async function prerenderSite(input: {
 
   const fullBase = isFullUrlBase(input.base) ? input.base : undefined;
   const shell = prepareShell(input.shell, { relativeBase });
-  const pool = createRendererPool({
-    ...(pr.executablePath !== undefined ? { executablePath: pr.executablePath } : {}),
-    allowOrigins: pr.allowOrigins,
-    ...(pr.idleMs !== undefined ? { idleMs: pr.idleMs } : {}),
-    codeGeneration: pr.isolation.codeGeneration,
+  const server = await startStaticServer({
+    dir: input.outDir,
+    base: input.base,
+    shell,
+    relativeBase,
+    ...(fullBase !== undefined ? { fullBase } : {}),
+    happyDomCompat: mayUseHappyDom(pr),
   });
   try {
-    const server = await startStaticServer({
-      dir: input.outDir,
-      base: input.base,
-      shell,
-      relativeBase,
-      ...(fullBase !== undefined ? { fullBase } : {}),
-      happyDomCompat: mayUseHappyDom(pr),
+    const syncResources = mayUseHappyDom(pr) ? await loadClassicScripts(shell, server.origin + mountPath(mount) + "/") : {};
+    const pool = createRendererPool({
+      ...(pr.executablePath !== undefined ? { executablePath: pr.executablePath } : {}),
+      allowOrigins: pr.allowOrigins,
+      ...(pr.idleMs !== undefined ? { idleMs: pr.idleMs } : {}),
+      codeGeneration: pr.isolation.codeGeneration,
+      syncResources,
     });
     try {
       const result = await crawlRoutes(
@@ -84,9 +87,54 @@ export async function prerenderSite(input: {
       if (result.failures.length > 0) throw new Error(formatFailures(result.failures, pr.fallback));
       return result;
     } finally {
-      await server.close();
+      await pool.closeAll();
     }
   } finally {
-    await pool.closeAll();
+    await server.close();
   }
+}
+
+/** src of each classic script in `html` that a browser runs synchronously (no async, defer or module type). */
+export function classicScriptSrcs(html: string): string[] {
+  const out: string[] = [];
+  for (const m of html.matchAll(/<script\b([^>]*)>/gi)) {
+    const attrs = m[1]!;
+    const attr = (name: string) =>
+      new RegExp(`(?:^|\\s)${name}(?:\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+)))?(?=\\s|$)`, "i").exec(attrs);
+    const src = attr("src");
+    if (!src || attr("async") || attr("defer")) continue;
+    const type = attr("type");
+    const t = (type?.[1] ?? type?.[2] ?? type?.[3] ?? "").trim().toLowerCase();
+    if (type && t !== "" && !/^(text|application)\/(x-)?(java|ecma)script$/.test(t)) continue;
+    const value = src[1] ?? src[2] ?? src[3];
+    if (value) out.push(value);
+  }
+  return out;
+}
+
+/**
+ * Loads the shell's classic scripts from the prerender server, so the happy-dom render process can
+ * serve its synchronous loads of them from memory (see HappyDomRendererOptions.syncResources).
+ */
+async function loadClassicScripts(shell: string, base: string): Promise<Record<string, { body: string; contentType: string }>> {
+  const origin = new URL(base).origin;
+  const out: Record<string, { body: string; contentType: string }> = {};
+  for (const src of classicScriptSrcs(shell)) {
+    let url: URL;
+    try {
+      url = new URL(src, base);
+    } catch {
+      continue;
+    }
+    if (url.origin !== origin) continue;
+    url.hash = "";
+    try {
+      const res = await fetch(url, { headers: { host: url.host } });
+      if (!res.ok) continue;
+      out[url.href] = { body: await res.text(), contentType: res.headers.get("content-type") ?? "text/javascript" };
+    } catch {
+      // left to the renderer, which then explains the failed load
+    }
+  }
+  return out;
 }

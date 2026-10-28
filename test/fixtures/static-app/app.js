@@ -184,6 +184,27 @@ function start() {
       document.head.appendChild(script);
       break;
     }
+    case "/syncxhr": {
+      // a synchronous XHR the page survives (it falls back), and one it does not
+      let text = "fallback";
+      try {
+        const xhr = new XMLHttpRequest();
+        xhr.open("GET", "/data.json", false);
+        xhr.send();
+        text = JSON.parse(xhr.responseText).text;
+      } catch {
+        // keep the fallback
+      }
+      show(`<p>syncxhr ${text}</p>`);
+      break;
+    }
+    case "/syncxhr-needed": {
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", "/data.json", false);
+      xhr.send();
+      show(`<p>${JSON.parse(xhr.responseText).text}</p>`);
+      break;
+    }
     case "/xsocket": {
       const from = new URLSearchParams(location.search).get("from");
       let result = "opened";

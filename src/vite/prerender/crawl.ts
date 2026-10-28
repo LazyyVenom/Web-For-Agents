@@ -17,6 +17,8 @@ export interface PrerenderedPage {
   listed: boolean;
   /** By extension name. */
   inPage: Record<string, unknown>;
+  /** See RenderResult.warnings. */
+  warnings?: string[];
 }
 
 export interface CrawlFailure {
@@ -33,6 +35,8 @@ export interface CrawlResult {
   bodyFallbackRoutes: string[];
   /** Routes skipped because their file names would be too long to write. Sorted. */
   tooLongRoutes: string[];
+  /** Problems that did not fail a render but may have changed its output, by route. Sorted. */
+  renderWarnings: Array<{ route: string; message: string }>;
 }
 
 export interface CrawlOptions {
@@ -198,6 +202,7 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
       renderer: used,
       listed: !info.noindex && !redirected,
       inPage: result.inPage,
+      ...(result.warnings?.length ? { warnings: result.warnings } : {}),
     };
     return { page, found: [...new Set(found)].sort(), tooLong };
   };
@@ -284,11 +289,13 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
   const failures: CrawlFailure[] = [];
   const bodyFallbackRoutes: string[] = [];
   const tooLong = new Set(seedTooLong);
+  const renderWarnings: CrawlResult["renderWarnings"] = [];
   for (const route of selected) {
     const o = await run(route);
     if (o.page) {
       pages.push(o.page);
       if (o.page.info.contentSource === "body") bodyFallbackRoutes.push(route);
+      for (const message of o.page.warnings ?? []) renderWarnings.push({ route, message });
     }
     if (o.failure) failures.push(o.failure);
     for (const r of o.tooLong) tooLong.add(r);
@@ -296,7 +303,8 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
   pages.sort(byRoute);
   failures.sort(byRoute);
   bodyFallbackRoutes.sort();
-  return { pages, failures, truncated, bodyFallbackRoutes, tooLongRoutes: [...tooLong].sort() };
+  renderWarnings.sort(byRoute);
+  return { pages, failures, truncated, bodyFallbackRoutes, tooLongRoutes: [...tooLong].sort(), renderWarnings };
 }
 
 export function formatFailures(failures: CrawlFailure[], fallback: RendererName | false): string {

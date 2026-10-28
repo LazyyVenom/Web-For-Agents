@@ -184,6 +184,7 @@ export function createBuildPlugin(resolved: ResolvedOptions, extensions: Prerend
         `${LOG_PREFIX} stopped after ${pr.maxRoutes} routes (prerender.maxRoutes); raise it to include more routes`,
       );
     }
+    for (const { route, message } of result.renderWarnings) logger.warn(`${LOG_PREFIX} ${route}: ${message}`);
     if (result.tooLongRoutes.length > 0) {
       logger.warn(
         `${LOG_PREFIX} skipped ${result.tooLongRoutes.length} route(s) whose file names would be too long ` +

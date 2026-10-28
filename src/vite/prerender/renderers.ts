@@ -28,6 +28,8 @@ export function createRendererPool(opts: {
   idleMs?: number;
   /** prerender.isolation.codeGeneration. Default false. */
   codeGeneration?: boolean;
+  /** See HappyDomRendererOptions.syncResources. */
+  syncResources?: Record<string, { body: string; contentType: string }>;
 }): RendererPool {
   const made = new Map<RendererName, Promise<Renderer>>();
   return {
@@ -41,6 +43,7 @@ export function createRendererPool(opts: {
                   {
                     allowOrigins: opts.allowOrigins ?? [],
                     ...(opts.idleMs !== undefined ? { idleMs: opts.idleMs } : {}),
+                    ...(opts.syncResources ? { syncResources: opts.syncResources } : {}),
                   },
                   { codeGeneration: opts.codeGeneration === true },
                 ),

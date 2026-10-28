@@ -15,6 +15,8 @@ export interface RenderResult {
   finalPath: string;
   /** JSON.parse of each in-page script's result, keyed by extension name. */
   inPage: Record<string, unknown>;
+  /** Problems that did not fail the render but may have changed its output. */
+  warnings?: string[];
 }
 
 export interface Renderer {

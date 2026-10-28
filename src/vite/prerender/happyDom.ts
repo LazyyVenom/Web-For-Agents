@@ -119,6 +119,12 @@ export interface HappyDomRendererOptions {
    * the page settled within its cap, else IDLE_MS.
    */
   idleMs?: number;
+  /**
+   * Bodies of the shell's classic (synchronously loaded) scripts, by absolute URL. happy-dom loads
+   * such scripts with a synchronous request, which it makes by spawning a process; these are served
+   * from memory instead, so they work where spawning is not allowed (the isolated render process).
+   */
+  syncResources?: Record<string, { body: string; contentType: string }>;
 }
 
 /** Scheme a blocked request is rewritten to, so happy-dom rejects it like a network error before connecting. */
@@ -188,6 +194,19 @@ export function createHappyDomRenderer(opts: HappyDomRendererOptions = {}): Rend
           },
           beforeSyncRequest({ request, window }) {
             if (blocks(request.url, window)) return poison(request);
+            const known = opts.syncResources?.[request.url.split("#")[0]!];
+            if (known && request.method === "GET") {
+              const W = window as unknown as { Headers: new (init: Record<string, string>) => unknown };
+              return {
+                status: 200,
+                statusText: "OK",
+                ok: true,
+                url: request.url,
+                redirected: false,
+                headers: new W.Headers({ "content-type": known.contentType }) as never,
+                body: Buffer.from(known.body),
+              };
+            }
             // happy-dom makes synchronous requests by spawning a process, which the render process's
             // permission model forbids: fail them cleanly and explain why.
             if (!canSpawn) {
@@ -267,7 +286,13 @@ export function createHappyDomRenderer(opts: HappyDomRendererOptions = {}): Rend
           deadline,
           timeoutMs,
         );
-        return { html, finalPath, inPage: results };
+        return {
+          html,
+          finalPath,
+          inPage: results,
+          // The page rendered anyway, but without what the refused requests would have loaded.
+          ...(state.syncRefused.length > 0 ? { warnings: [syncHint(state.syncRefused).slice(2)] } : {}),
+        };
       } finally {
         active.delete(state);
         await page.close().catch(() => {});
