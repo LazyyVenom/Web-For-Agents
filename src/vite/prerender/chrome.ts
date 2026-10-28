@@ -12,7 +12,10 @@ import {
 
 type PlaywrightCore = typeof import("playwright-core");
 
-/** How long a render waits for its page to close before moving on. */
+/**
+ * How long a render waits for its page to close before moving on. A render therefore takes at most
+ * its `timeoutMs` plus this long, even when the browser stalls.
+ */
 const PAGE_CLOSE_MS = 5000;
 
 /** Resolves when `work` settles or after `ms`, whichever is first. Never rejects. */
@@ -26,7 +29,11 @@ function settleWithin(work: Promise<unknown>, ms: number): Promise<void> {
 
 export async function createChromeRenderer(
   channel: "chrome" | "msedge",
-  opts: { executablePath?: string; pageCloseMs?: number } = {},
+  opts: {
+    executablePath?: string;
+    /** @internal For tests: overrides PAGE_CLOSE_MS. */
+    pageCloseMs?: number;
+  } = {},
   load: () => Promise<PlaywrightCore> = () => import("playwright-core"),
 ): Promise<Renderer> {
   const label = channel === "msedge" ? "Edge" : "Chrome";
@@ -58,8 +65,9 @@ export async function createChromeRenderer(
     async render(url, timeoutMs, inPage) {
       const deadline = createDeadline(timeoutMs);
       const timeoutText = readyTimeoutMessage(timeoutMs);
-      // A stalled browser must not hold the render past its deadline, so opening the page counts
-      // against it. A page that opens after the deadline is closed as soon as it arrives.
+      // Opening the page counts against the deadline, and closing it is capped at PAGE_CLOSE_MS, so a
+      // stalled browser holds a render for at most timeoutMs + PAGE_CLOSE_MS. A page that opens after
+      // the deadline is closed as soon as it arrives.
       const opening = browser.newPage();
       let page: Awaited<typeof opening>;
       try {

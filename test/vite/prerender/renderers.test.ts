@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { inPageExpression } from "../../../src/vite/prerender/extensions";
 import { prepareShell } from "../../../src/vite/prerender/probe";
 import {
@@ -266,6 +266,40 @@ describe("chrome page lifecycle", () => {
     expect(err).toBeInstanceOf(RenderError);
     expect((err as Error).message).toContain("did not become ready within 300ms");
     expect(Date.now() - t).toBeLessThan(1500);
+  });
+
+  const later = <T,>(ms: number, settle: () => Promise<T>) =>
+    new Promise<T>((res, rej) => setTimeout(() => settle().then(res, rej), ms));
+
+  it("closes a page that opens after the deadline", async () => {
+    const close = vi.fn(async () => {});
+    const r = await createChromeRenderer(
+      "chrome",
+      {},
+      fakeChrome({ newPage: () => later(400, async () => ({ close })) }),
+    );
+    const err = await r.render("http://127.0.0.1/", 300).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RenderError);
+    expect(close).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(1), { timeout: 2000 });
+  });
+
+  it("swallows a page open that fails after the deadline", async () => {
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      const r = await createChromeRenderer(
+        "chrome",
+        {},
+        fakeChrome({ newPage: () => later(400, () => Promise.reject(new Error("late failure"))) }),
+      );
+      const err = await r.render("http://127.0.0.1/", 300).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(RenderError);
+      await new Promise((res) => setTimeout(res, 300));
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
   });
 
   it("does not wait forever for a page that never closes", async () => {
