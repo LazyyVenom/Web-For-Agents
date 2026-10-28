@@ -39,6 +39,40 @@ describe("htmlToMarkdown", () => {
   });
 });
 
+describe("htmlToMarkdown: adjacent inline elements", () => {
+  it("separates words the page shows apart", () => {
+    expect(htmlToMarkdown('<div class="flex"><span>Slot 01</span><span>Featured</span></div>')).toBe("Slot 01 Featured\n");
+    expect(htmlToMarkdown("<div><strong>26K+</strong><span>YouTube subs</span></div>")).toBe("**26K+** YouTube subs\n");
+    expect(htmlToMarkdown('<p><span>Email</span><a href="mailto:choubey.anubhav253@gmail.com">choubey.anubhav253@gmail.com</a></p>')).toBe(
+      "Email [choubey.anubhav253@gmail.com](mailto:choubey.anubhav253@gmail.com)\n",
+    );
+    expect(htmlToMarkdown("<p><span>Quest 5</span><!-- --><span>Active</span></p>")).toBe("Quest 5 Active\n");
+    expect(htmlToMarkdown('<nav><a href="/a">One</a><a href="/b">Two</a></nav>')).toBe("[One](/a) [Two](/b)\n");
+  });
+
+  it("looks past icons, form fields and empty elements", () => {
+    expect(htmlToMarkdown('<p><span>Mail</span><svg></svg><i class="icon"></i><span>Me</span></p>')).toBe("Mail Me\n");
+    expect(htmlToMarkdown('<form><label>Name<input name="n"></label><input type="hidden"><button>Send</button></form>')).toBe("Name Send\n");
+  });
+
+  it("keeps glue that is meant", () => {
+    // Element next to text.
+    expect(htmlToMarkdown("<p><b>Java</b>Script, H<sub>2</sub>O</p>")).toBe("**Java**Script, H2O\n");
+    // Two formatting elements.
+    expect(htmlToMarkdown("<p><b>Java</b><i>Script</i></p>")).toBe("**Java**_Script_\n");
+    // Single characters (letter animations).
+    expect(htmlToMarkdown("<h2><span>H</span><span>i</span></h2>")).toBe("## Hi\n");
+    // Punctuation.
+    expect(htmlToMarkdown("<p><span>Total</span><span>, then</span><span>(</span><span>x</span></p>")).toBe("Total, then(x\n");
+    expect(htmlToMarkdown("<p><span>$</span><span>20</span><span>Price</span><span>(USD)</span></p>")).toBe("$20 Price (USD)\n");
+    // Existing whitespace, line breaks and code.
+    expect(htmlToMarkdown("<p><span>a </span><span>b</span></p>")).toBe("a b\n");
+    expect(htmlToMarkdown("<p><span>ab</span><br><span>cd</span></p>")).toBe("ab  \ncd\n");
+    expect(htmlToMarkdown("<pre><code><span>con</span><span>st</span></code></pre>")).toBe("```\nconst\n```\n");
+    expect(htmlToMarkdown("<p><code><span>con</span><span>st</span></code></p>")).toBe("`const`\n");
+  });
+});
+
 describe("buildPageMarkdown", () => {
   it("prepends the title unless an h1 exists", () => {
     expect(buildPageMarkdown("About", "<p>x</p>")).toBe("# About\n\nx\n");

@@ -24,6 +24,67 @@ export function escapeLinkTarget(url: string): string {
   return url.replace(/\(/g, "%28").replace(/\)/g, "%29").replace(/\s/g, "%20");
 }
 
+/** Inline elements whose adjacent siblings may be separated by a space (see needsSeparator). */
+const INLINE_ELEMENTS = new Set([
+  "A", "ABBR", "B", "BDI", "BDO", "BUTTON", "CITE", "CODE", "DATA", "DEL", "DFN", "EM", "I", "INS", "KBD",
+  "LABEL", "MARK", "OUTPUT", "Q", "S", "SAMP", "SMALL", "SPAN", "STRONG", "SUB", "SUP", "TIME", "U", "VAR",
+]);
+/** Text-formatting elements: two of them side by side (<b>Java</b><i>Script</i>) are glued on purpose. */
+const FORMATTING_ELEMENTS = new Set([
+  "ABBR", "B", "BDI", "BDO", "CITE", "CODE", "DEL", "DFN", "EM", "I", "INS", "KBD", "MARK", "Q", "S", "SAMP",
+  "SMALL", "STRONG", "SUB", "SUP", "U", "VAR",
+]);
+/** Text that ends with an opening character or starts with a closing one attaches to its neighbour. */
+const OPENS = /[([{$#@/\u2018\u201c]$/;
+const CLOSES = /^[.,;:!?%)\]}\u2019\u201d\u2026]/;
+
+/** Elements that add no text to the markdown when they have none: icons, form fields, empty spans. */
+const TEXTLESS_ELEMENTS = new Set(["CANVAS", "INPUT", "SVG", "TEXTAREA"]);
+
+/** Nothing in the markdown: a comment, an empty text node, or an empty inline element or form field. */
+function rendersNothing(node: Node): boolean {
+  if (node.nodeType === 8) return true;
+  if (node.nodeType === 3) return !node.nodeValue;
+  const name = node.nodeName.toUpperCase();
+  return node.nodeType === 1 && !node.textContent && (INLINE_ELEMENTS.has(name) || TEXTLESS_ELEMENTS.has(name));
+}
+
+/** The previous sibling that puts something in the markdown (React leaves comments between elements). */
+function previousContentSibling(node: Node): Node | null {
+  let prev = node.previousSibling;
+  while (prev && rendersNothing(prev)) prev = prev.previousSibling;
+  return prev;
+}
+
+/**
+ * Whether an inline element needs a space before it so its text does not run into its previous
+ * sibling's. Markup such as `<span>Slot 01</span><span>Featured</span>` in a flex row has no
+ * whitespace between the elements, so the page shows two words while plain text would read
+ * "Slot 01Featured". The rule: a space goes between two adjacent sibling elements (with only
+ * comments, icons, form fields or empty inline elements between them) when both are inline
+ * elements with text, the boundary has no whitespace, and none of these holds, since each marks
+ * glue that is meant:
+ * - both are text-formatting elements (`<b>Java</b><i>Script</i>`);
+ * - either side's text is a single character (letter-by-letter animations, drop caps);
+ * - the left text ends with an opening character ( `( [ { $ # @ /` or an opening quote) or the
+ *   right text starts with closing punctuation (`. , ; : ! ? % ) ] }`, a closing quote, an ellipsis);
+ * - they are inside `<pre>` or `<code>`.
+ * An element next to a text node (`<b>Java</b>Script`, `H<sub>2</sub>O`) is never separated.
+ */
+function needsSeparator(node: Node): boolean {
+  if (node.nodeType !== 1 || !INLINE_ELEMENTS.has(node.nodeName)) return false;
+  const prev = previousContentSibling(node);
+  if (!prev || prev.nodeType !== 1 || !INLINE_ELEMENTS.has(prev.nodeName)) return false;
+  if (FORMATTING_ELEMENTS.has(node.nodeName) && FORMATTING_ELEMENTS.has(prev.nodeName)) return false;
+  const left = prev.textContent ?? "";
+  const right = node.textContent ?? "";
+  if (!left.trim() || !right.trim() || /\s$/.test(left) || /^\s/.test(right)) return false;
+  if (left.trim().length === 1 || right.trim().length === 1) return false;
+  if (OPENS.test(left) || CLOSES.test(right)) return false;
+  for (let p = node.parentNode; p; p = p.parentNode) if (p.nodeName === "PRE" || p.nodeName === "CODE") return false;
+  return true;
+}
+
 function createService(pageUrl?: string): TurndownService {
   const service = new TurndownService({
     headingStyle: "atx",
@@ -74,6 +135,14 @@ function createService(pageUrl?: string): TurndownService {
       return `![${alt}](${escapeLinkTarget(resolveUrl(src, pageUrl))}${titleSuffix(el)})`;
     },
   });
+  // Separate adjacent inline elements that the page shows as separate words (see needsSeparator).
+  const forNode = service.rules.forNode.bind(service.rules);
+  service.rules.forNode = (node) => {
+    const rule = forNode(node);
+    const replace = rule.replacement;
+    if (!replace || !needsSeparator(node)) return rule;
+    return { ...rule, replacement: (content, n, options) => " " + replace(content, n, options) };
+  };
   return service;
 }
 
