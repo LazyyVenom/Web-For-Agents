@@ -55,6 +55,27 @@ useEffect(() => {
 
 Pages that never go idle (polling requests, a long-lived `fetch` stream, a DOM that keeps changing) time out the same way. Hold and release around the work the page actually needs, so the renderer captures it once that is done, or raise `prerender.timeoutMs` for slow routes.
 
+## Animated pages
+
+Only content changes keep a page from going quiet. These include added or removed nodes and changed text. Attribute changes do not count, so CSS-class, `style`, `aria-*` and `data-*` animations never delay a capture.
+
+Some pages keep changing their content forever: a typing effect, a rotating quote, a mascot's lines every few seconds. They never go quiet, so they time out. Two options handle them, and both work the same in happy-dom and Chrome.
+
+`prerender.readySelector` names an element that marks the page as ready. A route is captured as soon as that element exists and no `fetch`/XHR is in flight, however busy the DOM still is. `holdPrerender()` is still respected. Choose an element that appears once the real content is in place (after a loading screen, for example):
+
+```ts
+webForAgents({
+  // ...
+  prerender: { readySelector: "[data-hero-ready]" },
+});
+```
+
+The selector applies to every route. A route where it never matches times out, so put the marker on every page, or pick a selector every page has (such as `main h1`). An invalid selector fails the render with a message naming it.
+
+`prerender.onTimeout: "snapshot"` saves a page that is still not ready at `prerender.timeoutMs`, instead of failing the build. The page is saved exactly as it was at that moment, so a typing effect may be half-typed. The build logs a warning naming each such route. Page errors still fail the route, and so does a page that has not finished loading by the deadline. The default, `"fail"`, keeps the behaviour described above.
+
+Prefer `readySelector` where you can: it captures a known state, and it does not wait for the full timeout. Use `"snapshot"` as a safety net, together with a lower `timeoutMs` if waiting the full 15 seconds per route is too slow.
+
 ## SPA fallback
 
 After prerendering, `dist/index.html` is the rendered `/` page. If your host serves `index.html` for unknown URLs, deep links that were not prerendered would get the home page's HTML: it flashes before the app boots, and `hydrateApp` would hydrate the wrong markup. Point the fallback at `dist/200.html` instead, which is the untouched shell. If `public/200.html` exists, it is used as is and not generated.

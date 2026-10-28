@@ -9,10 +9,15 @@ import {
   errorMessage,
   POLL_MS,
   SETTLED_POLL_MS,
+  SNAPSHOT_GRACE_MS,
+  TimeoutError,
   readyTimeoutMessage,
   runInPage,
+  snapshotWarning,
   waitForReady,
   withoutBlockedLoads,
+  type Deadline,
+  type ReadinessOptions,
   type Renderer,
 } from "./renderCore";
 
@@ -111,7 +116,7 @@ function pageSink(page: BrowserPage): Sink & { failed: Promise<never>; done(): v
   };
 }
 
-export interface HappyDomRendererOptions {
+export interface HappyDomRendererOptions extends ReadinessOptions {
   /** Origins pages may load from besides the prerender server. Default []. */
   allowOrigins?: readonly string[];
   /**
@@ -250,6 +255,27 @@ export function createHappyDomRenderer(opts: HappyDomRendererOptions = {}): Rend
     },
   });
 
+  /** Waits until the page is ready (see readyCheck); rejects with a page error or a TimeoutError. */
+  const waitUntilReady = async (page: BrowserPage, blocked: string[], deadline: Deadline, timeoutMs: number) => {
+    const poll = async (check: string) => {
+      const r = page.evaluate(check) as ReadyState;
+      return { ready: r.ready, errors: withoutBlockedLoads([...r.errors], blocked) };
+    };
+    if (opts.readySelector !== undefined) {
+      // The page says when it is ready, so happy-dom's settling (never, on an animated page) is not awaited.
+      const check = readyCheck(IDLE_MS, opts.readySelector);
+      return waitForReady(() => poll(check), timeoutMs, POLL_MS);
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const settled = await Promise.race([
+      page.waitUntilComplete().then(() => true),
+      new Promise<boolean>((r) => (timer = setTimeout(() => r(false), Math.min(deadline.remaining(), 2000)))),
+    ]).finally(() => clearTimeout(timer));
+    const idleMs = opts.idleMs ?? (settled ? SETTLED_IDLE_MS : IDLE_MS);
+    const check = readyCheck(idleMs);
+    return waitForReady(() => poll(check), timeoutMs, Math.min(settled ? SETTLED_POLL_MS : POLL_MS, idleMs));
+  };
+
   return {
     name: "happy-dom",
     async render(url, timeoutMs, inPage) {
@@ -266,51 +292,42 @@ export function createHappyDomRenderer(opts: HappyDomRendererOptions = {}): Rend
       for (const m of NOOP_CONSOLE) pageConsole[m] = () => {};
       const sink = pageSink(page);
       attach(sink);
-      const step = <T>(work: Promise<T>) =>
-        deadline.race(Promise.race([work, sink.failed]), timeoutText);
+      const within = <T>(d: Deadline, text: string, work: Promise<T>) =>
+        d.race(Promise.race([work, sink.failed]), text);
+      const step = <T>(work: Promise<T>) => within(deadline, timeoutText, work);
+      /** The deadline passed before the page was ready, and prerender.onTimeout is "snapshot". */
+      let timedOut = false;
       try {
         try {
           await step(page.goto(url));
-          let timer: ReturnType<typeof setTimeout> | undefined;
-          const settled = await step(
-            Promise.race([
-              page.waitUntilComplete().then(() => true),
-              new Promise<boolean>((r) => (timer = setTimeout(() => r(false), Math.min(deadline.remaining(), 2000)))),
-            ]).finally(() => clearTimeout(timer)),
-          );
-          const idleMs = opts.idleMs ?? (settled ? SETTLED_IDLE_MS : IDLE_MS);
-          const check = readyCheck(idleMs);
-          await step(
-            waitForReady(
-              async () => {
-                const r = page.evaluate(check) as ReadyState;
-                return { ready: r.ready, errors: withoutBlockedLoads([...r.errors], state.blocked) };
-              },
-              timeoutMs,
-              Math.min(settled ? SETTLED_POLL_MS : POLL_MS, idleMs),
-            ),
-          );
+          try {
+            await step(waitUntilReady(page, state.blocked, deadline, timeoutMs));
+          } catch (e) {
+            if (!(opts.onTimeout === "snapshot" && e instanceof TimeoutError)) throw e;
+            timedOut = true;
+          }
         } catch (e) {
           throw new RenderError("happy-dom", errorMessage(e) + blockedHint(state.blocked) + syncHint(state.syncRefused));
         }
         const html = page.evaluate(SERIALIZE_EXPR) as string;
         const finalPath = new URL(page.url).pathname;
+        // A snapshot's deadline has passed: its in-page scripts get a short grace period instead.
+        const after = timedOut ? createDeadline(SNAPSHOT_GRACE_MS) : deadline;
+        const afterMs = timedOut ? SNAPSHOT_GRACE_MS : timeoutMs;
         const results = await runInPage(
           "happy-dom",
           inPage,
-          (expr) => step(Promise.resolve().then(() => page.evaluate(expr))),
-          deadline,
-          timeoutMs,
+          (expr) =>
+            within(after, readyTimeoutMessage(afterMs), Promise.resolve().then(() => page.evaluate(expr))),
+          after,
+          afterMs,
         );
-        return {
-          html,
-          finalPath,
-          inPage: results,
+        const warnings = [
+          ...(timedOut ? [snapshotWarning(timeoutMs)] : []),
           // The page rendered anyway, but without what the refused requests would have loaded.
-          ...(state.syncRefused.length > 0
-            ? { warnings: [...new Map(state.syncRefused.map((r) => [r.kind + r.url, r])).values()].map(syncRefusalText) }
-            : {}),
-        };
+          ...[...new Map(state.syncRefused.map((r) => [r.kind + r.url, r])).values()].map(syncRefusalText),
+        ];
+        return { html, finalPath, inPage: results, ...(warnings.length > 0 ? { warnings } : {}) };
       } finally {
         active.delete(state);
         await page.close().catch(() => {});

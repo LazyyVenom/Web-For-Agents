@@ -17,7 +17,12 @@ import {
   type Renderer,
 } from "../../../src/vite/prerender/renderers";
 import { errorMessage as sharedErrorMessage } from "../../../src/shared/errors";
-import { SERIALIZE_EXPR } from "../../../src/vite/prerender/renderCore";
+import {
+  SERIALIZE_EXPR,
+  TimeoutError,
+  snapshotWarning,
+  type ReadinessOptions,
+} from "../../../src/vite/prerender/renderCore";
 import { errorMessage } from "../../../src/vite/prerender/renderers";
 import { Window } from "happy-dom";
 import { formatFailures } from "../../../src/vite/prerender/crawl";
@@ -26,7 +31,7 @@ import type { RendererName } from "../../../src/vite/options";
 import { probeChrome } from "../../helpers/chrome";
 import { canObserveModuleLoads, wrappersInstalledBeforeHappyDom } from "../../helpers/childOrder";
 import { CACHE_TOUCH_MS, childEntryFile, keepFresh } from "../../../src/vite/prerender/happyDomProcess";
-import { isSyncResources } from "../../../src/vite/prerender/renderChild";
+import { isSyncResources, parseChildOptions } from "../../../src/vite/prerender/renderChild";
 
 const dir = fileURLToPath(new URL("../../fixtures/static-app/", import.meta.url));
 const shell = prepareShell(readFileSync(dir + "index.html", "utf8"), { relativeBase: false });
@@ -83,7 +88,10 @@ afterAll(async () => {
 const RENDER_MS = 15_000;
 const SUITE_TIMEOUT_MS = 30_000;
 
-const suite = (name: RendererName, make: (opts?: { allowOrigins?: string[] }) => Promise<Renderer>) => {
+const suite = (
+  name: RendererName,
+  make: (opts?: ReadinessOptions & { allowOrigins?: string[] }) => Promise<Renderer>,
+) => {
   let r: Renderer;
   beforeAll(async () => {
     r = await make();
@@ -235,6 +243,75 @@ const suite = (name: RendererName, make: (opts?: { allowOrigins?: string[] }) =>
     const err = await r.render(url("/forever"), 1000).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(RenderError);
     expect((err as Error).message).toContain("did not become ready within 1000ms");
+  });
+
+  describe("animated pages", () => {
+    // /typing: a loading screen, then a tagline typing forever, a rotating mascot line and a
+    // class-toggling animation; [data-hero-ready] appears with the hero. /classes: attribute churn only.
+    const withRenderer = async (opts: ReadinessOptions, run: (r2: Renderer) => Promise<void>) => {
+      const r2 = await make(opts);
+      try {
+        await run(r2);
+      } finally {
+        await r2.close();
+      }
+    };
+
+    it("never becomes ready by default (the DOM never goes quiet)", async () => {
+      const err = await r.render(url("/typing"), 1500).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(RenderError);
+      expect((err as Error).message).toContain("did not become ready within 1500ms");
+    });
+
+    it("prerender.readySelector renders it once the element exists", async () => {
+      await withRenderer({ readySelector: "[data-hero-ready]" }, async (r2) => {
+        const t = Date.now();
+        const res = await r2.render(url("/typing"), RENDER_MS);
+        expect(Date.now() - t).toBeLessThan(5000);
+        expect(res.html).toContain("Animated home");
+        expect(res.html).toContain("About text that is always there.");
+        expect(res.html).not.toContain("Loading");
+        expect(res.warnings).toBeUndefined();
+        // other pages still render (the selector is not on them: they time out, as they would wait for it)
+        const other = await r2.render(url("/fetch"), 1000).catch((e: unknown) => e);
+        expect((other as Error).message).toContain("did not become ready within 1000ms");
+      });
+    });
+
+    it("prerender.readySelector still waits for __WFA_READY__ and reports an invalid selector", async () => {
+      await withRenderer({ readySelector: "main" }, async (r2) => {
+        const err = await r2.render(url("/forever"), 1000).catch((e: unknown) => e);
+        expect((err as Error).message).toContain("did not become ready within 1000ms");
+      });
+      await withRenderer({ readySelector: "[[" }, async (r2) => {
+        const err = await r2.render(url("/typing"), RENDER_MS).catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(RenderError);
+        expect((err as Error).message).toContain('prerender.readySelector "[[" is not a valid CSS selector');
+      });
+    });
+
+    it('prerender.onTimeout: "snapshot" saves the page at the deadline, with a warning', async () => {
+      await withRenderer({ onTimeout: "snapshot" }, async (r2) => {
+        const res = await r2.render(url("/typing"), 1500, {
+          t: inPageExpression(() => document.querySelectorAll("#about").length),
+        });
+        expect(res.html).toContain("Animated home");
+        expect(res.html).toContain("About text that is always there.");
+        expect(res.finalPath).toBe("/typing");
+        expect(res.inPage.t).toBe(1);
+        expect(res.warnings).toEqual([snapshotWarning(1500)]);
+        // a page that becomes ready is not a snapshot; page errors still fail it
+        expect((await r2.render(url("/fetch"), RENDER_MS)).warnings).toBeUndefined();
+        await expect(r2.render(url("/boom"), RENDER_MS)).rejects.toThrow("boom");
+      });
+    });
+
+    it("attribute-only churn (class, style, aria-*, data-*) does not block readiness", async () => {
+      const t = Date.now();
+      const res = await r.render(url("/classes"), RENDER_MS);
+      expect(Date.now() - t).toBeLessThan(4000);
+      expect(res.html).toContain("Static text");
+    });
   });
 
   describe("in-page scripts", () => {
@@ -461,6 +538,32 @@ describe("happy-dom render process isolation", { timeout: SUITE_TIMEOUT_MS }, ()
     }
   });
 
+  it("validates the options it is started with", async () => {
+    const ok = { localOrigins: ["http://127.0.0.1:1"], allowOrigins: [], idleMs: 0, readySelector: "#x", onTimeout: "snapshot" };
+    expect(parseChildOptions(JSON.stringify(ok))).toEqual(ok);
+    expect(parseChildOptions('{"localOrigins":[]}')).toEqual({ localOrigins: [] });
+    for (const [bad, msg] of [
+      ["[]", "not an object"],
+      ["{}", "localOrigins"],
+      ['{"localOrigins":[],"readySelector":""}', "readySelector must be a non-empty string"],
+      ['{"localOrigins":[],"readySelector":1}', "readySelector"],
+      ['{"localOrigins":[],"onTimeout":"retry"}', 'onTimeout must be "fail" or "snapshot"'],
+      ['{"localOrigins":[],"idleMs":-1}', "idleMs"],
+      ['{"localOrigins":[],"allowOrigins":"x"}', "allowOrigins"],
+    ] as const) {
+      expect(() => parseChildOptions(bad), bad).toThrow(msg);
+    }
+    // the render process refuses to start with a malformed option
+    const r = createIsolatedHappyDomRenderer({ onTimeout: "later" as never });
+    try {
+      const err = await r.render(server.origin + "/fetch", RENDER_MS).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(RenderError);
+      expect((err as Error).message).toContain('render option onTimeout must be "fail" or "snapshot"');
+    } finally {
+      await r.close();
+    }
+  });
+
   it("accepts only well-formed resources messages", async () => {
     expect(isSyncResources({})).toBe(true);
     expect(isSyncResources({ "http://x/a.js": { body: "1", contentType: "text/javascript" } })).toBe(true);
@@ -605,6 +708,7 @@ describe("waitForReady", () => {
     await expect(waitForReady(async () => ({ ready: false, errors: [] }), 200)).rejects.toThrow(
       "did not become ready within 200ms",
     );
+    await expect(waitForReady(async () => ({ ready: false, errors: [] }), 100)).rejects.toBeInstanceOf(TimeoutError);
   });
 });
 

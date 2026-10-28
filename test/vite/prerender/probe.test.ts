@@ -107,6 +107,50 @@ describe("probe readiness", () => {
     expect(check().ready).toBe(false);
   });
 
+  it("ignores attribute-only changes (class, style, aria-*, data-*), but not text changes", async () => {
+    const { window, check } = setup();
+    const el = window.document.createElement("div");
+    window.document.body.appendChild(el);
+    await sleep(IDLE_MS + 50);
+    el.className = "pulse";
+    el.setAttribute("style", "opacity: 0.5");
+    el.setAttribute("aria-busy", "true");
+    el.setAttribute("data-frame", "3");
+    await sleep(20);
+    expect(check().ready).toBe(true);
+    el.textContent = "typed";
+    await sleep(20);
+    expect(check().ready).toBe(false);
+    await sleep(IDLE_MS + 50);
+    el.firstChild!.nodeValue = "typed more";
+    await sleep(20);
+    expect(check().ready).toBe(false);
+  });
+
+  it("with a readySelector, is ready once the element exists, however busy the DOM is", async () => {
+    const { window } = setup();
+    const check = () => window.eval(readyCheck(IDLE_MS, "#hero")) as ReadyState;
+    await sleep(20); // the window finishes loading (document.readyState "complete")
+    expect(window.document.readyState).toBe("complete");
+    expect(check().ready).toBe(false);
+    const hero = window.document.createElement("h1");
+    hero.id = "hero";
+    window.document.body.appendChild(hero);
+    expect(check().ready).toBe(true);
+    (window as unknown as Record<string, unknown>).__WFA_READY__ = false;
+    expect(check().ready).toBe(false);
+    (window as unknown as Record<string, unknown>).__WFA_READY__ = true;
+    (window as unknown as Record<string, { inflight: number }>)[PROBE_GLOBAL]!.inflight = 1;
+    expect(check().ready).toBe(false);
+  });
+
+  it("with a readySelector, reports an invalid selector as an error", () => {
+    const { window } = setup();
+    const r = window.eval(readyCheck(IDLE_MS, 'a"[[')) as ReadyState;
+    expect(r.ready).toBe(false);
+    expect(r.errors[0]).toContain('prerender.readySelector "a\\"[[" is not a valid CSS selector');
+  });
+
   it("is not ready until document.readyState is complete", async () => {
     const { window, check } = setup();
     Object.defineProperty(window.document, "readyState", { value: "loading", configurable: true });

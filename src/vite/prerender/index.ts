@@ -60,6 +60,8 @@ export async function prerenderSite(input: {
       ...(pr.executablePath !== undefined ? { executablePath: pr.executablePath } : {}),
       allowOrigins: pr.allowOrigins,
       ...(pr.idleMs !== undefined ? { idleMs: pr.idleMs } : {}),
+      ...(pr.readySelector !== undefined ? { readySelector: pr.readySelector } : {}),
+      onTimeout: pr.onTimeout,
       codeGeneration: pr.isolation.codeGeneration,
       syncResources,
     });

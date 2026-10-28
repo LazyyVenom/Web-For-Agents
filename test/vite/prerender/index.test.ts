@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { resolveOptions, type PrerenderOptions } from "../../../src/vite/options";
+import { snapshotWarning } from "../../../src/vite/prerender/renderCore";
 import { classicScriptSrcs, loadClassicScripts, mayUseHappyDom, prerenderSite } from "../../../src/vite/prerender/index";
 import { createIsolatedHappyDomRenderer } from "../../../src/vite/prerender/happyDomProcess";
 import { prepareShell } from "../../../src/vite/prerender/probe";
@@ -43,12 +44,12 @@ describe("classicScriptSrcs", () => {
 const staticApp = fileURLToPath(new URL("../../fixtures/static-app/", import.meta.url));
 const permission = process.allowedNodeEnvironmentFlags.has("--permission");
 
-async function prerender(shell: string, routes: string[], base = "/", outDir = staticApp) {
+async function prerender(shell: string, routes: string[], base = "/", outDir = staticApp, extra: PrerenderOptions = {}) {
   const options = resolveOptions({
     siteUrl: "https://a.com",
     routes,
     robots: { ai: { training: "allow", search: "allow" } },
-    prerender: { crawl: false },
+    prerender: { crawl: false, ...extra },
   });
   return prerenderSite({ outDir, base, shell, options, skipRoute: (r) => r === "/" && !routes.includes("/"), extensions: [] });
 }
@@ -196,5 +197,27 @@ describe("preloaded classic scripts", { timeout: 60_000 }, () => {
     const r = await prerender(bigShell(base + "marker.js?c"), ["/"], base);
     expect(r.pages[0]!.html).toContain('data-ran="classic"');
     expect(r.renderWarnings).toEqual([]);
+  });
+});
+
+describe("animated pages through prerenderSite", { timeout: 60_000 }, () => {
+  const shell = () => prepareShell(readFileSync(staticApp + "index.html", "utf8"), { relativeBase: false });
+
+  it("passes prerender.readySelector to the renderer", async () => {
+    const r = await prerender(shell(), ["/typing"], "/", staticApp, { readySelector: "[data-hero-ready]" });
+    expect(r.pages.find((p) => p.route === "/typing")!.html).toContain("About text that is always there.");
+    expect(r.renderWarnings).toEqual([]);
+  });
+
+  it('passes prerender.onTimeout: "snapshot" and reports one warning for the route', async () => {
+    const r = await prerender(shell(), ["/typing"], "/", staticApp, { onTimeout: "snapshot", timeoutMs: 1500 });
+    expect(r.pages.find((p) => p.route === "/typing")!.html).toContain("Animated home");
+    expect(r.renderWarnings).toEqual([{ route: "/typing", message: snapshotWarning(1500) }]);
+  });
+
+  it("fails the route without either, as before", async () => {
+    await expect(prerender(shell(), ["/typing"], "/", staticApp, { timeoutMs: 1500 })).rejects.toThrow(
+      "/typing [happy-dom]: did not become ready within 1500ms",
+    );
   });
 });

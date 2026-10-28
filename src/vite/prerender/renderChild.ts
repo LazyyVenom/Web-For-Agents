@@ -44,9 +44,36 @@ export function isSyncResources(v: unknown): v is SyncResources {
   );
 }
 
+/**
+ * Checks the options the parent passed in the environment, so a malformed value fails the render
+ * process at start (reported by the parent) rather than changing how pages render.
+ */
+export function parseChildOptions(json: string): ChildOptions {
+  const o: unknown = JSON.parse(json);
+  if (o === null || typeof o !== "object" || Array.isArray(o)) throw new Error("render options are not an object");
+  const v = o as Record<string, unknown>;
+  const bad = (field: string, want: string) => {
+    throw new Error(`render option ${field} must be ${want}, got ${JSON.stringify(v[field])}`);
+  };
+  const strings = (x: unknown) => Array.isArray(x) && x.every((s) => typeof s === "string");
+  if (!strings(v.localOrigins)) bad("localOrigins", "an array of strings");
+  if (v.allowOrigins !== undefined && !strings(v.allowOrigins)) bad("allowOrigins", "an array of strings");
+  if (v.idleMs !== undefined && !(typeof v.idleMs === "number" && Number.isInteger(v.idleMs) && v.idleMs >= 0)) {
+    bad("idleMs", "a non-negative integer");
+  }
+  if (v.readySelector !== undefined && !(typeof v.readySelector === "string" && v.readySelector.trim() !== "")) {
+    bad("readySelector", "a non-empty string");
+  }
+  if (v.onTimeout !== undefined && v.onTimeout !== "fail" && v.onTimeout !== "snapshot") {
+    bad("onTimeout", '"fail" or "snapshot"');
+  }
+  if (v.syncResources !== undefined && !isSyncResources(v.syncResources)) bad("syncResources", "a resources object");
+  return o as ChildOptions;
+}
+
 async function runRenderChild(): Promise<void> {
   const send = (m: ChildMessage) => process.send!(m);
-  const options = JSON.parse(process.env[CHILD_OPTIONS_ENV] ?? "{}") as ChildOptions;
+  const options = parseChildOptions(process.env[CHILD_OPTIONS_ENV] ?? "{}");
   // Contain the network before happy-dom (or anything a page could reach) is loaded. happy-dom is
   // imported dynamically below; both the package build and the dev bundle split it into its own
   // chunk, so it is not evaluated before this line (tested in renderers.test.ts and pack.test.ts).
