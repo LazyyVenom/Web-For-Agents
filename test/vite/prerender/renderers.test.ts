@@ -374,6 +374,20 @@ describe("happy-dom render process isolation", { timeout: SUITE_TIMEOUT_MS }, ()
     process.env.WFA_TEST_SECRET = SECRET;
   });
 
+  it("marks renders cut off by Ctrl-C (SIGINT to the render process) as interrupted", async () => {
+    const r = createIsolatedHappyDomRenderer();
+    try {
+      await r.render(server.origin + "/fetch", RENDER_MS);
+      const pending = r.render(server.origin + "/held", RENDER_MS);
+      r.childProcess()!.kill("SIGINT");
+      const err = (await pending.catch((e: unknown) => e)) as RenderError;
+      expect(err).toBeInstanceOf(RenderError);
+      expect(err.interrupted).toBe(true);
+    } finally {
+      await r.close();
+    }
+  });
+
   it("reports a crashed render process and recovers", async () => {
     const r = createIsolatedHappyDomRenderer();
     try {
