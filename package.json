@@ -37,7 +37,7 @@
     "dist"
   ],
   "bin": {
-    "web-for-agents": "./dist/bin.js"
+    "web-for-agents": "dist/bin.js"
   },
   "engines": {
     "node": ">=20.19"
@@ -92,10 +92,10 @@
     "turndown-plugin-gfm": "^1"
   },
   "peerDependencies": {
+    "playwright-core": ">=1.40",
     "react": ">=18",
-    "vite": ">=5",
     "react-dom": ">=18",
-    "playwright-core": ">=1.40"
+    "vite": ">=5"
   },
   "peerDependenciesMeta": {
     "react": {
@@ -116,15 +116,15 @@
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/turndown": "^5.0.6",
     "@vitejs/plugin-react": "^6.1.2",
+    "playwright-core": "^1.64.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "react-router": "^7",
     "tsup": "^9.0.0",
     "typescript": "^6.0.3",
     "vite": "^8.3.5",
-    "vitest": "^5.0.5",
-    "@types/turndown": "^5.0.6",
-    "playwright-core": "^1.64.1",
-    "react-router": "^7"
+    "vitest": "^5.0.5"
   }
 }

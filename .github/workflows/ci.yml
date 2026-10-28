@@ -1,9 +1,12 @@
 name: CI
 
+# Pushes and pull requests run one job (Node 22). The full matrix (Node 20.19/22/24,
+# Vite 5-7 and the packed package against Vite 5-8) runs only from "Run workflow".
 on:
   push:
     branches: [master]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -25,7 +28,7 @@ jobs:
       fail-fast: false
       matrix:
         # Vite 8 and plugin-react 6 need Node ^20.19 || >=22.12, so 20 is pinned to 20.19.
-        node: ["20.19", "22", "24"]
+        node: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '["20.19", "22", "24"]' || '["22"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -41,6 +44,7 @@ jobs:
 
   vite-compat:
     name: Vite ${{ matrix.vite }}
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -65,6 +69,7 @@ jobs:
 
   pack:
     name: Packed package (Vite ${{ matrix.vite }})
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
