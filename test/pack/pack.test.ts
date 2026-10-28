@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -190,5 +190,20 @@ describe(`packed package in a Vite ${viteMajor} app`, () => {
       expect(report.checks.filter((c) => c.status !== "pass"), page).toEqual([]);
       expect(report.score, page).toBe(100);
     }
+  });
+
+  it("the installed CLI generates agent files for a flat, self-prerendered dist", async () => {
+    const own = path.join(work, "own-dist");
+    mkdirSync(own, { recursive: true });
+    writeFileSync(path.join(own, "index.html"), read("index.html"));
+    writeFileSync(path.join(own, "about.html"), read("about/index.html"));
+    const bin = path.join(app, "node_modules/.bin/web-for-agents");
+    const args = ["generate", own, "--site-url", origin, "--ai-training", "block", "--ai-search", "allow", "--json"];
+    const result = JSON.parse(await sh(bin, args, app)) as { fileLayout: string; pages: Array<{ route: string }> };
+    expect(result.fileLayout).toBe("flat");
+    expect(result.pages.map((p) => p.route)).toEqual(["/", "/about"]);
+    expect(readFileSync(path.join(own, "about.md"), "utf8")).toContain("# About us");
+    expect(readFileSync(path.join(own, "llms.txt"), "utf8")).toContain(`${origin}/about.md`);
+    expect(existsSync(path.join(own, "agents.json"))).toBe(true);
   });
 });
