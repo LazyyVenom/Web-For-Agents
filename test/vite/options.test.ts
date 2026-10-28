@@ -17,6 +17,15 @@ describe("resolveOptions", () => {
     );
   });
 
+  it("rejects whitespace and control characters in siteUrl (they would inject robots.txt and llms.txt lines)", () => {
+    for (const siteUrl of ["https://a.com\r\nDisallow: /", "https://a.com/\nx", "https://a.com\t", "https://a.com/a b", "https://a.com/\u0000"]) {
+      expect(() => resolveOptions({ siteUrl, robots }), JSON.stringify(siteUrl)).toThrow(
+        "[web-for-agents] siteUrl must not contain whitespace or control characters",
+      );
+    }
+    expect(resolveOptions({ siteUrl: "https://a.com/x%20y", robots }).siteUrl).toBe("https://a.com/x%20y");
+  });
+
   it("requires explicit AI policy", () => {
     const msg = "robots.ai.training and robots.ai.search are required";
     expect(() => resolveOptions({ siteUrl: "https://a.com" } as never)).toThrow(msg);

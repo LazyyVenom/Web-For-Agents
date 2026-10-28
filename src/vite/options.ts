@@ -209,6 +209,10 @@ function resolveOverlay(
 }
 
 export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
+  // The URL parser drops tabs and line breaks, but siteUrl is used verbatim in robots.txt and llms.txt.
+  if (typeof input?.siteUrl === "string" && /[\s\u0000-\u001f\u007f]/.test(input.siteUrl)) {
+    throw new Error(`${LOG_PREFIX} siteUrl must not contain whitespace or control characters`);
+  }
   let url: URL | undefined;
   try {
     url = new URL(input?.siteUrl);
