@@ -1,6 +1,7 @@
 import { IDLE_MS, readyCheck, type ReadyState } from "./probe";
 import {
   RenderError,
+  assertNoPageErrors,
   SERIALIZE_EXPR,
   blockedHint,
   createDeadline,
@@ -168,6 +169,10 @@ export async function createChromeRenderer(
           deadline = createDeadline(SNAPSHOT_GRACE_MS);
           budgetMs = SNAPSHOT_GRACE_MS;
           timeoutText = readyTimeoutMessage(SNAPSHOT_GRACE_MS);
+          await assertNoPageErrors(async () => {
+            const r = (await deadline.race(page.evaluate(check), timeoutText)) as ReadyState;
+            return withoutBlockedLoads([...pageErrors, ...r.errors], blocked);
+          });
         }
         html = (await deadline.race(page.evaluate(SERIALIZE_EXPR), timeoutText)) as string;
         finalPath = new URL(page.url()).pathname;

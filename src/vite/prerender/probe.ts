@@ -44,7 +44,8 @@ export const PROBE_SCRIPT = `(function () {
   }
   if (w.MutationObserver) {
     // Content changes only: attribute churn (class, style, aria-*, data-* animations) never settles
-    // on an animated page and does not change what is saved.
+    // on an animated page. Attributes are still saved, so a late attribute-only update (a meta tag or
+    // an img src changed alone, after the content is quiet) may be captured before or after it lands.
     new w.MutationObserver(touch).observe(document, {
       childList: true, subtree: true, characterData: true
     });

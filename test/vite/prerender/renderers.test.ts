@@ -19,6 +19,7 @@ import {
 import { errorMessage as sharedErrorMessage } from "../../../src/shared/errors";
 import {
   SERIALIZE_EXPR,
+  assertNoPageErrors,
   TimeoutError,
   snapshotWarning,
   type ReadinessOptions,
@@ -688,6 +689,14 @@ describe("shared render helpers", () => {
 
   it("errorMessage is the shared helper", () => {
     expect(errorMessage).toBe(sharedErrorMessage);
+  });
+});
+
+describe("assertNoPageErrors (the final check before a snapshot)", () => {
+  it("throws the first error read at that moment, and passes when there is none", async () => {
+    await expect(assertNoPageErrors(() => ["late error", "second"])).rejects.toThrow("late error");
+    await expect(assertNoPageErrors(async () => ["async late error"])).rejects.toThrow("async late error");
+    await expect(assertNoPageErrors(() => [])).resolves.toBeUndefined();
   });
 });
 

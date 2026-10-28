@@ -2,6 +2,7 @@ import { Browser, PropertySymbol, type BrowserPage } from "happy-dom";
 import { IDLE_MS, SETTLED_IDLE_MS, readyCheck, type ReadyState } from "./probe";
 import {
   RenderError,
+  assertNoPageErrors,
   SERIALIZE_EXPR,
   blockedHint,
   createDeadline,
@@ -305,6 +306,10 @@ export function createHappyDomRenderer(opts: HappyDomRendererOptions = {}): Rend
           } catch (e) {
             if (!(opts.onTimeout === "snapshot" && e instanceof TimeoutError)) throw e;
             timedOut = true;
+            await assertNoPageErrors(() => {
+              const r = page.evaluate(readyCheck(IDLE_MS, opts.readySelector)) as ReadyState;
+              return withoutBlockedLoads([...r.errors], state.blocked);
+            });
           }
         } catch (e) {
           throw new RenderError("happy-dom", errorMessage(e) + blockedHint(state.blocked) + syncHint(state.syncRefused));

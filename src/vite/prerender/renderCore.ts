@@ -129,6 +129,15 @@ export const POLL_MS = 50;
 export const SETTLED_POLL_MS = 20;
 
 /** Polls `check` every `pollMs` until ready; rejects with the first reported error or on timeout. */
+/**
+ * Before a snapshot is saved: one last read of the page's errors, since errors raised after the
+ * last readiness poll would otherwise be lost. Throws the first error, as waitForReady does.
+ */
+export async function assertNoPageErrors(readErrors: () => string[] | Promise<string[]>): Promise<void> {
+  const errors = await readErrors();
+  if (errors.length) throw new Error(errors[0]);
+}
+
 export async function waitForReady(
   check: () => Promise<{ ready: boolean; errors: string[] }>,
   timeoutMs: number,
