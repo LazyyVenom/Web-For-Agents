@@ -85,6 +85,7 @@ export async function prerenderSite(input: {
           ...(markdown ? { markdownUrl: (route: string) => publicMdUrl(options.siteUrl, route) } : {}),
           inPage,
           skipRoute: input.skipRoute,
+          fileLayout: pr.fileLayout,
         },
         async (url, renderer, timeoutMs, scripts) => (await pool.get(renderer)).render(url, timeoutMs, scripts),
       ).catch((e: unknown) => {

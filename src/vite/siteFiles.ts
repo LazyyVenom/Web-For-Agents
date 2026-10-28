@@ -35,6 +35,34 @@ async function callHook<T>(ext: PrerenderExtension, hook: string, fn: () => T | 
   }
 }
 
+/**
+ * Keeps the pages whose output files are still free, in order: a page that would write a file
+ * already in `taken` (a reserved file such as 200.html, or an earlier page's file) is dropped with a
+ * warning naming both. With the flat layout "/index" writes index.html, the file of "/", and "/200"
+ * writes the SPA fallback; in any layout "/index" writes index.md. Nothing is ever overwritten.
+ */
+export function dropFileCollisions<T extends { route: string }>(
+  pages: T[],
+  filesOf: (page: T) => string[],
+  taken: Map<string, string>,
+  warn: (message: string) => void,
+): T[] {
+  const kept: T[] = [];
+  for (const page of pages) {
+    const files = filesOf(page);
+    const clash = files.find((f) => taken.has(f));
+    if (clash !== undefined) {
+      warn(
+        `${LOG_PREFIX} skipped ${shortRoute(page.route)}: its file ${clash} is already the file of ${taken.get(clash)}`,
+      );
+      continue;
+    }
+    for (const f of files) taken.set(f, shortRoute(page.route));
+    kept.push(page);
+  }
+  return kept;
+}
+
 /** The page fields the llms files, extensions and length warnings need. */
 export type SitePage = Pick<PrerenderedPage, "route" | "info" | "listed" | "inPage">;
 

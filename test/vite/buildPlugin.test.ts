@@ -486,6 +486,51 @@ describe("createBuildPlugin", () => {
     expect(t.warnings().some((w) => w.includes("skipped 1 route(s) whose file names would be too long"))).toBe(true);
   }, 30_000);
 
+  it("flat layout skips a leaf too long for .html instead of failing", async () => {
+    const t = make({ prerender: { fileLayout: "flat" } });
+    const long = "n".repeat(251); // fits "<leaf>.md" (254 bytes) but not "<leaf>.html" (256)
+    writeFileSync(
+      path.join(t.outDir, "assets/extra.js"),
+      EXTRA + `if (p === "/") root.querySelector("main").insertAdjacentHTML("beforeend", '<a href="/${long}">L</a>');\n`,
+    );
+    await t.run();
+    expect(t.has("index.md")).toBe(true);
+    expect(t.has(`${long}.md`)).toBe(false);
+    expect(t.warnings().some((w) => w.includes("skipped 1 route(s) whose file names would be too long"))).toBe(true);
+  }, 30_000);
+
+  it("flat layout skips /index and /200 instead of overwriting index.html and 200.html", async () => {
+    const t = make({ routes: ["/index", "/200"], prerender: { crawl: false, fileLayout: "flat" } });
+    writeFileSync(
+      path.join(t.outDir, "assets/extra.js"),
+      EXTRA + `if (p === "/index" || p === "/200") root.innerHTML = "<main><h1>Page " + p + "</h1></main>";\n`,
+    );
+    await t.run();
+    expect(t.read("index.html")).toContain("<title>T /</title>");
+    expect(t.read("200.html")).toBe(SHELL);
+    expect(t.read("index.md")).not.toContain("Page /index");
+    expect(t.warnings()).toEqual(
+      expect.arrayContaining([
+        "[web-for-agents] skipped /200: its file 200.html is already the file of the SPA fallback (200.html)",
+        "[web-for-agents] skipped /index: its file index.html is already the file of /",
+      ]),
+    );
+    expect(t.read("sitemap.xml")).not.toContain("/index<");
+    expect(t.read("llms.txt")).not.toContain("/200");
+  }, 30_000);
+
+  it("directory layout skips /index, whose index.md is the file of /", async () => {
+    const t = make({ routes: ["/index"], prerender: { crawl: false } });
+    writeFileSync(
+      path.join(t.outDir, "assets/extra.js"),
+      EXTRA + `if (p === "/index" || p === "/200") root.innerHTML = "<main><h1>Page " + p + "</h1></main>";\n`,
+    );
+    await t.run();
+    expect(t.has("index/index.html")).toBe(false);
+    expect(t.read("index.md")).not.toContain("Page /index");
+    expect(t.warnings()).toContain("[web-for-agents] skipped /index: its file index.md is already the file of /");
+  }, 30_000);
+
   it("writes nothing when a generated file name is too long", async () => {
     const t = make({ prerender: { crawl: false } }, [
       { name: "long", finalize: (ctx) => ctx.emitFile("x".repeat(300) + ".json", "{}") },

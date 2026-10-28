@@ -11,7 +11,7 @@ import type { PrerenderExtension } from "./prerender/extensions";
 import { MAX_ROUTE_BYTES, MAX_SEGMENT_BYTES, publicUrl, routeHtmlFile, routeMdFile, shortRoute } from "./prerender/paths";
 import { buildRobots } from "./robots";
 import { buildSitemap } from "./sitemap";
-import { fileOf, pageLengthWarnings, pageMarkdown, prefixed, SPA_FALLBACK_FILE, stageSiteFiles } from "./siteFiles";
+import { dropFileCollisions, fileOf, pageLengthWarnings, pageMarkdown, prefixed, SPA_FALLBACK_FILE, stageSiteFiles } from "./siteFiles";
 
 export { SPA_FALLBACK_FILE };
 
@@ -70,16 +70,31 @@ export function createBuildPlugin(resolved: ResolvedOptions, extensions: Prerend
       throw prefixed(e, "prerender failed");
     }
 
+    const filesOf = (route: string) => [routeHtmlFile(route, layout), ...(markdown ? [routeMdFile(route)] : [])];
+    const pages = dropFileCollisions(
+      result.pages,
+      (p) => filesOf(p.route),
+      new Map([[SPA_FALLBACK_FILE, `the SPA fallback (${SPA_FALLBACK_FILE})`]]),
+      (m) => logger.warn(m),
+    );
+    result = { ...result, pages };
+
     const mdByRoute = new Map<string, string>();
-    for (const page of result.pages) {
-      stager.stage(routeHtmlFile(page.route, layout), page.html);
+    /** Collisions were dropped above, so a "replaced" status is a bug; fail rather than overwrite. */
+    const stageNew = (file: string, source: string) => {
+      if (stager.stage(file, source).status === "replaced") {
+        throw new Error(`${LOG_PREFIX} internal error: ${file} was generated twice; nothing was written`);
+      }
+    };
+    for (const page of pages) {
+      stageNew(routeHtmlFile(page.route, layout), page.html);
       if (markdown) {
         const md = await pageMarkdown(markdown, { ...page, url: publicUrl(siteUrl, page.route) });
         mdByRoute.set(page.route, md);
-        stager.stage(routeMdFile(page.route), md);
+        stageNew(routeMdFile(page.route), md);
       }
     }
-    return { result, listed: result.pages.filter((p) => p.listed), mdByRoute };
+    return { result, listed: pages.filter((p) => p.listed), mdByRoute };
   };
 
   const runPipeline = async () => {
