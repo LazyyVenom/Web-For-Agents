@@ -382,7 +382,12 @@ describe("happy-dom render process isolation", { timeout: SUITE_TIMEOUT_MS }, ()
       const out = JSON.parse(json!.replace(/&quot;/g, '"')) as { restoreAttempt: string; results: string[] };
       expect(out.restoreAttempt).toBe("TypeError"); // the wrappers cannot be redefined
       // net.connect, new Socket().connect, http.get, tls.connect, dns.lookup, dns.promises.lookup, fetch, UDP
-      expect(out.results).toEqual(Array(8).fill("ERR_WFA_NETWORK_BLOCKED"));
+      expect(out.results.slice(0, 8)).toEqual(Array(8).fill("ERR_WFA_NETWORK_BLOCKED"));
+      // TLS over a socket to the prerender server is allowed (it fails later, in the handshake) ...
+      expect(out.results[8]).not.toBe("ERR_WFA_NETWORK_BLOCKED");
+      expect(out.results[8]).not.toBe("timeout");
+      // ... TLS over an unchecked socket is not
+      expect(out.results[9]).toBe("ERR_WFA_NETWORK_BLOCKED");
       await new Promise((res) => setTimeout(res, 100));
       expect(otherHits).toEqual([]);
     } finally {

@@ -41,6 +41,8 @@ export class NetworkBlockedError extends Error {
   }
 }
 
+let installed = false;
+
 function lock(target: object, key: string, value: unknown): void {
   Object.defineProperty(target, key, { value, writable: false, configurable: false, enumerable: true });
 }
@@ -59,6 +61,8 @@ function connectTarget(args: unknown[]): { host: string; port: number } | { path
 }
 
 export function containNetwork(list: NetworkAllowList): void {
+  if (installed) throw new Error("containNetwork: already installed");
+  installed = true;
   const hostAllowed = (host: string) => list.endpoints.has(host.replace(/^\[|\]$/g, "").toLowerCase());
   const allowed = (host: string, port: number) =>
     list.endpoints.get(host.replace(/^\[|\]$/g, "").toLowerCase())?.has(port) === true;
@@ -82,6 +86,8 @@ export function containNetwork(list: NetworkAllowList): void {
   };
 
   // Every TCP and TLS connection (net, tls, http, https, http2, undici's fetch, ws) ends here.
+  /** Sockets connected to an allowed endpoint: TLS may be layered on them. */
+  const vetted = new WeakSet<object>();
   const connect = net.Socket.prototype.connect;
   lock(net.Socket.prototype, "connect", function (this: net.Socket, ...args: unknown[]) {
     const err = check(args);
@@ -89,6 +95,7 @@ export function containNetwork(list: NetworkAllowList): void {
       process.nextTick(() => this.destroy(err));
       return this;
     }
+    vetted.add(this);
     return (connect as (...a: unknown[]) => net.Socket).apply(this, args);
   });
   for (const key of ["connect", "createConnection"] as const) {
@@ -101,6 +108,14 @@ export function containNetwork(list: NetworkAllowList): void {
   }
   const tlsConnect = tls.connect as (...a: unknown[]) => tls.TLSSocket;
   lock(tls, "connect", (...args: unknown[]) => {
+    const options = (typeof args[0] === "object" && args[0] !== null ? args[0] : args[2]) as { socket?: unknown } | undefined;
+    if (options?.socket !== undefined) {
+      // TLS over a socket the caller already has: fine when that socket went through the checks.
+      if (typeof options.socket === "object" && options.socket !== null && vetted.has(options.socket)) {
+        return tlsConnect(...args);
+      }
+      throw new NetworkBlockedError("TLS over a socket that did not connect to an allowed endpoint");
+    }
     const err = check(typeof args[0] === "number" ? args : [args[0] ?? {}]);
     if (err) throw err;
     return tlsConnect(...args);

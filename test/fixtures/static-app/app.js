@@ -164,6 +164,16 @@ function start() {
         outcome((done) => {
           mod("dgram").createSocket("udp4").send("x", Number(other.port), "127.0.0.1", (e) => done(e ? String(e.code) : "sent"));
         }),
+        // TLS over a socket to the prerender server (allowed; the handshake then fails on plain HTTP)
+        outcome((done) => {
+          const raw = net.connect(Number(location.port), "127.0.0.1");
+          const t = p.getBuiltinModule("tls").connect({ socket: raw, rejectUnauthorized: false }, () => done("secured"));
+          t.on("error", (e) => done(String(e.code)));
+        }),
+        // TLS over a socket that never went through the checks
+        outcome((done) => {
+          p.getBuiltinModule("tls").connect({ socket: new net.Socket() }).on("error", (e) => done(String(e.code)));
+        }),
       ]).then((results) => {
         show(`<pre id="escape">${JSON.stringify({ restoreAttempt, results })}</pre>`);
         window.__WFA_READY__ = true;
