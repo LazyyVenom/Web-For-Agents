@@ -123,6 +123,16 @@ describe("normalizeRoute", () => {
 describe("prerender and output options", () => {
   const base = { siteUrl: "https://a.com", robots } as const;
 
+  it("defaults concurrency to 8 for happy-dom and 4 when a browser renders", () => {
+    const c = (prerender: object) => (resolveOptions({ ...base, prerender }).prerender as { concurrency: number }).concurrency;
+    expect(c({})).toBe(8);
+    expect(c({ fallback: "chrome" })).toBe(8);
+    expect(c({ renderer: "chrome" })).toBe(4);
+    expect(c({ renderer: "msedge" })).toBe(4);
+    expect(c({ routeRenderers: [{ match: "/app/*", renderer: "chrome" }] })).toBe(4);
+    expect(c({ renderer: "chrome", concurrency: 2 })).toBe(2);
+  });
+
   it("validates prerender.idleMs", () => {
     expect(resolveOptions({ ...base, prerender: { idleMs: 0 } }).prerender).toMatchObject({ idleMs: 0 });
     expect(resolveOptions({ ...base, prerender: {} }).prerender).not.toHaveProperty("idleMs");
@@ -157,7 +167,7 @@ describe("prerender and output options", () => {
       fallback: false,
       routeRenderers: [],
       timeoutMs: 15000,
-      concurrency: 4,
+      concurrency: 8,
       maxRoutes: 500,
       allowOrigins: [],
     });

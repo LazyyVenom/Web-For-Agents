@@ -62,7 +62,7 @@ export interface PrerenderOptions {
   executablePath?: string;
   /** Per-route readiness timeout in milliseconds. Default 15000. */
   timeoutMs?: number;
-  /** Routes rendered at once. Default 4. */
+  /** Routes rendered at once. Default 8 with happy-dom only, 4 when any route renders in Chrome or Edge. */
   concurrency?: number;
   /** Stop discovering routes after this many (a warning is logged). Default 500. */
   maxRoutes?: number;
@@ -189,13 +189,15 @@ function resolvePrerender(input: PrerenderOptions): ResolvedPrerender {
     bad("executablePath", "a string");
   }
   const allowOrigins = resolveAllowOrigins(input.allowOrigins, bad);
+  // A browser page costs far more memory than a happy-dom one. The fallback renders failures only.
+  const usesBrowser = renderer !== "happy-dom" || routeRenderers.some((rr) => rr.renderer !== "happy-dom");
   const out: ResolvedPrerender = {
     crawl: input.crawl ?? true,
     renderer,
     fallback,
     routeRenderers,
     timeoutMs: posInt("timeoutMs", input.timeoutMs, 15000),
-    concurrency: posInt("concurrency", input.concurrency, 4),
+    concurrency: posInt("concurrency", input.concurrency, usesBrowser ? 4 : 8),
     maxRoutes: posInt("maxRoutes", input.maxRoutes, 500),
     allowOrigins,
   };
