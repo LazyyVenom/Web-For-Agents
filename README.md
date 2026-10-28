@@ -154,6 +154,7 @@ All options and the AI crawler list: [Plugin options](https://github.com/LazyyVe
 - [Dev overlay](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/overlay.md)
 - [Security](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/security.md)
 - [Advanced exports](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/advanced.md)
+- [Changelog](https://github.com/LazyyVenom/Web-For-Agents/blob/master/CHANGELOG.md)
 
 ## Development
 
