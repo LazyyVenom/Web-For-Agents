@@ -193,7 +193,10 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
   const pages: SitePage[] = [];
   const result: GeneratedPage[] = [];
   const mdByRoute = new Map<string, string>();
-  /** Each page's HTML file mtime, read before generate edits the file, for sitemap.lastmod "file". */
+  /**
+   * Each page's HTML file mtime, read before generate edits the file: the sitemap.lastmod "file"
+   * date, and what a page gets back if writing fails partway (the rollback rewrites it).
+   */
   const mtimeByRoute = new Map<string, Date>();
   const bodyFallback: string[] = [];
   const utf16: string[] = [];
@@ -207,7 +210,7 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
     (m) => logger.warn(m),
   );
   for (const { route, file } of routes) {
-    if (resolved.sitemapLastmod === "file") mtimeByRoute.set(route, fs.statSync(path.join(outDir, file)).mtime);
+    mtimeByRoute.set(route, fs.statSync(path.join(outDir, file)).mtime);
     const bytes = fs.readFileSync(path.join(outDir, file));
     const { charset, text: html } = decodeHtml(bytes);
     const url = publicUrl(siteUrl, route);
@@ -262,12 +265,27 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
     listed,
     mdByRoute,
   });
-  stager.flush();
-  // Adding the markdown link is not a content change: keep the page's mtime, so sitemap.lastmod
-  // "file" stays the date the page was built and a second run writes the same sitemap.
-  for (const [route, mtime] of mtimeByRoute) {
-    const file = fileByRoute.get(route)!;
-    if (written.has(file)) fs.utimesSync(path.join(outDir, file), mtime, mtime);
+  let flushed = false;
+  try {
+    stager.flush();
+    flushed = true;
+  } finally {
+    // A failed write rolls every page back to its old content: give it its old mtime too, so a
+    // failed run changes nothing. On success, adding the markdown link is not a content change
+    // either when sitemap.lastmod is "file": the page keeps its mtime, so lastmod stays the date
+    // the page was built and a second run writes the same sitemap.
+    if (!flushed || resolved.sitemapLastmod === "file") {
+      for (const [route, mtime] of mtimeByRoute) {
+        const file = fileByRoute.get(route)!;
+        if (!written.has(file)) continue;
+        try {
+          fs.utimesSync(path.join(outDir, file), mtime, mtime);
+        } catch (e) {
+          // Never hide the write error; on success, report the restore failure.
+          if (flushed) throw e;
+        }
+      }
+    }
   }
 
   if (markdown && bodyFallback.length > 0) {

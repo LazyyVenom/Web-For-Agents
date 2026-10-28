@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -253,5 +253,21 @@ describe("generateAgentFiles", () => {
     const u = setup();
     await expect(u.run({ sitemap: { lastmod: () => "soon" } })).rejects.toThrow('sitemap.lastmod must return "YYYY-MM-DD"');
     expect(u.has("llms.txt")).toBe(false);
+  });
+
+  it("a write that fails partway leaves every page's content and mtime as it was", async () => {
+    for (const lastmod of ["none", "file"] as const) {
+      const t = setup();
+      const old = new Date("2025-06-15T12:00:00Z");
+      for (const f of ["index.html", "about.html", "experience.html"]) utimesSync(path.join(t.dir, f), old, old);
+      const before = t.read("about.html");
+      // robots.txt is a directory, so writing it fails after the pages were written.
+      mkdirSync(path.join(t.dir, "robots.txt"));
+      await expect(t.run({ overwrite: true, sitemap: { lastmod } })).rejects.toThrow(/rolled back/);
+      expect(t.read("about.html")).toBe(before);
+      for (const f of ["index.html", "about.html", "experience.html"]) {
+        expect(statSync(path.join(t.dir, f)).mtime.toISOString(), `${lastmod} ${f}`).toBe(old.toISOString());
+      }
+    }
   });
 });
