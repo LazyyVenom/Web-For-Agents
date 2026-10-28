@@ -174,6 +174,24 @@ describe("createBuildPlugin", () => {
     expect(t.read("llms-full.txt")).toContain("EXTRA /fetch");
   }, 30_000);
 
+  it("writes llms sections and sitemap lastmod (\"file\" is the build date)", async () => {
+    const t = make({
+      routes: ["/fetch"],
+      prerender: { crawl: false },
+      sitemap: { lastmod: "file" },
+      llms: { intro: "About me.", sections: [{ title: "Links", links: [{ title: "Resume", url: "/resume.pdf" }] }] },
+    });
+    const before = new Date().toISOString().slice(0, 10);
+    await t.run();
+    const after = new Date().toISOString().slice(0, 10);
+    const llms = t.read("llms.txt");
+    expect(llms).toContain("\n\nAbout me.\n\n## Links\n\n- [Resume](https://a.com/resume.pdf)\n\n## Pages\n");
+    expect(t.read("llms-full.txt")).toContain("## Links\n\n- [Resume](https://a.com/resume.pdf)\n\nSource: ");
+    const dates = [...t.read("sitemap.xml").matchAll(/<lastmod>([^<]+)<\/lastmod>/g)].map((m) => m[1]);
+    expect(dates).toHaveLength(2);
+    for (const d of dates) expect([before, after]).toContain(d);
+  }, 30_000);
+
   it("prefixes markdown.transform errors with the route and writes nothing", async () => {
     const t = make({
       routes: ["/fetch"],

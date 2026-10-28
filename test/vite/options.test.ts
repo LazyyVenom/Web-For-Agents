@@ -336,3 +336,68 @@ describe("agentOutputs and isExcluded", () => {
     expect(isExcluded("/c", ["/a/*"])).toBe(false);
   });
 });
+
+describe("sitemap and llms options", () => {
+  const base = { siteUrl: "https://a.com/sub", robots } as const;
+
+  it("sitemap accepts a boolean or { lastmod }, default lastmod none", () => {
+    expect(resolveOptions(base)).toMatchObject({ sitemap: true, sitemapLastmod: "none" });
+    expect(resolveOptions({ ...base, sitemap: false })).toMatchObject({ sitemap: false, sitemapLastmod: "none" });
+    expect(resolveOptions({ ...base, sitemap: {} })).toMatchObject({ sitemap: true, sitemapLastmod: "none" });
+    expect(resolveOptions({ ...base, sitemap: { lastmod: "file" } })).toMatchObject({ sitemap: true, sitemapLastmod: "file" });
+    const fn = () => "2026-01-01";
+    expect(resolveOptions({ ...base, sitemap: { lastmod: fn } }).sitemapLastmod).toBe(fn);
+  });
+
+  it("rejects a bad sitemap option", () => {
+    expect(() => resolveOptions({ ...base, sitemap: "yes" as never })).toThrow("[web-for-agents] sitemap must be a boolean or { lastmod }");
+    expect(() => resolveOptions({ ...base, sitemap: { lastmod: "git" as never } })).toThrow(
+      '[web-for-agents] sitemap.lastmod must be "file", "none" or a function',
+    );
+  });
+
+  it("llms keeps intro and resolves section link URLs against siteUrl", () => {
+    const r = resolveOptions({
+      ...base,
+      llms: {
+        intro: "Hi",
+        sections: [
+          { title: "Links", links: [{ title: "Resume", url: "/resume.pdf" }, { title: "Mail", url: "mailto:me@a.com", description: "d" }] },
+          { title: "About", text: "x" },
+        ],
+      },
+    });
+    expect(r.llms).toEqual({
+      intro: "Hi",
+      sections: [
+        { title: "Links", links: [{ title: "Resume", url: "https://a.com/resume.pdf" }, { title: "Mail", url: "mailto:me@a.com", description: "d" }] },
+        { title: "About", text: "x" },
+      ],
+    });
+  });
+
+  it("rejects bad llms options with the field path", () => {
+    const bad = (llms: unknown) => () => resolveOptions({ ...base, llms: llms as never });
+    expect(bad({ title: 1 })).toThrow("[web-for-agents] llms.title must be a string");
+    expect(bad({ intro: ["x"] })).toThrow("[web-for-agents] llms.intro must be a string");
+    expect(bad({ sections: {} })).toThrow("[web-for-agents] llms.sections must be an array");
+    expect(bad({ sections: ["x"] })).toThrow("[web-for-agents] llms.sections[0] must be an object");
+    expect(bad({ sections: [{ text: "x" }] })).toThrow("[web-for-agents] llms.sections[0].title is required");
+    expect(bad({ sections: [{ title: " ", text: "x" }] })).toThrow("[web-for-agents] llms.sections[0].title must be a non-empty string");
+    expect(bad({ sections: [{ title: "T" }] })).toThrow("[web-for-agents] llms.sections[0] needs text or links");
+    expect(bad({ sections: [{ title: "T", links: [] }] })).toThrow("[web-for-agents] llms.sections[0] needs text or links");
+    expect(bad({ sections: [{ title: "T", links: [{ title: "x" }] }] })).toThrow("[web-for-agents] llms.sections[0].links[0].url is required");
+    for (const url of ["javascript:alert(1)", "data:text/html,x", "ftp://a.com/x", "http://"]) {
+      expect(bad({ sections: [{ title: "T", links: [{ title: "x", url }] }] })).toThrow(
+        `[web-for-agents] llms.sections[0].links[0].url must be an http(s) or mailto: URL, or a path on the site (got ${JSON.stringify(url)})`,
+      );
+    }
+    expect(bad({ sections: [{ title: "T", links: [{ title: "x", url: "https://a.com", description: 2 }] }] })).toThrow(
+      "[web-for-agents] llms.sections[0].links[0].description must be a string",
+    );
+  });
+
+  it("validates llms even when prerender is off", () => {
+    expect(() => resolveOptions({ ...base, prerender: false, llms: { sections: [{ title: "T" }] } as never })).toThrow("needs text or links");
+  });
+});

@@ -21,7 +21,7 @@ import { parseHtml } from "./prerender/dom";
 import { byRoute, isSafeRoute, publicMdUrl, publicUrl, routeMdFile, routeOfHtmlFile, shortRoute } from "./prerender/paths";
 import { decodeHtml, setMarkdownLink } from "./generateHtml";
 import { buildRobots } from "./robots";
-import { buildSitemap } from "./sitemap";
+import { buildSitemap, sitemapLastmods } from "./sitemap";
 
 export interface GenerateOptions {
   /** Build output directory holding the prerendered HTML, e.g. "dist". */
@@ -33,7 +33,7 @@ export interface GenerateOptions {
   /** Routes to leave out. A string is an exact path, or a prefix when it ends in "/*". */
   exclude?: Array<string | RegExp>;
   /** Write sitemap.xml and the `Sitemap:` line in robots.txt. Default true. */
-  sitemap?: boolean;
+  sitemap?: WebForAgentsOptions["sitemap"];
   /** Write a `.md` version of each page. `false` also turns off llms-full.txt. */
   markdown?: MarkdownOptions | false;
   /** Write llms.txt and llms-full.txt. Default on. */
@@ -193,6 +193,8 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
   const pages: SitePage[] = [];
   const result: GeneratedPage[] = [];
   const mdByRoute = new Map<string, string>();
+  /** Each page's HTML file mtime, read before generate edits the file, for sitemap.lastmod "file". */
+  const mtimeByRoute = new Map<string, Date>();
   const bodyFallback: string[] = [];
   const utf16: string[] = [];
   /** Routes whose page has its own markdown link, left untouched. */
@@ -205,6 +207,7 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
     (m) => logger.warn(m),
   );
   for (const { route, file } of routes) {
+    if (resolved.sitemapLastmod === "file") mtimeByRoute.set(route, fs.statSync(path.join(outDir, file)).mtime);
     const bytes = fs.readFileSync(path.join(outDir, file));
     const { charset, text: html } = decodeHtml(bytes);
     const url = publicUrl(siteUrl, route);
@@ -245,7 +248,11 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
   }
 
   const listed = pages.filter((p) => p.listed);
-  if (resolved.sitemap) guarded.stage(fileOf(SITEMAP_PATH), buildSitemap(siteUrl, listed.map((p) => p.route)));
+  if (resolved.sitemap) {
+    const routes = listed.map((p) => p.route);
+    const lastmod = await sitemapLastmods(resolved.sitemapLastmod, routes, (r) => mtimeByRoute.get(r));
+    guarded.stage(fileOf(SITEMAP_PATH), buildSitemap(siteUrl, routes, lastmod));
+  }
   guarded.stage(fileOf(ROBOTS_PATH), buildRobots(resolved));
   const extensions = resolved.agentMap
     ? [agentMapExtension({ siteUrl, fileName: resolved.agentMap.fileName })]
@@ -256,6 +263,12 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
     mdByRoute,
   });
   stager.flush();
+  // Adding the markdown link is not a content change: keep the page's mtime, so sitemap.lastmod
+  // "file" stays the date the page was built and a second run writes the same sitemap.
+  for (const [route, mtime] of mtimeByRoute) {
+    const file = fileByRoute.get(route)!;
+    if (written.has(file)) fs.utimesSync(path.join(outDir, file), mtime, mtime);
+  }
 
   if (markdown && bodyFallback.length > 0) {
     logger.warn(

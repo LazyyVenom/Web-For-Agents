@@ -242,4 +242,16 @@ describe("generateAgentFiles", () => {
     const empty = setup({ "assets/a.html": "<p>x</p>" });
     await expect(empty.run()).rejects.toThrow("no .html pages found");
   });
+
+  it("sitemap.lastmod: a function gets each listed route; nothing is written when it throws", async () => {
+    const t = setup();
+    const seen: string[] = [];
+    await t.run({ sitemap: { lastmod: (r) => (seen.push(r), r === "/about" ? "2026-05-01" : undefined) } });
+    expect(seen).toEqual(["/", "/about", "/blog/post", "/experience"]);
+    expect(t.read("sitemap.xml")).toContain("<loc>https://me.dev/about</loc><lastmod>2026-05-01</lastmod></url>");
+    expect(t.read("sitemap.xml").match(/<lastmod>/g)).toHaveLength(1);
+    const u = setup();
+    await expect(u.run({ sitemap: { lastmod: () => "soon" } })).rejects.toThrow('sitemap.lastmod must return "YYYY-MM-DD"');
+    expect(u.has("llms.txt")).toBe(false);
+  });
 });

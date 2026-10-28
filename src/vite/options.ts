@@ -2,6 +2,7 @@ import { DEFAULT_CONTENT_SELECTOR } from "../shared/content";
 import { AGENT_MAP_PATH, normalizeRoute } from "../shared/conventions";
 import { LOG_PREFIX, withPrefix } from "../shared/errors";
 import { DEFAULT_SHORTCUT, parseShortcut } from "../shared/shortcut";
+import { tryResolveUrl } from "../shared/url";
 import { trimTrailingSlash } from "./prerender/paths";
 
 export { normalizeRoute };
@@ -22,7 +23,7 @@ export interface WebForAgentsOptions {
     disallow?: string[];
   };
   /** Generate sitemap.xml and the `Sitemap:` line in robots.txt. Default true. */
-  sitemap?: boolean;
+  sitemap?: boolean | SitemapOptions;
   /** Prerender routes after the build. `false` also turns off markdown, llms and the agent map. */
   prerender?: PrerenderOptions | false;
   /** Write a `.md` version of each page. `false` also turns off llms-full.txt. */
@@ -135,6 +136,37 @@ export interface LlmsOptions {
   title?: string;
   /** llms.txt summary. Default: the description of "/". */
   description?: string;
+  /** Plain text after the summary, in llms.txt and llms-full.txt. Blank lines separate paragraphs. */
+  intro?: string;
+  /** Sections written before "## Pages" in llms.txt, and in the llms-full.txt header. */
+  sections?: LlmsSectionOptions[];
+}
+
+export interface LlmsSectionOptions {
+  /** The section heading. */
+  title: string;
+  /** Plain text under the heading. Blank lines separate paragraphs. */
+  text?: string;
+  /** Links listed under the text. */
+  links?: LlmsLinkOptions[];
+}
+
+export interface LlmsLinkOptions {
+  title: string;
+  /** http(s) or mailto: URL. A relative URL ("/resume.pdf") is resolved against siteUrl. */
+  url: string;
+  description?: string;
+}
+
+/** A route's last modification date: "YYYY-MM-DD", a W3C datetime, a Date, or undefined for none. */
+export type SitemapLastmod = (route: string) => string | Date | undefined | Promise<string | Date | undefined>;
+
+export interface SitemapOptions {
+  /**
+   * `<lastmod>` for each URL. "file": the source HTML file's modification time with `generate`, the
+   * build date with the plugin. A function returns the date per route. Default "none".
+   */
+  lastmod?: "file" | "none" | SitemapLastmod;
 }
 
 export type ResolvedPrerender = Required<
@@ -153,6 +185,8 @@ export interface ResolvedOptions {
   routes: string[];
   robots: WebForAgentsOptions["robots"];
   sitemap: boolean;
+  /** `<lastmod>` source; "none" when the sitemap is off. */
+  sitemapLastmod: "file" | "none" | SitemapLastmod;
   exclude: Array<string | RegExp>;
   prerender: ResolvedPrerender | false;
   markdown: ResolvedMarkdown | false;
@@ -308,6 +342,78 @@ export function resolveMarkdown(input: MarkdownOptions | undefined): ResolvedMar
   return out;
 }
 
+function resolveSitemap(input: WebForAgentsOptions["sitemap"]): Pick<ResolvedOptions, "sitemap" | "sitemapLastmod"> {
+  if (input === undefined || typeof input === "boolean") return { sitemap: input ?? true, sitemapLastmod: "none" };
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new Error(withPrefix("sitemap must be a boolean or { lastmod }"));
+  }
+  const lastmod = input.lastmod ?? "none";
+  if (lastmod !== "file" && lastmod !== "none" && typeof lastmod !== "function") {
+    throw new Error(withPrefix('sitemap.lastmod must be "file", "none" or a function'));
+  }
+  return { sitemap: true, sitemapLastmod: lastmod };
+}
+
+/** Validates llms options; section link URLs are resolved against siteUrl. */
+function resolveLlms(input: LlmsOptions | undefined, siteUrl: string): LlmsOptions {
+  if (input === undefined) return {};
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new Error(withPrefix("llms must be false or { title, description, intro, sections }"));
+  }
+  const str = (v: unknown, field: string, nonEmpty = false): string | undefined => {
+    if (v === undefined) return undefined;
+    if (typeof v !== "string" || (nonEmpty && v.trim() === "")) {
+      throw new Error(withPrefix(`llms.${field} must be a ${nonEmpty ? "non-empty " : ""}string`));
+    }
+    return v;
+  };
+  const out: LlmsOptions = { ...input };
+  str(input.title, "title");
+  str(input.description, "description");
+  str(input.intro, "intro");
+  if (input.sections === undefined) return out;
+  if (!Array.isArray(input.sections)) throw new Error(withPrefix("llms.sections must be an array"));
+  out.sections = input.sections.map((sec: unknown, i): LlmsSectionOptions => {
+    const at = `sections[${i}]`;
+    if (typeof sec !== "object" || sec === null || Array.isArray(sec)) {
+      throw new Error(withPrefix(`llms.${at} must be an object such as { title, text, links }`));
+    }
+    const { title, text, links } = sec as Record<string, unknown>;
+    if (title === undefined) throw new Error(withPrefix(`llms.${at}.title is required`));
+    const s: LlmsSectionOptions = { title: str(title, `${at}.title`, true)! };
+    const t = str(text, `${at}.text`);
+    if (t !== undefined) s.text = t;
+    if (links !== undefined) {
+      if (!Array.isArray(links)) throw new Error(withPrefix(`llms.${at}.links must be an array`));
+      s.links = links.map((l: unknown, j): LlmsLinkOptions => {
+        const lat = `${at}.links[${j}]`;
+        if (typeof l !== "object" || l === null || Array.isArray(l)) {
+          throw new Error(withPrefix(`llms.${lat} must be an object such as { title, url, description }`));
+        }
+        const link = l as Record<string, unknown>;
+        if (link.title === undefined) throw new Error(withPrefix(`llms.${lat}.title is required`));
+        if (link.url === undefined) throw new Error(withPrefix(`llms.${lat}.url is required`));
+        const url = typeof link.url === "string" ? tryResolveUrl(link.url.trim(), siteUrl + "/") : null;
+        const scheme = url === null ? "" : new URL(url).protocol;
+        if (url === null || !["http:", "https:", "mailto:"].includes(scheme)) {
+          throw new Error(
+            withPrefix(`llms.${lat}.url must be an http(s) or mailto: URL, or a path on the site (got ${JSON.stringify(link.url)})`),
+          );
+        }
+        const o: LlmsLinkOptions = { title: str(link.title, `${lat}.title`, true)!, url };
+        const d = str(link.description, `${lat}.description`);
+        if (d !== undefined) o.description = d;
+        return o;
+      });
+    }
+    if (!s.text?.trim() && !s.links?.length) {
+      throw new Error(withPrefix(`llms.${at} needs text or links`));
+    }
+    return s;
+  });
+  return out;
+}
+
 const AGENT_MAP_FILE = /^[A-Za-z0-9_.-]+\.json$/;
 
 function resolveAgentMap(input: WebForAgentsOptions["agentMap"]): { fileName: string } | false {
@@ -397,6 +503,8 @@ export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
   const prerender = input.prerender === false ? false : resolvePrerender(input.prerender ?? {});
   let markdown: ResolvedOptions["markdown"] = false;
   let llms: ResolvedOptions["llms"] = false;
+  // Validated even when prerender is off, so a bad section fails fast.
+  const requestedLlms = input.llms === false ? false : resolveLlms(input.llms, siteUrl);
   // Validated even when prerender is off, so a bad fileName fails fast.
   const requestedAgentMap = resolveAgentMap(input.agentMap);
   let agentMap: ResolvedOptions["agentMap"] = false;
@@ -409,7 +517,7 @@ export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
     }
   } else {
     if (input.markdown !== false) markdown = resolveMarkdown(input.markdown);
-    if (input.llms !== false) llms = { ...input.llms };
+    llms = requestedLlms;
     agentMap = requestedAgentMap;
   }
 
@@ -417,7 +525,7 @@ export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
     siteUrl,
     routes,
     robots: input.robots,
-    sitemap: input.sitemap ?? true,
+    ...resolveSitemap(input.sitemap),
     exclude,
     prerender,
     markdown,

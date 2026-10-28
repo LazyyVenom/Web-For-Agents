@@ -155,8 +155,13 @@ export async function stageSiteFiles(
       const md = mdByRoute.get(p.route);
       return md !== undefined ? { ...p, markdown: md } : { ...p };
     });
-    stager.stage(fileOf(LLMS_TXT_PATH), buildLlmsTxt(site, llmsPages, sections));
-    if (markdown) stager.stage(fileOf(LLMS_FULL_TXT_PATH), buildLlmsFullTxt(site, llmsPages));
+    const llmsSite = {
+      ...site,
+      ...(llms.intro !== undefined ? { intro: llms.intro } : {}),
+      ...(llms.sections !== undefined ? { sections: llms.sections } : {}),
+    };
+    stager.stage(fileOf(LLMS_TXT_PATH), buildLlmsTxt(llmsSite, llmsPages, sections));
+    if (markdown) stager.stage(fileOf(LLMS_FULL_TXT_PATH), buildLlmsFullTxt(llmsSite, llmsPages));
   }
 
   for (const ext of extensions) {

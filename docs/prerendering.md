@@ -145,6 +145,62 @@ Every prerendered page gets a markdown twin: `/about` is served as `/about.md` a
 
 When a page has no `<h1>`, its markdown starts with a `# title` heading. That heading, and the titles and descriptions in `llms.txt` and `llms-full.txt`, are written on a single line, with `\`, `[`, `]` and `<` backslash-escaped, so they cannot close link text or open raw HTML (`Vec<T>` is written `Vec\<T>`). Page bodies are converted from HTML with their text escaped, so text that looks like HTML never becomes live HTML, and `<script>`, `<style>`, `<noscript>` and `<template>` elements are dropped.
 
+### Custom sections
+
+`llms.intro` and `llms.sections` add your own text and links at the top of `llms.txt` (before `## Pages`) and of `llms-full.txt` (before the first page). Use them for an "About me" summary, key links and featured work:
+
+```ts
+llms: {
+  intro: "I am a full-stack developer who builds tools for small teams.",
+  sections: [
+    {
+      title: "Key links",
+      links: [
+        { title: "Resume", url: "/resume.pdf", description: "PDF, one page" },
+        { title: "GitHub", url: "https://github.com/me" },
+        { title: "Email", url: "mailto:me@example.com" },
+      ],
+    },
+    { title: "Featured projects", text: "Things I built recently.", links: [{ title: "Tool", url: "https://github.com/me/tool" }] },
+  ],
+},
+```
+
+```md
+# Me
+
+> The summary from llms.description or the root page
+
+I am a full-stack developer who builds tools for small teams.
+
+## Key links
+
+- [Resume](https://example.com/resume.pdf): PDF, one page
+- [GitHub](https://github.com/me)
+- [Email](mailto:me@example.com)
+
+## Featured projects
+
+...
+
+## Pages
+```
+
+A link `url` must be http(s) or `mailto:`; a relative URL such as `/resume.pdf` is resolved against `siteUrl`. Each section needs `text` or at least one link. `intro` and `text` are plain text: blank lines separate paragraphs, and they are escaped like titles, with a leading `#`, `>`, `-` or `1.` escaped too, so they cannot add headings, lists or links. Bad values fail the build with an error naming the field, such as `llms.sections[0].links[1].url`. Both work with `generate`, including from a JSON `--config` file.
+
+## Sitemap lastmod
+
+`sitemap: { lastmod }` adds a `<lastmod>` date to each URL in `sitemap.xml`. By default (`"none"`) there is none.
+
+- `"file"`: with `generate`, the modification time of each page's HTML file, so the date your own prerender last wrote it (adding the markdown link keeps the file's time). With the plugin, every page is rendered by the build, so it is the build date.
+- A function `(route) => string | Date | undefined`, sync or async, for dates you track yourself (a CMS field, `git log`). Return `"YYYY-MM-DD"`, a W3C datetime with a time zone (`"2026-01-31T09:00:00Z"`), a `Date`, or `undefined` for no `<lastmod>` on that route. Anything else, or an error thrown by the function, fails the build with the route named.
+
+Dates from `"file"` and `Date` values are written as `YYYY-MM-DD` in UTC. A function can only be set from code or a `.js` / `.mjs` config file; `"file"` also works in JSON.
+
+```ts
+sitemap: { lastmod: "file" },
+```
+
 ## Blocked AI crawlers
 
 If `robots.ai.training` or `robots.ai.search` is `"block"` while `.md` files, `llms.txt`, `llms-full.txt` or `agents.json` are enabled, the build logs a warning: those files are still generated and publicly fetchable, so blocking bots in `robots.txt` does not hide them. Set `markdown: false`, `llms: false` and/or `agentMap: false` if you do not want them published.
