@@ -229,6 +229,23 @@ describe("crawlRoutes", () => {
     expect(off.pages[0]!.html).not.toContain('type="text/markdown"');
   });
 
+  it("skips routes whose file names would be too long, without failing", async () => {
+    const calls: string[] = [];
+    const long = "/" + "x".repeat(300);
+    const deep = "/" + Array.from({ length: 60 }, () => "y".repeat(20)).join("/");
+    const wide = "/" + "%C3%A9".repeat(130); // 130 "é" = 260 bytes decoded
+    const render = fakeRender(
+      { "/": page(a(long) + a(deep) + a(wide) + a("/ok")), "/ok": page("OK"), [long]: page("L") },
+      calls,
+    );
+    const r = await crawlRoutes(opts({ seeds: ["/", "/" + "z".repeat(256)] }), render);
+    expect(r.pages.map((p) => p.route)).toEqual(["/", "/ok"]);
+    expect(r.failures).toEqual([]);
+    expect(r.tooLongRoutes).toEqual([long, "/" + "z".repeat(256), deep, wide].sort());
+    expect(calls).toEqual(expect.arrayContaining(["/", "/ok"]));
+    expect(calls).toHaveLength(2);
+  });
+
   it("reports body-fallback routes", async () => {
     const r = await crawlRoutes(
       opts(),

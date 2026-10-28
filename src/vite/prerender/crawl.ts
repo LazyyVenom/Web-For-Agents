@@ -4,7 +4,7 @@ import { isExcluded, type RendererName } from "../options";
 import { analyzePage, type PageInfo } from "./analyze";
 import { finalizeHtml } from "./finalize";
 import { mountPath } from "../../shared/url";
-import { byRoute, isSafeRoute, linkToRoute } from "./paths";
+import { byRoute, isRouteTooLong, isSafeRoute, linkToRoute } from "./paths";
 import type { InPageScripts, RenderResult } from "./renderCore";
 
 export interface PrerenderedPage {
@@ -31,6 +31,8 @@ export interface CrawlResult {
   failures: CrawlFailure[];
   truncated: boolean;
   bodyFallbackRoutes: string[];
+  /** Routes skipped because their file names would be too long to write. Sorted. */
+  tooLongRoutes: string[];
 }
 
 export interface CrawlOptions {
@@ -80,12 +82,18 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
     seen.add(route);
     queue.push(route);
   };
+  const tooLong = new Set<string>();
+  const fits = (route: string): boolean => {
+    if (!isRouteTooLong(route)) return true;
+    tooLong.add(route);
+    return false;
+  };
   for (const s of [...new Set(opts.seeds.map(normalizeRoute))].sort()) {
-    if (isSafeRoute(s) && !skip(s)) enqueue(s);
+    if (isSafeRoute(s) && fits(s) && !skip(s)) enqueue(s);
   }
 
   const candidate = (route: string | null): route is string =>
-    route !== null && !isExcluded(route, opts.exclude) && !skip(route);
+    route !== null && !isExcluded(route, opts.exclude) && fits(route) && !skip(route);
 
   const pages: PrerenderedPage[] = [];
   const failures: CrawlFailure[] = [];
@@ -188,7 +196,7 @@ export async function crawlRoutes(opts: CrawlOptions, render: RenderFn): Promise
   pages.sort(byRoute);
   failures.sort(byRoute);
   bodyFallbackRoutes.sort();
-  return { pages, failures, truncated, bodyFallbackRoutes };
+  return { pages, failures, truncated, bodyFallbackRoutes, tooLongRoutes: [...tooLong].sort() };
 }
 
 export function formatFailures(failures: CrawlFailure[], fallback: RendererName | false): string {

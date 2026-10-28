@@ -9,7 +9,7 @@ import { buildLlmsFullTxt, buildLlmsTxt, type LlmsPage, type LlmsSection } from 
 import type { ResolvedOptions } from "./options";
 import { prerenderSite, type CrawlResult } from "./prerender/index";
 import type { ExtensionContext, ExtensionPage, PrerenderExtension } from "./prerender/extensions";
-import { publicMdUrl, publicUrl, routeHtmlFile, routeMdFile } from "./prerender/paths";
+import { MAX_ROUTE_BYTES, MAX_SEGMENT_BYTES, publicMdUrl, publicUrl, routeHtmlFile, routeMdFile, shortRoute } from "./prerender/paths";
 import { buildRobots } from "./robots";
 import { buildSitemap } from "./sitemap";
 
@@ -32,6 +32,66 @@ async function callHook<T>(ext: PrerenderExtension, hook: string, fn: () => T | 
   } catch (e) {
     throw prefixed(e, `extension "${ext.name}" ${hook} failed`);
   }
+}
+
+/** Longest file name most file systems accept, in bytes. */
+const MAX_NAME_BYTES = 255;
+
+/**
+ * Wraps `stager` so its flush leaves outDir as it was on failure: every staged path is checked
+ * before anything is written, and if a write still fails, the files written so far are restored
+ * (or removed when new) along with any directories the flush created.
+ */
+export function atomicStager(stager: FileStager, outDir: string): FileStager {
+  const staged = new Set<string>();
+  return {
+    ...stager,
+    stage(fileName, source) {
+      const r = stager.stage(fileName, source);
+      if (r.status !== "skipped") staged.add(r.file);
+      return r;
+    },
+    flush() {
+      for (const rel of staged) {
+        const long = rel.split("/").find((seg) => Buffer.byteLength(seg, "utf8") > MAX_NAME_BYTES);
+        if (long !== undefined) {
+          throw new Error(
+            `${LOG_PREFIX} cannot write ${shortRoute(rel)}: the name "${shortRoute(long, 40)}" is longer than ${MAX_NAME_BYTES} bytes; nothing was written`,
+          );
+        }
+      }
+      // Snapshot what the flush may overwrite, and which directories it may create.
+      const before = new Map<string, Buffer | null>();
+      const newDirs = new Set<string>();
+      for (const rel of staged) {
+        const file = path.join(outDir, rel);
+        before.set(file, fs.existsSync(file) && fs.statSync(file).isFile() ? fs.readFileSync(file) : null);
+        for (let d = path.dirname(file); d.length > outDir.length && !fs.existsSync(d); d = path.dirname(d)) {
+          newDirs.add(d);
+        }
+      }
+      try {
+        stager.flush();
+      } catch (e) {
+        for (const [file, content] of before) {
+          try {
+            if (content === null) fs.rmSync(file, { force: true });
+            else fs.writeFileSync(file, content);
+          } catch {
+            // best effort: keep restoring the rest
+          }
+        }
+        for (const d of [...newDirs].sort((a, b) => b.length - a.length)) {
+          try {
+            fs.rmdirSync(d);
+          } catch {
+            // not empty or already gone
+          }
+        }
+        throw prefixed(e, "writing the generated files failed; the files written so far were rolled back");
+      }
+    },
+  };
 }
 
 type BuildEnv = { name?: string; config?: { consumer?: string } };
@@ -151,7 +211,7 @@ export function createBuildPlugin(resolved: ResolvedOptions, extensions: Prerend
   const runPipeline = async () => {
     const { siteUrl, markdown } = resolved;
     const pr = resolved.prerender;
-    const stager = createFileStager({ outDir, publicDir, warn: (msg) => logger.warn(msg) });
+    const stager = atomicStager(createFileStager({ outDir, publicDir, warn: (msg) => logger.warn(msg) }), outDir);
 
     const rendered = pr === false ? undefined : await renderSite(stager);
     // Routes listed in `routes` but served from publicDir stay in the sitemap (they have no markdown, so not in llms).
@@ -174,6 +234,14 @@ export function createBuildPlugin(resolved: ResolvedOptions, extensions: Prerend
     if (result.truncated) {
       logger.warn(
         `${LOG_PREFIX} stopped after ${pr.maxRoutes} routes (prerender.maxRoutes); raise it to include more routes`,
+      );
+    }
+    if (result.tooLongRoutes.length > 0) {
+      logger.warn(
+        `${LOG_PREFIX} skipped ${result.tooLongRoutes.length} route(s) whose file names would be too long ` +
+          `(a path segment over ${MAX_SEGMENT_BYTES} bytes or a path over ${MAX_ROUTE_BYTES} bytes): ` +
+          result.tooLongRoutes.slice(0, 5).map((r) => shortRoute(r)).join(", ") +
+          (result.tooLongRoutes.length > 5 ? ", ..." : ""),
       );
     }
     if (markdown && result.bodyFallbackRoutes.length > 0) {
