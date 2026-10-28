@@ -159,7 +159,9 @@ export function schemaFromForm(form: HTMLFormElement): JsonSchema {
 /** Longest string run through a pattern or format regex: bounds catastrophic backtracking in author patterns. */
 const MAX_REGEX_INPUT = 10_000;
 
-type Errors = Array<{ field: string; message: string }>;
+export type Errors = Array<{ field: string; message: string }>;
+
+const NOT_ALLOWED = "is not an allowed field";
 
 function checkValue(s: JsonSchema, v: unknown, field: string, errors: Errors): void {
   const bad = (message: string): void => {
@@ -237,7 +239,7 @@ function checkObject(schema: JsonSchema, obj: Record<string, unknown>, prefix: s
   for (const [key, value] of Object.entries(obj)) {
     const prop = props[key];
     if (!hasOwn(props, key) || !prop) {
-      if (schema.additionalProperties !== true) errors.push({ field: prefix + key, message: "is not an allowed field" });
+      if (schema.additionalProperties !== true) errors.push({ field: prefix + key, message: NOT_ALLOWED });
       continue;
     }
     if (value === undefined) continue;
@@ -253,4 +255,21 @@ export function validateInput(
   const errors: Errors = [];
   checkObject(schema, input, "", errors);
   return errors.length ? { ok: false, errors } : { ok: true, value: input };
+}
+
+/**
+ * Input for a form action. Like validateInput against the form's current schema, except that
+ * top-level keys with no field yet are let through when nothing else is wrong: filling may reveal
+ * their field, and fill() validates them then (or rejects them if it never appears).
+ */
+export function validateFormInput(
+  schema: JsonSchema,
+  input: unknown,
+): { ok: true; value: Record<string, unknown> } | { ok: false; errors: Errors } {
+  const r = validateInput(schema, input);
+  if (r.ok) return r;
+  const props = schema.properties ?? {};
+  const deferred = (e: Errors[number]): boolean =>
+    e.message === NOT_ALLOWED && !hasOwn(props, e.field) && hasOwn(input as object, e.field);
+  return r.errors.every(deferred) ? { ok: true, value: input as Record<string, unknown> } : r;
 }

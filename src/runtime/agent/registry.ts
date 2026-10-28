@@ -5,7 +5,7 @@ import { hasOwn } from "../../shared/object";
 import { compareStrings } from "../../shared/sort";
 import { isConcealed, isDisabled } from "./dom";
 import { submitFormAction } from "./formAutomation";
-import { EMPTY_OBJECT_SCHEMA, schemaFromForm, validateInput } from "./formSchema";
+import { EMPTY_OBJECT_SCHEMA, schemaFromForm, validateFormInput, validateInput } from "./formSchema";
 import type { AgentActionDescriptor, AgentActionResult, AgentActionSpec, JsonSchema } from "./types";
 import { exposeTool, hasModelContext, type WebMcpTool } from "./webmcp";
 
@@ -204,7 +204,7 @@ export async function executeAgentAction(
     if (r.kind === null) return { status: "error", message: "action has no handler and no element" };
     const { spec } = r;
     const schema = schemaOf(r);
-    const checked = validateInput(schema, input);
+    const checked = (r.kind === "form" ? validateFormInput : validateInput)(schema, input);
     if (!checked.ok) return { status: "invalid", errors: checked.errors };
     const value = checked.value;
 

@@ -282,4 +282,55 @@ describe("runFormAction", () => {
     f.addEventListener("submit", (e) => e.preventDefault());
     expect((await run(f, { q: "x" })).status).toBe("submitted");
   });
+
+  describe("fields revealed while filling", () => {
+    function revealing(): HTMLFormElement {
+      const f = mount(`<form>
+        <div hidden id="extra"><input name="company" maxlength="5"></div>
+        <input type="checkbox" name="business">
+      </form>`);
+      const box = f.elements.namedItem("business") as HTMLInputElement;
+      box.addEventListener("change", () => (document.getElementById("extra")!.hidden = !box.checked));
+      f.addEventListener("submit", (e) => e.preventDefault());
+      return f;
+    }
+
+    it("fills a field revealed by an earlier write in the same call", async () => {
+      const f = revealing();
+      expect((await run(f, { business: true, company: "Acme" })).status).toBe("submitted");
+      expect((f.elements.namedItem("company") as HTMLInputElement).value).toBe("Acme");
+    });
+
+    it("validates a revealed field's value against its schema", async () => {
+      const f = revealing();
+      expect(await run(f, { business: true, company: "Too long" })).toEqual({
+        status: "invalid",
+        errors: [{ field: "company", message: "must be at most 5 characters" }],
+      });
+      expect((f.elements.namedItem("company") as HTMLInputElement).value).toBe("");
+    });
+
+    it("rejects a name whose field never appears, without submitting", async () => {
+      const f = revealing();
+      const submitted = vi.fn();
+      f.addEventListener("submit", submitted);
+      expect(await run(f, { company: "Acme" })).toEqual({
+        status: "invalid",
+        errors: [{ field: "company", message: "is not an allowed field" }],
+      });
+      expect(submitted).not.toHaveBeenCalled();
+      expect((f.elements.namedItem("company") as HTMLInputElement).value).toBe("");
+    });
+
+    it("still reports unknown keys alongside other validation errors", async () => {
+      const f = mount(`<form><input name="a" required></form>`);
+      expect(await run(f, { nope: 1 })).toEqual({
+        status: "invalid",
+        errors: [
+          { field: "a", message: "is required" },
+          { field: "nope", message: "is not an allowed field" },
+        ],
+      });
+    });
+  });
 });
