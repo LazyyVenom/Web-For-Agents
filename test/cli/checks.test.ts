@@ -256,6 +256,12 @@ describe("checks", () => {
     expect(byId(inputs({ src: pageHtml({ head: ld }) }), "json-ld").status).toBe("warn");
   });
 
+  it("json-ld pass message agrees in number", () => {
+    const ld = (n: number) => '<script type="application/ld+json">{"@type":"Thing"}</script>'.repeat(n);
+    expect(byId(inputs({ src: pageHtml({ head: ld(1) }) }), "json-ld").message).toBe("1 JSON-LD block parses with an @type");
+    expect(byId(inputs({ src: pageHtml({ head: ld(2) }) }), "json-ld").message).toBe("2 JSON-LD blocks parse with an @type");
+  });
+
   it("deeply nested JSON-LD does not abort the audit", () => {
     const depth = 50_000;
     const deep = `{"@graph":${"[".repeat(depth)}{"@type":"Thing"}${"]".repeat(depth)}}`;
