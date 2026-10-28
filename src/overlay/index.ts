@@ -109,7 +109,7 @@ export function mountOverlay(options: OverlayOptions = {}): OverlayHandle {
   };
   /** Debounces by DEBOUNCE_MS, but never delays a pending refresh past MAX_WAIT_MS. */
   const schedule = (): void => {
-    const now = Date.now();
+    const now = performance.now();
     pendingSince ??= now;
     clearTimeout(timer);
     timer = setTimeout(refresh, Math.max(0, Math.min(DEBOUNCE_MS, pendingSince + MAX_WAIT_MS - now)));

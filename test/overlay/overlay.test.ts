@@ -161,7 +161,7 @@ describe("mountOverlay", () => {
   });
 
   it("refreshes at least once a second on a page that never stops mutating", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
     try {
       document.body.innerHTML = `<main><p id="n">tick 0</p></main>`;
       handle = mountOverlay({ open: true });
