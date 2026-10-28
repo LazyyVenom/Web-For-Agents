@@ -124,7 +124,7 @@ describe("generate e2e (bring your own prerender)", () => {
       expect(read(f).match(/type="text\/markdown"/g), f).toHaveLength(1);
     }
     expect(read("about.html")).toBe(
-      files["about.html"]!.replace("</head>", `<link rel="alternate" type="text/markdown" href="${origin}/about.md"></head>`),
+      files["about.html"]!.replace("</head>", `<link rel="alternate" type="text/markdown" href="${origin}/about.md" data-wfa="markdown"></head>`),
     );
     expect(read("robots.txt")).toBe(files["robots.txt"]);
     expect(read("404.html")).toBe(files["404.html"]);

@@ -22,6 +22,11 @@ export const READY_GLOBAL = "__WFA_READY__";
 export const HIDDEN_SELECTOR = '[hidden], [aria-hidden="true"]';
 /** Marks head tags managed by <Seo>; the value is the tag key. */
 export const HEAD_OWNED_ATTR = "data-wfa";
+/**
+ * HEAD_OWNED_ATTR value on the markdown alternate link that `generate` inserts, so later runs update
+ * only that link and never a page's own. Has no ":", so the runtime head manager never removes it.
+ */
+export const MARKDOWN_LINK_KEY = "markdown";
 
 export { normalizeRoute };
 

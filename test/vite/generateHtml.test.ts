@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { detectCharset, setMarkdownLink } from "../../src/vite/generateHtml";
 
 const HREF = "https://me.dev/about.md";
-const LINK = `<link rel="alternate" type="text/markdown" href="${HREF}">`;
+const LINK = `<link rel="alternate" type="text/markdown" href="${HREF}" data-wfa="markdown">`;
 
 /** Runs setMarkdownLink on UTF-8 text and returns the new text and what it did. */
 function run(html: string, href = HREF) {
@@ -48,25 +48,35 @@ describe("setMarkdownLink", () => {
     expect(run("<p>just text</p>").html).toBe(`${LINK}<p>just text</p>`);
   });
 
-  it("updates an existing link's href in place and is idempotent", () => {
-    const html = `<head><link type="text/markdown; charset=utf-8" rel="alternate" href='/old.md' title="md"></head>`;
-    const first = run(html);
+  it("leaves the page's own markdown link untouched and inserts nothing", () => {
+    for (const own of [
+      '<link rel="alternate" type="text/markdown" href="/mine.md">',
+      "<link type='text/markdown; charset=utf-8' rel='alternate home' href=/mine.md>",
+      '<link rel="alternate" type="text/markdown" href="/mine.md" data-wfa="something-else">',
+    ]) {
+      const html = `<head>${own}</head>`;
+      expect(run(html)).toEqual({ html, action: "kept" });
+    }
+    // An own link next to an earlier marked one: still nothing is changed.
+    const both = `<head>${LINK.replace(HREF, "/old.md")}<link rel="alternate" type="text/markdown" href="/mine.md"></head>`;
+    expect(run(both)).toEqual({ html: both, action: "kept" });
+  });
+
+  it("updates only its own marked link, in place, and is idempotent", () => {
+    const marked = `<head><link data-wfa="markdown" rel="alternate" type="text/markdown" href='/old.md' title="md"></head>`;
+    const first = run(marked);
     expect(first.action).toBe("updated");
-    expect(first.html).toBe(`<head><link type="text/markdown; charset=utf-8" rel="alternate" href='${HREF}' title="md"></head>`);
+    expect(first.html).toBe(marked.replace("'/old.md'", `'${HREF}'`));
     const second = run(first.html);
-    expect(second.action).toBe("unchanged");
-    expect(second.html).toBe(first.html);
-    // Inserted links are found again on the next run.
+    expect(second).toEqual({ html: first.html, action: "unchanged" });
+    // An inserted link is found again on the next run.
     const inserted = run("<head></head>").html;
-    expect(run(inserted).action).toBe("unchanged");
-    // Unquoted, bare and missing hrefs.
-    expect(run('<head><link rel=alternate type=text/markdown href=/x.md></head>').html).toBe(
-      `<head><link rel=alternate type=text/markdown href="${HREF}"></head>`,
+    expect(run(inserted)).toEqual({ html: inserted, action: "unchanged" });
+    // Unquoted and bare hrefs on a marked link.
+    expect(run("<head><link rel=alternate type=text/markdown data-wfa=markdown href=/x.md></head>").html).toBe(
+      `<head><link rel=alternate type=text/markdown data-wfa=markdown href="${HREF}"></head>`,
     );
-    expect(run("<head><link rel=alternate type=text/markdown href></head>").html).toBe(`<head>${LINK}</head>`);
-    expect(run('<head><link rel="alternate" type="text/markdown" /></head>').html).toBe(
-      `<head><link rel="alternate" type="text/markdown"  href="${HREF}"/></head>`,
-    );
+    expect(run("<head><link rel=alternate type=text/markdown data-wfa=markdown href></head>").html).toBe(`<head>${LINK}</head>`);
   });
 
   it("ignores markdown links in comments or scripts and other alternate links", () => {
@@ -84,7 +94,7 @@ describe("setMarkdownLink", () => {
     expect(detectCharset(bytes)).toBe("windows-1252");
     const out = setMarkdownLink(bytes, "windows-1252", "https://me.dev/é.md")!.bytes;
     const at = bytes.indexOf("</head>");
-    const link = Buffer.from('<link rel="alternate" type="text/markdown" href="https://me.dev/&#xe9;.md">', "latin1");
+    const link = Buffer.from('<link rel="alternate" type="text/markdown" href="https://me.dev/&#xe9;.md" data-wfa="markdown">', "latin1");
     expect(out.equals(Buffer.concat([bytes.subarray(0, at), link, bytes.subarray(at)]))).toBe(true);
   });
 

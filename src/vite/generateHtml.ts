@@ -1,4 +1,4 @@
-import { MARKDOWN_MIME } from "../shared/conventions";
+import { HEAD_OWNED_ATTR, MARKDOWN_LINK_KEY, MARKDOWN_MIME } from "../shared/conventions";
 import { scanHtml, type ScannedAttr } from "../shared/htmlScan";
 
 export interface DecodedHtml {
@@ -50,21 +50,27 @@ function isMarkdownAlternate(attrs: ScannedAttr[]): boolean {
 export interface LinkEdit {
   /** The new file content (the input bytes when nothing changed). */
   bytes: Buffer;
-  /** "inserted" a new link, "updated" an existing link's href, or "unchanged". */
-  action: "inserted" | "updated" | "unchanged";
+  /**
+   * "inserted" a new link, "updated" the href of the link generate inserted before, "unchanged", or
+   * "kept": the page has its own markdown alternate link, which is left as it is.
+   */
+  action: "inserted" | "updated" | "unchanged" | "kept";
 }
 
+const ourLink = (attr: string): string =>
+  `<link rel="alternate" type="${MARKDOWN_MIME}" href="${attr}" ${HEAD_OWNED_ATTR}="${MARKDOWN_LINK_KEY}">`;
+
 /**
- * Points the page at its markdown with `<link rel="alternate" type="text/markdown" href>`, working
- * on bytes so every other byte of the file is unchanged whatever its encoding.
+ * Points the page at its markdown with `<link rel="alternate" type="text/markdown" href data-wfa="markdown">`,
+ * working on bytes so every other byte of the file is unchanged whatever its encoding.
  *
  * The head is found with a tokenizer, so a "</head>" inside a comment, a script or style body or an
- * attribute value is never mistaken for the real one. An existing markdown alternate link in the
- * head gets its href set in place (so running twice changes nothing). Otherwise a link is inserted
- * just before the real `</head>`; without one, just after the `<head>` start tag; without that,
- * before the first `<body`; else at the top of the file. Non-ASCII characters in `href` are written
- * as character references, which mean the same in every encoding. Returns null for UTF-16 files
- * (not ASCII-compatible).
+ * attribute value is never mistaken for the real one. A markdown alternate link without the marker
+ * is the page's own: nothing is changed ("kept"). A marked one (from an earlier run) gets its href set
+ * in place. Otherwise a link is inserted just before the real `</head>`; without one, just after the
+ * `<head>` start tag; without that, before the first `<body`; else at the top of the file. Non-ASCII
+ * characters in `href` are written as character references, which mean the same in every encoding.
+ * Returns null for UTF-16 files (not ASCII-compatible).
  */
 export function setMarkdownLink(bytes: Uint8Array, charset: string, href: string): LinkEdit | null {
   if (charset.startsWith("utf-16")) return null;
@@ -75,6 +81,7 @@ export function setMarkdownLink(bytes: Uint8Array, charset: string, href: string
   let headOpenEnd = -1;
   let headClose = -1;
   let bodyOpen = -1;
+  let marked: { start: number; end: number; attrs: ScannedAttr[] } | undefined;
   for (const t of scanHtml(view, HEAD_RAW_TEXT)) {
     if (t.type !== "tag") continue;
     if (t.closing) {
@@ -89,23 +96,24 @@ export function setMarkdownLink(bytes: Uint8Array, charset: string, href: string
       bodyOpen = t.start;
       break;
     } else if (t.name === "link" && isMarkdownAlternate(t.attrs)) {
-      const h = t.attrs.find((a) => a.name === "href");
-      const splice = (start: number, end: number, text: string): LinkEdit => ({
-        bytes: Buffer.concat([buf.subarray(0, start), Buffer.from(text, "latin1"), buf.subarray(end)]),
-        action: "updated",
-      });
-      if (h && h.valueStart !== -1) {
-        if (h.value === attr) return { bytes: buf, action: "unchanged" };
-        return h.quote ? splice(h.valueStart, h.valueEnd, attr) : splice(h.valueStart, h.valueEnd, `"${attr}"`);
-      }
-      // A bare `href` with no value: replace the tag with a complete link.
-      if (h) return splice(t.start, t.end, `<link rel="alternate" type="${MARKDOWN_MIME}" href="${attr}">`);
-      // No href: add one before the tag's ">" (or "/>").
-      const close = view.slice(t.start, t.end).endsWith("/>") ? t.end - 2 : t.end - 1;
-      return splice(close, close, ` href="${attr}"`);
+      const owner = t.attrs.find((a) => a.name === HEAD_OWNED_ATTR)?.value;
+      if (owner !== MARKDOWN_LINK_KEY) return { bytes: buf, action: "kept" };
+      marked ??= t;
     }
   }
+  const splice = (start: number, end: number, text: string, action: LinkEdit["action"]): LinkEdit => ({
+    bytes: Buffer.concat([buf.subarray(0, start), Buffer.from(text, "latin1"), buf.subarray(end)]),
+    action,
+  });
+  if (marked) {
+    const h = marked.attrs.find((a) => a.name === "href");
+    if (h && h.valueStart !== -1) {
+      if (h.value === attr) return { bytes: buf, action: "unchanged" };
+      return splice(h.valueStart, h.valueEnd, h.quote ? attr : `"${attr}"`, "updated");
+    }
+    // A marked link with a bare or missing href: replace it whole.
+    return splice(marked.start, marked.end, ourLink(attr), "updated");
+  }
   const at = headClose !== -1 ? headClose : headOpenEnd !== -1 ? headOpenEnd : bodyOpen !== -1 ? bodyOpen : 0;
-  const link = Buffer.from(`<link rel="alternate" type="${MARKDOWN_MIME}" href="${attr}">`, "latin1");
-  return { bytes: Buffer.concat([buf.subarray(0, at), link, buf.subarray(at)]), action: "inserted" };
+  return splice(at, at, ourLink(attr), "inserted");
 }

@@ -84,7 +84,7 @@ describe("generateAgentFiles", () => {
     }
     for (const f of ["404.md", "200.md", "assets/frame.md", "drafts/x.md"]) expect(t.has(f), f).toBe(false);
     expect(t.read("about.md")).toContain("I build things.");
-    expect(t.read("about.html")).toContain('<link rel="alternate" type="text/markdown" href="https://me.dev/about.md"></head>');
+    expect(t.read("about.html")).toContain('<link rel="alternate" type="text/markdown" href="https://me.dev/about.md" data-wfa="markdown"></head>');
     expect(t.read("404.html")).toBe(SITE["404.html"]);
     const llms = t.read("llms.txt");
     expect(llms).toContain("# Home");
@@ -131,17 +131,31 @@ describe("generateAgentFiles", () => {
     expect(t.read("robots.txt")).toContain("Sitemap:");
   });
 
-  it("updates an existing markdown link in place and honours linkMarkdown: false", async () => {
+  it("keeps the page's own markdown link, adds no second one, and honours linkMarkdown: false", async () => {
     const own = page("About", "<p>x</p>", '<link rel="alternate" type="text/markdown" href="/mine.md">\n');
     const t = setup({ "index.html": SITE["index.html"]!, "about.html": own });
     await t.run({ linkMarkdown: false });
     expect(t.read("index.html")).toBe(SITE["index.html"]);
-    expect(t.read("about.html")).toBe(own);
     await t.run();
-    expect(t.read("about.html")).toBe(own.replace('href="/mine.md"', 'href="https://me.dev/about.md"'));
+    await t.run();
+    expect(t.read("about.html")).toBe(own);
     expect(t.read("index.html")).toContain("https://me.dev/index.md");
-    const r = await t.run();
-    expect(r.written).not.toContain("about.html");
+    expect(t.logger.info.mock.calls.map((c) => String(c[0]))).toContain(
+      "[web-for-agents] kept the page's own markdown link on /about",
+    );
+  });
+
+  it("updates its own marked link in place when the site URL changes, and repeat runs change nothing", async () => {
+    const t = setup({ "index.html": SITE["index.html"]!, "about.html": SITE["about.html"]! });
+    await t.run();
+    const first = t.read("about.html");
+    await t.run({ siteUrl: "https://new.dev" });
+    const moved = t.read("about.html");
+    expect(moved).toBe(first.replace("https://me.dev/about.md", "https://new.dev/about.md"));
+    expect(moved.match(/text\/markdown/g)).toHaveLength(1);
+    const again = await t.run({ siteUrl: "https://new.dev" });
+    expect(t.read("about.html")).toBe(moved);
+    expect(again.written).not.toContain("about.html");
   });
 
   it("applies markdown.transform and names the route on errors, writing nothing", async () => {
@@ -175,7 +189,7 @@ describe("generateAgentFiles", () => {
     writeFileSync(path.join(t.dir, "café.html"), latin);
     await t.run();
     const out = readFileSync(path.join(t.dir, "café.html"));
-    const link = Buffer.from('<link rel="alternate" type="text/markdown" href="https://me.dev/caf%C3%A9.md">', "latin1");
+    const link = Buffer.from('<link rel="alternate" type="text/markdown" href="https://me.dev/caf%C3%A9.md" data-wfa="markdown">', "latin1");
     const at = latin.indexOf("</head>");
     expect(out.equals(Buffer.concat([latin.subarray(0, at), link, latin.subarray(at)]))).toBe(true);
     // The page was decoded as windows-1252 for its markdown (0x80 is the euro sign there).

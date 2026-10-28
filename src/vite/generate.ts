@@ -194,6 +194,8 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
   const mdByRoute = new Map<string, string>();
   const bodyFallback: string[] = [];
   const utf16: string[] = [];
+  /** Routes whose page has its own markdown link, left untouched. */
+  const ownLinks: string[] = [];
   // "/index" (index/index.html) would write index.md, the markdown of "/".
   const routes = dropFileCollisions(
     [...fileByRoute].map(([route, file]) => ({ route, file })).sort(byRoute),
@@ -235,6 +237,7 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
     if (linkMarkdown) {
       const edit = setMarkdownLink(bytes, charset, publicMdUrl(siteUrl, route));
       if (edit === null) utf16.push(file);
+      else if (edit.action === "kept") ownLinks.push(shortRoute(route));
       else if (edit.action !== "unchanged") guarded.stage(file, edit.bytes);
     }
   }
@@ -257,6 +260,9 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
       `${LOG_PREFIX} no [${CONTENT_ATTR}] or "${markdown.contentSelector}" element on ${bodyFallback.join(", ")}; ` +
         "content was taken from <body> minus header, nav, footer, aside",
     );
+  }
+  if (ownLinks.length > 0) {
+    base.info(`${LOG_PREFIX} kept the page's own markdown link on ${ownLinks.join(", ")}`);
   }
   if (utf16.length > 0) {
     logger.warn(`${LOG_PREFIX} ${utf16.join(", ")} ${utf16.length === 1 ? "is" : "are"} UTF-16; the markdown link was not added`);
