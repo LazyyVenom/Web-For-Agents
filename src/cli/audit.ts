@@ -11,6 +11,7 @@ import { hasScheme, tryResolveUrl } from "../shared/url";
 import { isMissing, runChecks, scoreOf, type CheckResult } from "./checks";
 import { DEFAULT_TIMEOUT_MS, fetchText, isOk, looksLikeHtml, notFetched, type FetchResult } from "./fetch";
 import { extractHtmlFacts, markdownAlternate } from "./html";
+import { isPrivateHost } from "./privateAddress";
 import { parseRobots } from "./robots";
 
 export interface AuditOptions {
@@ -23,6 +24,13 @@ export interface AuditOptions {
    * with "/" or a full URL is fetched as is. Default "/agents.json".
    */
   agentMapPath?: string;
+  /**
+   * Refuse redirects from a public host to a private, loopback or link-local address instead of
+   * following them with a warning. Default false.
+   */
+  blockPrivateRedirects?: boolean;
+  /** Classifies a URL hostname as private. Default: IP ranges, "localhost" and a DNS lookup. */
+  isPrivateHost?: (hostname: string) => Promise<boolean>;
 }
 
 export interface AuditReport {
@@ -33,6 +41,8 @@ export interface AuditReport {
   maxScore: 100;
   checks: CheckResult[];
   error?: string;
+  /** Redirects that crossed from a public host to a private address. Absent when there were none. */
+  warnings?: string[];
 }
 
 /** At most this many directories (root included) are probed for llms.txt and the agent map. */
@@ -71,9 +81,31 @@ const sameOrigin = (a: string, b: string): boolean => new URL(a).origin === new 
 /** Audits `url` for AI-agent readiness. Fatal problems are reported in `error`, not thrown. */
 export async function audit(url: string, opts: AuditOptions = {}): Promise<AuditReport> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const get = (u: string, accept?: string): Promise<FetchResult> =>
-    fetchText(u, { timeoutMs, userAgent: opts.userAgent, ...(accept ? { accept } : {}) });
+  const classify = opts.isPrivateHost ?? isPrivateHost;
+  const classified = new Map<string, Promise<boolean>>();
+  const isPrivate = (host: string): Promise<boolean> => {
+    let p = classified.get(host);
+    if (!p) classified.set(host, (p = classify(host)));
+    return p;
+  };
   const report: AuditReport = { url, finalUrl: url, redirected: false, score: 0, maxScore: 100, checks: [] };
+  const warnings = new Set<string>();
+  const get = async (u: string, accept?: string): Promise<FetchResult> => {
+    const r = await fetchText(u, {
+      timeoutMs,
+      userAgent: opts.userAgent,
+      isPrivateHost: isPrivate,
+      ...(opts.blockPrivateRedirects ? { blockPrivateRedirects: true } : {}),
+      ...(accept ? { accept } : {}),
+    });
+    if (r.privateRedirect) {
+      const { from, to } = r.privateRedirect;
+      const what = opts.blockPrivateRedirects ? "blocked a redirect" : "followed a redirect";
+      warnings.add(`${what} from public ${new URL(from).host} to private address ${to}`);
+      report.warnings = [...warnings];
+    }
+    return r;
+  };
   try {
     const page = await get(url, "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5");
     report.finalUrl = page.finalUrl;

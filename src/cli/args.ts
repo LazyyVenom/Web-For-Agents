@@ -11,6 +11,8 @@ export interface CliArgs {
   timeoutMs: number;
   /** --agent-map: file name probed like agents.json, or a "/"-path or URL fetched as is. */
   agentMap?: string;
+  /** --no-private-redirects: refuse redirects from a public host to a private address. */
+  blockPrivateRedirects?: boolean;
 }
 
 const fail = (msg: string): never => {
@@ -51,6 +53,9 @@ Options:
   --min-score <0-100>  exit with code 1 if the score is lower
   --timeout <ms>       per-request timeout (default ${DEFAULT_TIMEOUT_MS})
   --agent-map <path>   agent map file name (probed like agents.json), or a /path or URL
+  --no-private-redirects
+                       refuse redirects from a public host to a private, loopback or
+                       link-local address (default: follow them and print a warning)
   -h, --help           show this help
 
 Exit codes: 0 ok, 1 score below --min-score, 2 usage error or fatal error
@@ -67,6 +72,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
         "min-score": { type: "string" },
         timeout: { type: "string" },
         "agent-map": { type: "string" },
+        "no-private-redirects": { type: "boolean" },
         help: { type: "boolean", short: "h" },
       },
     });
@@ -86,6 +92,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
     json: values.json === true,
     timeoutMs: DEFAULT_TIMEOUT_MS,
   };
+  if (values["no-private-redirects"] === true) args.blockPrivateRedirects = true;
   if (values["min-score"] !== undefined) {
     const n = Number(values["min-score"]);
     if (!/^\d+(\.\d+)?$/.test(values["min-score"]) || n > 100) {
