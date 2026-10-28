@@ -47,7 +47,7 @@ describe("buildLlmsFullTxt", () => {
 
 describe("markdown injection through metadata", () => {
   const T = "Foo](http://evil)\n# Owned <img src=x onerror=alert(1)>";
-  const SAFE = "Foo\\]\\(http://evil\\) \\# Owned";
+  const SAFE = "Foo\\](http://evil) # Owned \\<img src=x onerror=alert(1)>";
   const hostile: LlmsPage[] = [
     { route: "/", title: T, description: T, url: "https://a.com/", mdUrl: "https://a.com/index.md", markdown: "x\n" },
   ];
@@ -57,9 +57,13 @@ describe("markdown injection through metadata", () => {
       `# ${SAFE}\n\n> ${SAFE}\n\n## Pages\n\n- [${SAFE}](https://a.com/index.md): ${SAFE}\n`,
     );
   });
+  it("keeps ordinary titles readable", () => {
+    const out = buildLlmsTxt({ title: "Acme (beta)" }, [{ route: "/", title: "Vec<T> docs", url: "https://a.com/" }]);
+    expect(out).toBe("# Acme (beta)\n\n## Pages\n\n- [Vec\\<T> docs](https://a.com/)\n");
+  });
   it("llms-full.txt escapes the site header", () => {
     const out = buildLlmsFullTxt({ title: T, description: T }, hostile);
     expect(out).toBe(`# ${SAFE}\n\n> ${SAFE}\n\nSource: https://a.com/\n\nx\n`);
-    expect(out).not.toContain("<img");
+    expect(out).not.toMatch(/(^|[^\\])<img/);
   });
 });

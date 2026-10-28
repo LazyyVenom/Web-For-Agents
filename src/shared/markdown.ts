@@ -3,17 +3,14 @@ import { gfm } from "turndown-plugin-gfm";
 import { collapseWhitespace } from "./text";
 import { resolveUrl } from "./url";
 
-/** Something that opens an HTML tag, comment or declaration: "<" then a letter, "/", "!" or "?". */
-const HTML_TAG = /<[a-zA-Z/!?][^>]*(?:>|$)/g;
-
 /**
  * Makes metadata (a title or description) safe to interpolate into markdown structure such as a
- * heading, a list item or link text: raw HTML tags are removed, whitespace (newlines included)
- * collapses to single spaces, and characters that start links, headings, quotes, emphasis or code
- * (\ [ ] ( ) # > * _ ` <) are backslash-escaped.
+ * heading, a list item or link text: whitespace (newlines included) collapses to single spaces, so
+ * it cannot start a new block, and `\`, `[`, `]` and `<` are backslash-escaped, so it cannot close
+ * link text or open raw HTML. Nothing is removed: "Vec<T> docs" becomes "Vec\<T> docs".
  */
 export function escapeMarkdownInline(s: string | null | undefined): string {
-  return collapseWhitespace((s ?? "").replace(HTML_TAG, " ")).replace(/[\\[\]()#>*_`<]/g, "\\$&");
+  return collapseWhitespace(s).replace(/[\\[\]<]/g, "\\$&");
 }
 
 /** ` "title"` for a markdown link/image, or "" when there is no title attribute. */

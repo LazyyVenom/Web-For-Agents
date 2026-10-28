@@ -19,8 +19,8 @@ type Site = { title: string; description?: string };
 
 /**
  * Titles and descriptions are page metadata interpolated into markdown structure (headings, list
- * items, link text), so they go through escapeMarkdownInline: no raw HTML, no newlines, and no
- * markdown syntax of their own. Page bodies (`markdown`) are already escaped by htmlToMarkdown.
+ * items, link text), so they go through escapeMarkdownInline: no newlines, no raw HTML and no way
+ * to close the link text. Page bodies (`markdown`) are already escaped by htmlToMarkdown.
  */
 function header(site: Site): string[] {
   const blocks = [`# ${escapeMarkdownInline(site.title)}`];
@@ -48,6 +48,6 @@ export function buildLlmsFullTxt(site: Site, pages: LlmsPage[]): string {
   const blocks = [...pages]
     .sort(byRoute)
     .filter((p) => p.markdown !== undefined)
-    .map((p) => `Source: ${escapeLinkTarget(p.url)}\n\n${p.markdown!.trim()}`);
+    .map((p) => `Source: ${p.url}\n\n${p.markdown!.trim()}`);
   return [head, blocks.join("\n\n---\n\n")].filter(Boolean).join("\n\n") + "\n";
 }
