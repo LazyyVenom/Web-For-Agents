@@ -181,10 +181,41 @@ It takes the same `siteUrl`, `robots`, `exclude`, `sitemap`, `markdown` (includi
 - `linkMarkdown` (default `true`) adds `<link rel="alternate" type="text/markdown">` to each page's `<head>`. A page that already has one is left alone, so running `generate` twice adds the link only once.
 - `overwrite` (default `false`) replaces an existing `robots.txt`, `sitemap.xml`, `llms.txt`, `llms-full.txt` or agent map whose content differs. Without it, such a file (for example your own `public/robots.txt`, copied into `dist`) is kept and a warning is logged.
 
-How pages are found: every `.html` file in `outDir` is a page. `index.html` is `/`, and both `about.html` and `about/index.html` are `/about`, so flat, directory and mixed layouts all work. `200.html`, `404.html`, files under `assets/` and `exclude`d routes are skipped. Pages with `<meta name="robots" content="noindex">` get a `.md` file but stay out of `llms.txt`, the sitemap and `agents.json`. Your HTML is changed only to add the markdown link.
+How pages are found: every `.html` file in `outDir` is a page. `index.html` is `/`, and both `about.html` and `about/index.html` are `/about`, so flat, directory and mixed layouts all work. If both exist, the first one in sorted order is used and a warning names both. File names become URLs the way a browser writes them: `c++.html` is `/c++`, `a b.html` is `/a%20b`.
+
+These are skipped:
+
+- `200.html` and `404.html`, in any directory (host fallback and error pages).
+- The top-level `assets/` and `node_modules/` directories.
+- Files and directories whose name starts with a dot.
+- Symbolic links, with a warning.
+- Files with other extensions, such as `.htm`, or `.HTML` in capitals.
+- File names that cannot be a URL path (a backslash, for example), with a warning.
+- `exclude`d routes.
+- `/index` (from `index/index.html`), whose `index.md` would replace the markdown of `/`, with a warning.
+
+Pages with `<meta name="robots" content="noindex">` get a `.md` file but stay out of `llms.txt`, the sitemap and `agents.json`.
+
+Your HTML is changed only to add the markdown link. The file's encoding is detected (BOM, else `<meta charset>`, else UTF-8) and every other byte is left as it was, so a `windows-1252` page stays `windows-1252`. UTF-16 files are read but not changed. An existing `.md` file with different content is replaced, with a warning. Nothing is ever written through a symbolic link, so nothing lands outside `outDir`.
 
 The result lists the pages, the detected layout (`"flat"`, `"directory"` or `"mixed"`), the files written and the files kept. Nothing is written if any page fails, for example when `markdown.transform` throws.
 
 `agents.json` here comes from each page's static markup: elements with `data-agent-action` (what `useAgentAction` and `AgentForm` render) and WebMCP `<form toolname>` forms, with form fields as the input schema. An action registered with only a `handler` and no element exists only while your app runs, so it is not listed in this mode.
 
-The plugin can also write flat files itself: set `prerender.fileLayout: "flat"` to write `/about` as `about.html` instead of `about/index.html`.
+The plugin can also write flat files itself: set `prerender.fileLayout: "flat"` to write `/about` as `about.html` instead of `about/index.html`. See [Flat file layout](#flat-file-layout).
+
+## Flat file layout
+
+With `prerender.fileLayout: "flat"`, `/about` is written to `about.html` and `/blog/post` to `blog/post.html`. `/` stays `index.html`, the `.md` files are the same as in the directory layout, and `200.html` is still the SPA fallback. Your host must serve `about.html` at `/about`:
+
+| Host | Setup |
+| --- | --- |
+| Netlify | Pretty URLs, on by default. |
+| Vercel | `"cleanUrls": true` in `vercel.json`. |
+| Cloudflare Pages | Works by default. |
+| nginx | `try_files $uri $uri.html $uri/ =404;` |
+| S3 + CloudFront | Needs a viewer-request function that appends `.html` to extensionless paths. |
+
+If both `about.html` and a directory `about/` exist, some hosts redirect `/about` to `/about/`. Check that the canonical URL you set matches what your host serves.
+
+A route whose file would be another route's file is skipped with a warning naming both, instead of overwriting it. In the flat layout that is `/index` (it would write `index.html`, the page for `/`) and `/200` (it would write `200.html`, the SPA fallback). In both layouts `/index` would also write `index.md`. A route whose file name would be too long with the `.html` suffix is skipped with a warning.

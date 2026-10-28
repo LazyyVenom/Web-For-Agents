@@ -53,13 +53,13 @@ vite build && node scripts/prerender.mjs
 npx web-for-agents generate dist --site-url https://example.com --ai-training block --ai-search allow
 ```
 
-It reads every `.html` file in the directory and writes `llms.txt`, `llms-full.txt`, a `.md` copy of each page, `robots.txt`, `sitemap.xml` and `agents.json`. It also adds a markdown `<link>` to each page's `<head>`. See [Using your own prerender](prerendering.md#using-your-own-prerender) for how pages are found and what is kept.
+It reads every `.html` file in the directory and writes `llms.txt`, `llms-full.txt`, a `.md` copy of each page, `robots.txt`, `sitemap.xml` and `agents.json`. It also adds a markdown `<link>` to each page's `<head>`. It skips `200.html`, `404.html`, `assets/`, `node_modules/`, dotfiles, symbolic links and excluded routes. See [Using your own prerender](prerendering.md#using-your-own-prerender) for the full list and for what is kept.
 
 Flags:
 
 - `--site-url <url>` is the absolute URL of the deployed site. Required, here or as `siteUrl` in `--config`.
 - `--ai-training <allow|block>` and `--ai-search <allow|block>` set the AI crawler policy for `robots.txt`. Both are required, here or as `robots.ai` in `--config`. There is no default.
-- `--config <file>` loads options from a `.json`, `.js` or `.mjs` file. A JS file default-exports the options object. Use a JS file for options that are functions or regular expressions, such as `markdown.transform` or `exclude`. Flags take precedence over the file.
+- `--config <file>` loads options from a `.json`, `.js` or `.mjs` file. A JS file default-exports the options object. Use a JS file for options that are functions or regular expressions, such as `markdown.transform` or `exclude`. Prefer `.mjs`: on Node 20 a `.js` file with `export default` only loads when your `package.json` has `"type": "module"`. Flags take precedence over the file. Keys that are not options (a typo such as `siteURL`, or `prerender`) are reported as a warning.
 - `--no-link-markdown` leaves your HTML files unchanged.
 - `--overwrite` replaces an existing `robots.txt`, `sitemap.xml`, `llms.txt`, `llms-full.txt` or `agents.json` whose content differs. By default such a file is kept, with a warning.
 - `--json` prints the result (pages found, layout, files written, files kept) as JSON.
