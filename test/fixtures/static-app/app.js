@@ -170,6 +170,13 @@ function start() {
       });
       break;
     }
+    case "/codegen": {
+      // page-realm eval works anywhere; a function from happy-dom's own (Node) realm needs code generation
+      const page = eval("1 + 1") + new Function("return 1")();
+      const host = window.constructor.constructor("return 4")();
+      show(`<p>codegen ${page + host}</p>`);
+      break;
+    }
     case "/xsocket": {
       const from = new URLSearchParams(location.search).get("from");
       let result = "opened";

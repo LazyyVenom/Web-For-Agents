@@ -382,6 +382,28 @@ describe("happy-dom render process isolation", { timeout: SUITE_TIMEOUT_MS }, ()
     }
   });
 
+  it("explains a page that needs code generation, and prerender.isolation.codeGeneration allows it", async () => {
+    const off = createIsolatedHappyDomRenderer();
+    try {
+      const err = (await off.render(server.origin + "/codegen", RENDER_MS).catch((e: unknown) => e)) as RenderError;
+      expect(err).toBeInstanceOf(RenderError);
+      expect(err.message).toContain("Code generation from strings disallowed");
+      expect(err.message).toContain("eval or new Function");
+      expect(err.message).toContain("prerender: { isolation: { codeGeneration: true } }");
+      expect(err.message).toContain("weakens the sandbox");
+      expect(err.message).toContain("Chrome");
+    } finally {
+      await off.close();
+    }
+    const pool = createRendererPool({ codeGeneration: true });
+    try {
+      const res = await (await pool.get("happy-dom")).render(server.origin + "/codegen", RENDER_MS);
+      expect(res.html).toContain("codegen 7");
+    } finally {
+      await pool.closeAll();
+    }
+  });
+
   it("the in-process renderer is what the escape would reach without isolation", async () => {
     // documents the threat: in-process, the escape reaches the build's own process
     const target = join(tmp, "c.txt");

@@ -76,6 +76,12 @@ export interface PrerenderOptions {
    * Default: 50 for happy-dom once it reports every timer and request settled, else 200 (always 200 for Chrome).
    */
   idleMs?: number;
+  /**
+   * The happy-dom render process. `codeGeneration: true` lets page code build functions from
+   * strings with happy-dom's own (Node) Function; it is off because it is how page code escapes
+   * happy-dom. Prefer rendering such routes with Chrome. Default { codeGeneration: false }.
+   */
+  isolation?: { codeGeneration?: boolean };
 }
 
 export interface MarkdownOptions {
@@ -90,9 +96,10 @@ export interface LlmsOptions {
   description?: string;
 }
 
-export type ResolvedPrerender = Required<Omit<PrerenderOptions, "executablePath" | "idleMs">> & {
+export type ResolvedPrerender = Required<Omit<PrerenderOptions, "executablePath" | "idleMs" | "isolation">> & {
   executablePath?: string;
   idleMs?: number;
+  isolation: { codeGeneration: boolean };
 };
 
 export interface ResolvedOptions {
@@ -162,6 +169,14 @@ function resolveAllowOrigins(input: unknown, bad: (field: string, expected: stri
   return [...out].sort();
 }
 
+function resolveIsolation(input: unknown, bad: (field: string, expected: string) => never): { codeGeneration: boolean } {
+  if (input === undefined) return { codeGeneration: false };
+  if (typeof input !== "object" || input === null) bad("isolation", "an object such as { codeGeneration: false }");
+  const cg = (input as { codeGeneration?: unknown }).codeGeneration;
+  if (cg !== undefined && typeof cg !== "boolean") bad("isolation.codeGeneration", "a boolean");
+  return { codeGeneration: cg === true };
+}
+
 function resolvePrerender(input: PrerenderOptions): ResolvedPrerender {
   const bad = (field: string, expected: string): never => {
     throw new Error(`${LOG_PREFIX} prerender.${field} must be ${expected}`);
@@ -200,6 +215,7 @@ function resolvePrerender(input: PrerenderOptions): ResolvedPrerender {
     concurrency: posInt("concurrency", input.concurrency, usesBrowser ? 4 : 8),
     maxRoutes: posInt("maxRoutes", input.maxRoutes, 500),
     allowOrigins,
+    isolation: resolveIsolation(input.isolation, bad),
   };
   if (input.executablePath !== undefined) out.executablePath = input.executablePath;
   if (input.idleMs !== undefined) {

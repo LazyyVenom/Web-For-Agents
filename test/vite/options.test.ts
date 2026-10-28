@@ -133,6 +133,15 @@ describe("prerender and output options", () => {
     expect(c({ renderer: "chrome", concurrency: 2 })).toBe(2);
   });
 
+  it("validates prerender.isolation", () => {
+    const iso = (isolation: unknown) => (resolveOptions({ ...base, prerender: { isolation } as never }).prerender as { isolation: unknown }).isolation;
+    expect(iso(undefined)).toEqual({ codeGeneration: false });
+    expect(iso({})).toEqual({ codeGeneration: false });
+    expect(iso({ codeGeneration: true })).toEqual({ codeGeneration: true });
+    expect(() => iso(true)).toThrow("prerender.isolation must be an object");
+    expect(() => iso({ codeGeneration: "yes" })).toThrow("prerender.isolation.codeGeneration must be a boolean");
+  });
+
   it("validates prerender.idleMs", () => {
     expect(resolveOptions({ ...base, prerender: { idleMs: 0 } }).prerender).toMatchObject({ idleMs: 0 });
     expect(resolveOptions({ ...base, prerender: {} }).prerender).not.toHaveProperty("idleMs");
@@ -170,6 +179,7 @@ describe("prerender and output options", () => {
       concurrency: 8,
       maxRoutes: 500,
       allowOrigins: [],
+      isolation: { codeGeneration: false },
     });
     expect(r.markdown).toEqual({ contentSelector: "main" });
     expect(r.llms).toEqual({});

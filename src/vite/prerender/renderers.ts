@@ -26,6 +26,8 @@ export function createRendererPool(opts: {
   executablePath?: string;
   allowOrigins?: readonly string[];
   idleMs?: number;
+  /** prerender.isolation.codeGeneration. Default false. */
+  codeGeneration?: boolean;
 }): RendererPool {
   const made = new Map<RendererName, Promise<Renderer>>();
   return {
@@ -35,10 +37,13 @@ export function createRendererPool(opts: {
         r =
           name === "happy-dom"
             ? Promise.resolve(
-                createIsolatedHappyDomRenderer({
-                  allowOrigins: opts.allowOrigins ?? [],
-                  ...(opts.idleMs !== undefined ? { idleMs: opts.idleMs } : {}),
-                }),
+                createIsolatedHappyDomRenderer(
+                  {
+                    allowOrigins: opts.allowOrigins ?? [],
+                    ...(opts.idleMs !== undefined ? { idleMs: opts.idleMs } : {}),
+                  },
+                  { codeGeneration: opts.codeGeneration === true },
+                ),
               )
             : createChromeRenderer(name, {
                 ...(opts.executablePath !== undefined ? { executablePath: opts.executablePath } : {}),
