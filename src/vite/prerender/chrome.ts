@@ -2,11 +2,14 @@ import { READY_CHECK, type ReadyState } from "./probe";
 import {
   RenderError,
   SERIALIZE_EXPR,
+  blockedHint,
   createDeadline,
+  createOriginPolicy,
   errorMessage,
   readyTimeoutMessage,
   runInPage,
   waitForReady,
+  withoutBlockedLoads,
   type Renderer,
 } from "./renderCore";
 
@@ -31,6 +34,8 @@ export async function createChromeRenderer(
   channel: "chrome" | "msedge",
   opts: {
     executablePath?: string;
+    /** Origins pages may load from besides the prerender server. Default []. */
+    allowOrigins?: readonly string[];
     /** @internal For tests: overrides PAGE_CLOSE_MS. */
     pageCloseMs?: number;
   } = {},
@@ -60,15 +65,44 @@ export async function createChromeRenderer(
     );
   }
 
+  const allowed = createOriginPolicy(opts.allowOrigins);
+
   return {
     name: channel,
     async render(url, timeoutMs, inPage) {
       const deadline = createDeadline(timeoutMs);
       const timeoutText = readyTimeoutMessage(timeoutMs);
+      const origin = new URL(url).origin;
+      const blocked: string[] = [];
       // Opening the page counts against the deadline, and closing it is capped at PAGE_CLOSE_MS, so a
       // stalled browser holds a render for at most timeoutMs + PAGE_CLOSE_MS. A page that opens after
-      // the deadline is closed as soon as it arrives.
-      const opening = browser.newPage();
+      // the deadline is closed as soon as it arrives. Service workers would bypass request routing.
+      const opening = browser.newPage({ serviceWorkers: "block" }).then(async (p) => {
+        try {
+          // Hermetic network: requests to other origins fail like network errors.
+          await p.route(
+            (u) => !allowed(u.href, origin),
+            (route) => {
+              blocked.push(route.request().url());
+              return route.abort("blockedbyclient");
+            },
+          );
+          // playwright-core < 1.48 has no WebSocket routing.
+          if (typeof p.routeWebSocket === "function") {
+            await p.routeWebSocket(
+              (u) => !allowed(u.href, origin),
+              (ws) => {
+                blocked.push(ws.url());
+                return ws.close();
+              },
+            );
+          }
+          return p;
+        } catch (e) {
+          p.close().catch(() => {});
+          throw e;
+        }
+      });
       let page: Awaited<typeof opening>;
       try {
         page = await deadline.race(opening, timeoutText);
@@ -90,14 +124,14 @@ export async function createChromeRenderer(
           await deadline.race(
             waitForReady(async () => {
               const r = (await page.evaluate(READY_CHECK)) as ReadyState;
-              return { ready: r.ready, errors: [...pageErrors, ...r.errors] };
+              return { ready: r.ready, errors: withoutBlockedLoads([...pageErrors, ...r.errors], blocked) };
             }, timeoutMs),
             timeoutText,
           );
           html = (await deadline.race(page.evaluate(SERIALIZE_EXPR), timeoutText)) as string;
           finalPath = new URL(page.url()).pathname;
         } catch (e) {
-          throw new RenderError(channel, errorMessage(e));
+          throw new RenderError(channel, errorMessage(e) + blockedHint(blocked));
         }
         const results = await runInPage(
           channel,

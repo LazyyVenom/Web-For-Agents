@@ -123,6 +123,22 @@ describe("normalizeRoute", () => {
 describe("prerender and output options", () => {
   const base = { siteUrl: "https://a.com", robots } as const;
 
+  it("validates and normalizes prerender.allowOrigins", () => {
+    const r = resolveOptions({
+      ...base,
+      prerender: { allowOrigins: ["https://CDN.example.com/", "http://127.0.0.1:8080", "https://cdn.example.com:443"] },
+    });
+    expect(r.prerender && r.prerender.allowOrigins).toEqual(["http://127.0.0.1:8080", "https://cdn.example.com"]);
+    for (const bad of ["cdn.example.com", "ftp://x.com", "https://x.com/path", "https://x.com/?q", "https://x.com#h", "https://u:p@x.com", "", 1]) {
+      expect(() => resolveOptions({ ...base, prerender: { allowOrigins: [bad as string] } }), String(bad)).toThrow(
+        /prerender\.allowOrigins must be an array of http\(s\) origins/,
+      );
+    }
+    expect(() => resolveOptions({ ...base, prerender: { allowOrigins: "https://x.com" as never } })).toThrow(
+      /prerender\.allowOrigins/,
+    );
+  });
+
   it("prerender defaults", () => {
     const r = resolveOptions({ ...base, robots: { ai: { training: "allow", search: "allow" } } });
     expect(r.prerender).toEqual({
@@ -133,6 +149,7 @@ describe("prerender and output options", () => {
       timeoutMs: 15000,
       concurrency: 4,
       maxRoutes: 500,
+      allowOrigins: [],
     });
     expect(r.markdown).toEqual({ contentSelector: "main" });
     expect(r.llms).toEqual({});

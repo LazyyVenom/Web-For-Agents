@@ -30,8 +30,33 @@ const chromeAvailable = await probeChrome();
 let server: StaticServer;
 let hanging: Server;
 let hangingOrigin: string;
+/** A second origin a page may try to load from; records every request and upgrade it gets. */
+let other: Server;
+let otherOrigin: string;
+const otherHits: string[] = [];
 beforeAll(async () => {
   server = await startStaticServer({ dir, base: "/", shell });
+  other = createServer((req, res) => {
+    otherHits.push(req.url ?? "");
+    const body: Record<string, [string, string]> = {
+      "/evil.js": ["text/javascript", 'document.documentElement.setAttribute("data-evil", "ran");'],
+      "/evil.css": ["text/css", "h1 { color: red }"],
+      "/data.json": ["application/json", '{"text":"from the other origin"}'],
+      "/evil.png": ["image/svg+xml", '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>'],
+    };
+    const hit = body[req.url ?? ""];
+    res.writeHead(hit ? 200 : 404, {
+      "content-type": hit?.[0] ?? "text/plain",
+      "access-control-allow-origin": "*",
+    });
+    res.end(hit?.[1] ?? "");
+  });
+  other.on("upgrade", (req, socket) => {
+    otherHits.push("upgrade " + req.url);
+    socket.destroy();
+  });
+  await new Promise<void>((res) => other.listen(0, "127.0.0.1", res));
+  otherOrigin = `http://127.0.0.1:${(other.address() as AddressInfo).port}`;
   // accepts connections and never answers
   hanging = createServer(() => {});
   await new Promise<void>((res) => hanging.listen(0, "127.0.0.1", res));
@@ -39,6 +64,8 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await server?.close();
+  other?.closeAllConnections();
+  await new Promise((res) => other?.close(res));
   hanging?.closeAllConnections();
   await new Promise((res) => hanging?.close(res));
 });
@@ -50,7 +77,7 @@ afterAll(async () => {
 const RENDER_MS = 15_000;
 const SUITE_TIMEOUT_MS = 30_000;
 
-const suite = (name: RendererName, make: () => Promise<Renderer>) => {
+const suite = (name: RendererName, make: (opts?: { allowOrigins?: string[] }) => Promise<Renderer>) => {
   let r: Renderer;
   beforeAll(async () => {
     r = await make();
@@ -59,6 +86,55 @@ const suite = (name: RendererName, make: () => Promise<Renderer>) => {
     await r?.close();
   }, SUITE_TIMEOUT_MS);
   const url = (p: string) => server.origin + p;
+
+  describe("hermetic network", () => {
+    const from = () => "?from=" + encodeURIComponent(otherOrigin);
+
+    it("blocks a cross-origin script, stylesheet and image without failing the render", async () => {
+      otherHits.length = 0;
+      const res = await r.render(url("/xorigin" + from()), RENDER_MS);
+      expect(res.html).toContain("<h1>Cross</h1>");
+      expect(res.html).not.toContain("data-evil");
+      expect(otherHits).toEqual([]);
+    });
+
+    it("fails a blocked fetch like a network error", async () => {
+      otherHits.length = 0;
+      const res = await r.render(url("/xfetch" + from()), RENDER_MS);
+      expect(res.html).toContain("xfetch failed");
+      expect(otherHits).toEqual([]);
+    });
+
+    it("names the blocked URL and prerender.allowOrigins when the render depends on it", async () => {
+      const err = await r.render(url("/xneeds" + from()), RENDER_MS).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(RenderError);
+      const msg = (err as Error).message;
+      expect(msg).toContain(`requests to other origins were blocked: ${otherOrigin}/data.json`);
+      expect(msg).toContain(`prerender: { allowOrigins: ["${otherOrigin}"] }`);
+    });
+
+    it("blocks WebSockets to other origins", async () => {
+      otherHits.length = 0;
+      const res = await r.render(url("/xsocket" + from()), RENDER_MS);
+      if (name === "happy-dom") expect(res.html).toContain("socket refused SecurityError");
+      await new Promise((res) => setTimeout(res, 100));
+      expect(otherHits).toEqual([]);
+    });
+
+    it("loads from an allowed origin", async () => {
+      const allowed = await make({ allowOrigins: [otherOrigin] });
+      try {
+        otherHits.length = 0;
+        const res = await allowed.render(url("/xorigin" + from()), RENDER_MS);
+        expect(res.html).toContain('data-evil="ran"');
+        expect(otherHits).toContain("/evil.js");
+        const fetched = await allowed.render(url("/xfetch" + from()), RENDER_MS);
+        expect(fetched.html).toContain("xfetch ok from the other origin");
+      } finally {
+        await allowed.close();
+      }
+    });
+  });
 
   it("renders fetched data", async () => {
     const res = await r.render(url("/fetch"), RENDER_MS);
@@ -211,11 +287,11 @@ const suite = (name: RendererName, make: () => Promise<Renderer>) => {
 };
 
 describe("happy-dom renderer", { timeout: SUITE_TIMEOUT_MS }, () => {
-  suite("happy-dom", async () => createHappyDomRenderer());
+  suite("happy-dom", async (opts) => createHappyDomRenderer(opts));
 });
 
 describe.skipIf(!chromeAvailable)("chrome renderer", { timeout: SUITE_TIMEOUT_MS }, () => {
-  suite("chrome", () => createChromeRenderer("chrome"));
+  suite("chrome", (opts) => createChromeRenderer("chrome", opts));
 });
 
 describe("shared render helpers", () => {
@@ -276,7 +352,7 @@ describe("chrome page lifecycle", () => {
     const r = await createChromeRenderer(
       "chrome",
       {},
-      fakeChrome({ newPage: () => later(400, async () => ({ close })) }),
+      fakeChrome({ newPage: () => later(400, async () => ({ close, route: async () => {} })) }),
     );
     const err = await r.render("http://127.0.0.1/", 300).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(RenderError);
@@ -305,6 +381,7 @@ describe("chrome page lifecycle", () => {
   it("does not wait forever for a page that never closes", async () => {
     const page = {
       on: () => {},
+      route: async () => {},
       goto: async () => null,
       evaluate: async (expr: string) =>
         expr === SERIALIZE_EXPR ? "<!DOCTYPE html>\n<html></html>" : { ready: true, errors: [], path: "/" },

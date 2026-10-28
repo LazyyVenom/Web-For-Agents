@@ -61,6 +61,48 @@ function start() {
     }
     case "/empty":
       break;
+    case "/xorigin": {
+      // loads a script, stylesheet and image from the origin in ?from=, then renders regardless
+      const from = new URLSearchParams(location.search).get("from");
+      const script = document.createElement("script");
+      script.async = true; // as browsers treat inserted scripts; happy-dom loads others synchronously
+      script.src = from + "/evil.js";
+      document.head.appendChild(script);
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = from + "/evil.css";
+      document.head.appendChild(link);
+      show(`<h1>Cross</h1><img src="${from}/evil.png" alt="">`);
+      break;
+    }
+    case "/xfetch": {
+      // the render survives a failed request it handles
+      const from = new URLSearchParams(location.search).get("from");
+      fetch(from + "/data.json").then(
+        (r) => r.json().then((d) => show(`<p>xfetch ok ${d.text}</p>`)),
+        (e) => show(`<p>xfetch failed ${e && e.name}</p>`),
+      );
+      break;
+    }
+    case "/xneeds": {
+      // the render depends on the request
+      const from = new URLSearchParams(location.search).get("from");
+      fetch(from + "/data.json")
+        .then((r) => r.json())
+        .then((d) => show(`<p>${d.text}</p>`));
+      break;
+    }
+    case "/xsocket": {
+      const from = new URLSearchParams(location.search).get("from");
+      let result = "opened";
+      try {
+        new WebSocket(from.replace(/^http/, "ws") + "/socket");
+      } catch (e) {
+        result = "refused " + e.name;
+      }
+      show(`<p>socket ${result}</p>`);
+      break;
+    }
   }
 }
 

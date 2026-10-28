@@ -66,6 +66,11 @@ export interface PrerenderOptions {
   concurrency?: number;
   /** Stop discovering routes after this many (a warning is logged). Default 500. */
   maxRoutes?: number;
+  /**
+   * Origins ("https://cdn.example.com") pages may load from while prerendering. Every other request
+   * that does not go to the build's own files is blocked and fails like a network error. Default [].
+   */
+  allowOrigins?: string[];
 }
 
 export interface MarkdownOptions {
@@ -123,6 +128,34 @@ export function isExcluded(route: string, exclude: Array<string | RegExp>): bool
 
 const RENDERERS: readonly string[] = ["happy-dom", "chrome", "msedge"];
 
+/** Validates prerender.allowOrigins: http(s) origins only, normalized ("https://A.com/" -> "https://a.com"). */
+function resolveAllowOrigins(input: unknown, bad: (field: string, expected: string) => never): string[] {
+  if (input === undefined) return [];
+  const expected = 'an array of http(s) origins such as "https://cdn.example.com"';
+  if (!Array.isArray(input)) bad("allowOrigins", expected);
+  const out = new Set<string>();
+  for (const o of input as unknown[]) {
+    let u: URL | undefined;
+    try {
+      u = typeof o === "string" ? new URL(o) : undefined;
+    } catch {
+      u = undefined;
+    }
+    if (
+      !u ||
+      (u.protocol !== "http:" && u.protocol !== "https:") ||
+      u.username !== "" ||
+      u.password !== "" ||
+      u.pathname !== "/" ||
+      /[?#]/.test(o as string)
+    ) {
+      bad("allowOrigins", `${expected} (got ${JSON.stringify(o)})`);
+    }
+    out.add(u!.origin);
+  }
+  return [...out].sort();
+}
+
 function resolvePrerender(input: PrerenderOptions): ResolvedPrerender {
   const bad = (field: string, expected: string): never => {
     throw new Error(`${LOG_PREFIX} prerender.${field} must be ${expected}`);
@@ -149,6 +182,7 @@ function resolvePrerender(input: PrerenderOptions): ResolvedPrerender {
   if (input.executablePath !== undefined && typeof input.executablePath !== "string") {
     bad("executablePath", "a string");
   }
+  const allowOrigins = resolveAllowOrigins(input.allowOrigins, bad);
   const out: ResolvedPrerender = {
     crawl: input.crawl ?? true,
     renderer,
@@ -157,6 +191,7 @@ function resolvePrerender(input: PrerenderOptions): ResolvedPrerender {
     timeoutMs: posInt("timeoutMs", input.timeoutMs, 15000),
     concurrency: posInt("concurrency", input.concurrency, 4),
     maxRoutes: posInt("maxRoutes", input.maxRoutes, 500),
+    allowOrigins,
   };
   if (input.executablePath !== undefined) out.executablePath = input.executablePath;
   return out;

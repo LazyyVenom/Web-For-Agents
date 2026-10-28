@@ -1,13 +1,16 @@
-import { Browser, type BrowserPage } from "happy-dom";
+import { Browser, PropertySymbol, type BrowserPage } from "happy-dom";
 import { READY_CHECK, type ReadyState } from "./probe";
 import {
   RenderError,
   SERIALIZE_EXPR,
+  blockedHint,
   createDeadline,
+  createOriginPolicy,
   errorMessage,
   readyTimeoutMessage,
   runInPage,
   waitForReady,
+  withoutBlockedLoads,
   type Renderer,
 } from "./renderCore";
 
@@ -106,7 +109,48 @@ function pageSink(page: BrowserPage): Sink & { failed: Promise<never>; done(): v
   };
 }
 
-export function createHappyDomRenderer(): Renderer {
+export interface HappyDomRendererOptions {
+  /** Origins pages may load from besides the prerender server. Default []. */
+  allowOrigins?: readonly string[];
+}
+
+/** Scheme a blocked request is rewritten to, so happy-dom rejects it like a network error before connecting. */
+const BLOCKED_SCHEME = "wfa-blocked:";
+
+export function createHappyDomRenderer(opts: HappyDomRendererOptions = {}): Renderer {
+  const allowed = createOriginPolicy(opts.allowOrigins);
+  /** Origins of the URLs rendered so far: the prerender server. */
+  const local = new Set<string>();
+  interface Active {
+    page: BrowserPage;
+    origin: string;
+    blocked: string[];
+  }
+  const active = new Set<Active>();
+  const ownerOf = (window: unknown): Active | undefined => {
+    for (const a of active) {
+      try {
+        if (a.page.frames.some((f) => f.window === window)) return a;
+      } catch {
+        // page closing
+      }
+    }
+    return undefined;
+  };
+  /** True (and recorded) when the window's page may not request `url`. */
+  const blocks = (url: string, window: unknown): boolean => {
+    const owner = ownerOf(window);
+    if (owner ? allowed(url, owner.origin) : [...local].some((o) => allowed(url, o))) return false;
+    owner?.blocked.push(url);
+    return true;
+  };
+  // Every fetch, XHR, script, module, stylesheet and frame navigation goes through these hooks. A
+  // blocked request gets an unsupported scheme, which happy-dom rejects as a network error right
+  // after the hook returns (throwing from the async hook would leak one of happy-dom's pending tasks).
+  const poison = (request: object) => {
+    const r = request as Record<symbol, URL>;
+    r[PropertySymbol.url] = new URL(BLOCKED_SCHEME + r[PropertySymbol.url]!.href);
+  };
   const browser = new Browser({
     settings: {
       enableJavaScriptEvaluation: true,
@@ -115,6 +159,31 @@ export function createHappyDomRenderer(): Renderer {
       // probe and Vite's CSS preload for lazy chunks. "handleDisabledFileLoadingAsSuccess" is no
       // substitute: it fires "load" synchronously on append, before Vite's helper listens for it.
       enableCSSFileLoading: true,
+      fetch: {
+        interceptor: {
+          async beforeAsyncRequest({ request, window }) {
+            if (blocks(request.url, window)) poison(request);
+          },
+          beforeSyncRequest({ request, window }) {
+            if (blocks(request.url, window)) poison(request);
+          },
+        },
+      },
+      navigation: {
+        // WebSockets connect without the fetch hooks.
+        beforeContentCallback(window) {
+          const Native = window.WebSocket;
+          (window as unknown as { WebSocket: unknown }).WebSocket = class extends Native {
+            constructor(url: string | URL, protocols?: string | string[]) {
+              const href = new URL(String(url), window.location.href).href;
+              if (blocks(href, window)) {
+                throw new window.DOMException(`Refused to connect to "${href}": blocked during prerendering`, "SecurityError");
+              }
+              super(href, protocols);
+            }
+          };
+        },
+      },
     },
   });
 
@@ -123,7 +192,11 @@ export function createHappyDomRenderer(): Renderer {
     async render(url, timeoutMs, inPage) {
       const deadline = createDeadline(timeoutMs);
       const timeoutText = readyTimeoutMessage(timeoutMs);
+      const origin = new URL(url).origin;
+      local.add(origin);
       const page = browser.newPage();
+      const state: Active = { page, origin, blocked: [] };
+      active.add(state);
       // happy-dom's VirtualConsole throws "Method not implemented." for these; React dev builds
       // call console.timeStamp, so make them no-ops (the page console is per page, kept across goto).
       const pageConsole = page.console as unknown as Record<string, unknown>;
@@ -145,11 +218,11 @@ export function createHappyDomRenderer(): Renderer {
           await step(
             waitForReady(async () => {
               const r = page.evaluate(READY_CHECK) as ReadyState;
-              return { ready: r.ready, errors: [...r.errors] };
+              return { ready: r.ready, errors: withoutBlockedLoads([...r.errors], state.blocked) };
             }, timeoutMs),
           );
         } catch (e) {
-          throw new RenderError("happy-dom", errorMessage(e));
+          throw new RenderError("happy-dom", errorMessage(e) + blockedHint(state.blocked));
         }
         const html = page.evaluate(SERIALIZE_EXPR) as string;
         const finalPath = new URL(page.url).pathname;
@@ -162,6 +235,7 @@ export function createHappyDomRenderer(): Renderer {
         );
         return { html, finalPath, inPage: results };
       } finally {
+        active.delete(state);
         await page.close().catch(() => {});
         // Rejections caused by closing (aborted fetches) are emitted after the current tick.
         await new Promise((r) => setImmediate(r));

@@ -25,11 +25,66 @@ export interface Renderer {
 
 export class RenderError extends Error {
   renderer: RendererName;
+  /** The renderer was closed or killed (Ctrl-C) while rendering: the build was interrupted, the page did not fail. */
+  interrupted?: boolean;
   constructor(renderer: RendererName, message: string) {
     super(message);
     this.name = "RenderError";
     this.renderer = renderer;
   }
+}
+
+/**
+ * The hermetic network rule both renderers apply: a page may load from its own origin (the local
+ * prerender server) and from `allowOrigins`; data: and blob: URLs never leave the process. Everything
+ * else is blocked and fails like a network error. Returns true when `url` may be requested.
+ */
+export function createOriginPolicy(allowOrigins: readonly string[] = []): (url: string, localOrigin: string) => boolean {
+  const allow = new Set(allowOrigins);
+  return (url, localOrigin) => {
+    let u: URL;
+    try {
+      u = new URL(url);
+    } catch {
+      return false;
+    }
+    if (u.protocol === "data:" || u.protocol === "blob:") return true;
+    // WebSockets share their HTTP origin's rule.
+    const origin =
+      u.protocol === "ws:" || u.protocol === "wss:"
+        ? new URL(url.replace(/^ws/i, "http")).origin
+        : u.origin;
+    return origin === localOrigin || allow.has(origin);
+  };
+}
+
+/** Text appended to a failed render's message when the page had requests blocked. Empty when none. */
+export function blockedHint(blocked: readonly string[]): string {
+  if (blocked.length === 0) return "";
+  const urls = [...new Set(blocked)];
+  const shown = urls.slice(0, 3).join(", ") + (urls.length > 3 ? `, and ${urls.length - 3} more` : "");
+  const origins = [...new Set(urls.map((u) => tryOrigin(u)).filter((o): o is string => o !== null))];
+  const example = origins.length > 0 ? ` (e.g. prerender: { allowOrigins: ${JSON.stringify(origins.slice(0, 3))} })` : "";
+  return (
+    `; requests to other origins were blocked: ${shown}. Prerendering only loads the build's own files; ` +
+    `if the page needs these, add their origins to prerender.allowOrigins${example}`
+  );
+}
+
+function tryOrigin(url: string): string | null {
+  try {
+    const o = new URL(url.replace(/^ws/i, "http")).origin;
+    return o === "null" ? null : o;
+  } catch {
+    return null;
+  }
+}
+
+/** Drops the probe's "Failed to load <url>" errors for blocked URLs: a blocked request is not fatal by itself. */
+export function withoutBlockedLoads(errors: string[], blocked: readonly string[]): string[] {
+  if (blocked.length === 0) return errors;
+  const ignored = new Set(blocked.map((u) => "Failed to load " + u));
+  return errors.filter((e) => !ignored.has(e));
 }
 
 export function readyTimeoutMessage(timeoutMs: number): string {

@@ -221,42 +221,103 @@ describe("other bases", () => {
   }, 120_000);
 });
 
+/** Records the host of every request made through Node's http(s) and fetch while `run` runs. */
+async function spyHosts<T>(run: () => Promise<T>): Promise<{ hosts: string[]; value: T }> {
+  const hosts: string[] = [];
+  const note = (a: unknown) => {
+    try {
+      if (typeof a === "string" || a instanceof URL) hosts.push(new URL(a, "http://unknown.invalid").hostname);
+      else if (a && typeof a === "object") {
+        const o = a as { hostname?: string; host?: string; url?: string };
+        hosts.push(o.hostname ?? o.host?.split(":")[0] ?? (o.url ? new URL(o.url, "http://unknown.invalid").hostname : "unknown.invalid"));
+      }
+    } catch {
+      hosts.push("unparseable");
+    }
+  };
+  const orig = { fetch: globalThis.fetch, hr: http.request, hg: http.get, sr: https.request, sg: https.get };
+  globalThis.fetch = ((a: unknown, ...r: unknown[]) => (note(a), (orig.fetch as Function)(a, ...r))) as typeof fetch;
+  for (const [m, k] of [[http, "request"], [http, "get"], [https, "request"], [https, "get"]] as const) {
+    const f = (m as any)[k];
+    (m as any)[k] = (...a: unknown[]) => (note(a[0]), f.apply(m, a));
+  }
+  try {
+    return { hosts, value: await run() };
+  } finally {
+    globalThis.fetch = orig.fetch;
+    http.request = orig.hr;
+    http.get = orig.hg;
+    https.request = orig.sr;
+    https.get = orig.sg;
+  }
+}
+
 describe("full-URL base", () => {
   it.each(["https://cdn.example.com/app/", "//cdn.example.com/app/"])("makes no non-local requests with base %s", async (base) => {
-    const hosts: string[] = [];
-    const note = (a: unknown) => {
-      try {
-        if (typeof a === "string" || a instanceof URL) hosts.push(new URL(a, "http://unknown.invalid").hostname);
-        else if (a && typeof a === "object") {
-          const o = a as { hostname?: string; host?: string; url?: string };
-          hosts.push(o.hostname ?? o.host?.split(":")[0] ?? (o.url ? new URL(o.url, "http://unknown.invalid").hostname : "unknown.invalid"));
-        }
-      } catch {
-        hosts.push("unparseable");
-      }
-    };
-    const orig = { fetch: globalThis.fetch, hr: http.request, hg: http.get, sr: https.request, sg: https.get };
-    globalThis.fetch = ((a: unknown, ...r: unknown[]) => (note(a), (orig.fetch as Function)(a, ...r))) as typeof fetch;
-    for (const [m, k] of [[http, "request"], [http, "get"], [https, "request"], [https, "get"]] as const) {
-      const f = (m as any)[k];
-      (m as any)[k] = (...a: unknown[]) => (note(a[0]), f.apply(m, a));
-    }
-    let dist: string;
-    try {
-      dist = (await buildFixture({ base })).dist;
-    } finally {
-      globalThis.fetch = orig.fetch;
-      http.request = orig.hr;
-      http.get = orig.hg;
-      https.request = orig.sr;
-      https.get = orig.sg;
-    }
+    const { hosts, value: dist } = await spyHosts(async () => (await buildFixture({ base })).dist);
     expect(hosts.length).toBeGreaterThan(0); // the spy sees the local requests
     expect(hosts.filter((h) => h !== "127.0.0.1")).toEqual([]);
     const html = read(dist, "blog/hello/index.html");
     expect(html).toMatch(new RegExp(`src="${base}assets/`));
     expect(html).toMatch(new RegExp(`href="${base}assets/Post-[^"]+\\.css"`));
     expect(filesContaining(dist, "127.0.0.1")).toEqual([]);
+  }, 120_000);
+});
+
+describe("hermetic network", () => {
+  /** A stand-in third party on another origin; records every request it gets. */
+  async function thirdParty() {
+    const hits: string[] = [];
+    const server = http.createServer((req, res) => {
+      hits.push(req.url ?? "");
+      res.writeHead(200, { "content-type": "text/javascript" });
+      res.end('document.documentElement.setAttribute("data-third-party", "ran");');
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    return { hits, origin, close: () => new Promise((r) => (server.closeAllConnections(), server.close(r))) };
+  }
+
+  const withTag = (root: string, origin: string) => {
+    const index = path.join(root, "index.html");
+    writeFileSync(
+      index,
+      readFileSync(index, "utf8").replace(
+        "</head>",
+        `<script async src="${origin}/tag.js"></script>` +
+          '<script async src="https://third-party.example.com/tag.js"></script>' +
+          '<link rel="stylesheet" href="https://third-party.example.com/font.css"></head>',
+      ),
+    );
+    return root;
+  };
+
+  it("blocks cross-origin scripts: nothing is requested from other origins and the build succeeds", async () => {
+    const tp = await thirdParty();
+    try {
+      const root = withTag(copyFixture("spa"), tp.origin);
+      const { hosts, value: dist } = await spyHosts(async () => (await buildFixture({ root })).dist);
+      expect(hosts.filter((h) => h !== "127.0.0.1")).toEqual([]);
+      expect(tp.hits).toEqual([]);
+      const html = read(dist, "about/index.html");
+      expect(html).toContain("About us");
+      expect(html).not.toContain("data-third-party");
+      expect(html).toContain('src="https://third-party.example.com/tag.js"'); // the tag itself is kept
+    } finally {
+      await tp.close();
+    }
+  }, 120_000);
+
+  it("loads from prerender.allowOrigins", async () => {
+    const tp = await thirdParty();
+    try {
+      const root = withTag(copyFixture("spa"), tp.origin);
+      const { dist } = await buildFixture({ root, extra: { prerender: { allowOrigins: [tp.origin] } } });
+      expect(tp.hits).toContain("/tag.js");
+      expect(read(dist, "about/index.html")).toContain('data-third-party="ran"');
+    } finally {
+      await tp.close();
+    }
   }, 120_000);
 });
 

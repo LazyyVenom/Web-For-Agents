@@ -40,7 +40,10 @@ export async function prerenderSite(input: {
 
   const fullBase = isFullUrlBase(input.base) ? input.base : undefined;
   const shell = prepareShell(input.shell, { relativeBase });
-  const pool = createRendererPool(pr.executablePath !== undefined ? { executablePath: pr.executablePath } : {});
+  const pool = createRendererPool({
+    ...(pr.executablePath !== undefined ? { executablePath: pr.executablePath } : {}),
+    allowOrigins: pr.allowOrigins,
+  });
   try {
     const server = await startStaticServer({
       dir: input.outDir,
