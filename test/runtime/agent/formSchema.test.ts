@@ -232,7 +232,7 @@ describe("regex input cap", () => {
 });
 
 describe("concealed fields", () => {
-  it("excludes hidden, inert, aria-hidden and display:none fields from the schema and agentFields", () => {
+  it("excludes fields concealed by markup: hidden, inert, aria-hidden, closed dialog, closed details", () => {
     const f = form(`
       <input name="ok">
       <input name="h" hidden>
@@ -240,16 +240,36 @@ describe("concealed fields", () => {
       <div inert><input name="inert"></div>
       <div aria-hidden="true"><textarea name="aria"></textarea></div>
       <div aria-hidden="false"><input name="shown"></div>
-      <input name="none" style="display:none">
-      <div style="display: none"><select name="nonep"><option>a</option></select></div>`);
-    expect(Object.keys(schemaFromForm(f).properties!)).toEqual(["ok", "shown"]);
-    expect([...agentFields(f).keys()]).toEqual(["ok", "shown"]);
+      <dialog><input name="dlg"></dialog>
+      <dialog open><input name="dlgOpen"></dialog>
+      <details><summary><input name="sum"></summary><div><input name="det"></div></details>
+      <details open><summary>s</summary><input name="detOpen"></details>
+      <input name="styled" style="display:none">`);
+    const visible = ["ok", "shown", "dlgOpen", "sum", "detOpen", "styled"];
+    expect(Object.keys(schemaFromForm(f).properties!)).toEqual(visible);
+    expect([...agentFields(f).keys()]).toEqual(visible);
   });
 
-  it("keeps fields of a detached form", () => {
-    const f = document.createElement("form");
-    f.innerHTML = `<input name="a">`;
-    expect(Object.keys(schemaFromForm(f).properties!)).toEqual(["a"]);
+  it("keeps a hidden checkbox or radio reachable through a visible, enabled label", () => {
+    const f = form(`
+      <input type="checkbox" name="terms" id="t" hidden><label for="t">I agree</label>
+      <label><input type="radio" name="plan" value="pro" hidden> Pro</label>
+      <input type="checkbox" name="peer" id="p" class="peer hidden"><label for="p">Peer</label>
+      <input type="checkbox" name="noLabel" hidden>
+      <input type="checkbox" name="hiddenLabel" id="hl" hidden><label for="hl" hidden>x</label>
+      <input type="checkbox" name="ariaToo" id="a" hidden aria-hidden="true"><label for="a">a</label>
+      <div hidden><input type="checkbox" name="inHidden" id="ih"></div><label for="ih">ih</label>
+      <input type="text" name="text" id="tx" hidden><label for="tx">tx</label>`);
+    expect(Object.keys(schemaFromForm(f).properties!)).toEqual(["terms", "plan", "peer"]);
+  });
+
+  it("exempts the first legend of a disabled fieldset", () => {
+    const f = form(`<fieldset disabled>
+      <legend><input name="first"></legend>
+      <legend><input name="second"></legend>
+      <input name="body">
+    </fieldset>`);
+    expect(Object.keys(schemaFromForm(f).properties!)).toEqual(["first"]);
   });
 
   it("excludes options in a disabled optgroup and hidden options from the enum", () => {

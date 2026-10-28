@@ -3,7 +3,7 @@ import { AGENT_GLOBAL } from "../../shared/conventions";
 import { errorMessage, withPrefix } from "../../shared/errors";
 import { hasOwn } from "../../shared/object";
 import { compareStrings } from "../../shared/sort";
-import { isDisabled, isHiddenOrInert } from "./dom";
+import { isConcealed, isDisabled } from "./dom";
 import { submitFormAction } from "./formAutomation";
 import { EMPTY_OBJECT_SCHEMA, schemaFromForm, validateInput } from "./formSchema";
 import type { AgentActionDescriptor, AgentActionResult, AgentActionSpec, JsonSchema } from "./types";
@@ -220,7 +220,7 @@ export async function executeAgentAction(
         return await submitFormAction(r.el, value, { settleMs: spec.submitSettleMs, signal });
       case "click":
         if (isDisabled(r.el)) return { status: "error", message: "element is disabled" };
-        if (isHiddenOrInert(r.el)) return { status: "error", message: "element is hidden or inert" };
+        if (isConcealed(r.el)) return { status: "error", message: "element is hidden or inert" };
         (r.el as HTMLElement).click();
         return { status: "clicked" };
     }

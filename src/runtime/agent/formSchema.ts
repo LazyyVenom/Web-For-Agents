@@ -4,7 +4,7 @@ import {
 } from "../../shared/conventions";
 import { hasOwn } from "../../shared/object";
 import { collapseWhitespace as clean } from "../../shared/text";
-import { isConcealed } from "./dom";
+import { inDisabledFieldset, isConcealed } from "./dom";
 import type { JsonSchema } from "./types";
 
 export const EMPTY_OBJECT_SCHEMA: JsonSchema = Object.freeze({
@@ -21,7 +21,7 @@ function isAgentField(e: Element): e is Field {
   const tag = e.tagName;
   if (tag !== "INPUT" && tag !== "SELECT" && tag !== "TEXTAREA") return false;
   if (!e.getAttribute("name")) return false;
-  if (e.hasAttribute("disabled") || e.hasAttribute("readonly") || e.closest("fieldset[disabled]")) return false;
+  if (e.hasAttribute("disabled") || e.hasAttribute("readonly") || inDisabledFieldset(e)) return false;
   if (tag === "INPUT" && EXCLUDED_TYPES.has((e.getAttribute("type") ?? "text").toLowerCase())) return false;
   return !isConcealed(e);
 }
@@ -29,8 +29,8 @@ function isAgentField(e: Element): e is Field {
 /**
  * The fields an agent may see and write, grouped by name in document order. The single
  * predicate for both the advertised schema and form filling: excludes hidden/password/file and
- * button-like inputs, disabled, readonly, inside fieldset[disabled], unnamed fields, and fields the
- * user cannot perceive: `hidden`, `inert`, aria-hidden="true" subtrees and display:none.
+ * button-like inputs, disabled, readonly, inside fieldset[disabled], unnamed fields, and concealed
+ * fields (see isConcealed).
  */
 export function agentFields(form: HTMLFormElement): Map<string, Field[]> {
   const groups = new Map<string, Field[]>();

@@ -225,4 +225,61 @@ describe("runFormAction", () => {
     f.addEventListener("submit", (e) => e.preventDefault());
     expect((await run(f, { q: "x" })).status).toBe("submitted");
   });
+
+  it("sets a hidden checkbox operated through its visible label", async () => {
+    const f = mount(`<form><input type="checkbox" name="terms" id="t" hidden><label for="t">I agree</label></form>`);
+    f.addEventListener("submit", (e) => e.preventDefault());
+    expect((await run(f, { terms: true })).status).toBe("submitted");
+    expect((f.elements.namedItem("terms") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("does not submit a concealed form or one whose default button is concealed", async () => {
+    for (const html of [
+      `<dialog><form><input name="q"><button>Send</button></form></dialog>`,
+      `<form><input name="q"><button hidden>Send</button></form>`,
+      `<form><input name="q"><div inert><button>Send</button></div></form>`,
+    ]) {
+      const f = mount(html);
+      const submitted = vi.fn((e: Event) => e.preventDefault());
+      f.addEventListener("submit", submitted);
+      const r = html.startsWith("<dialog") ? await run(f, {}) : await run(f, { q: "x" });
+      expect(r).toEqual({ status: "error", message: "form is hidden or inert" });
+      expect(submitted).not.toHaveBeenCalled();
+    }
+  });
+
+  it("submits through the default button, counting image and form= buttons", async () => {
+    const cases: Array<[string, string]> = [
+      [`<form id="f"><input name="q"><button name="op" value="save">Save</button><button name="op" value="del">Del</button></form>`, "save"],
+      [`<form id="f"><input name="q"><input type="image" name="img" alt="go"><button name="op" value="b">B</button></form>`, "img"],
+      [`<form id="f"><input name="q"></form><button form="f" name="op" value="outside">Out</button>`, "outside"],
+    ];
+    for (const [html, expected] of cases) {
+      const f = mount(html);
+      let submitter: Element | null | undefined;
+      f.addEventListener("submit", (e) => {
+        e.preventDefault();
+        submitter = (e as SubmitEvent).submitter;
+      });
+      expect((await run(f, { q: "x" })).status).toBe("submitted");
+      const s = submitter as HTMLButtonElement;
+      expect(s.value === expected || s.name === expected).toBe(true);
+    }
+  });
+
+  it("refuses a disabled image or form= default button", async () => {
+    for (const html of [
+      `<form id="f"><input name="q"><input type="image" alt="go" disabled><button>B</button></form>`,
+      `<form id="f"><input name="q"></form><button form="f" disabled>Out</button>`,
+    ]) {
+      const f = mount(html);
+      expect(await run(f, { q: "x" })).toEqual({ status: "error", message: "form submit is disabled" });
+    }
+  });
+
+  it("a submit button in the first legend of a disabled fieldset is enabled", async () => {
+    const f = mount(`<form><input name="q"><fieldset disabled><legend><button>Go</button></legend></fieldset></form>`);
+    f.addEventListener("submit", (e) => e.preventDefault());
+    expect((await run(f, { q: "x" })).status).toBe("submitted");
+  });
 });

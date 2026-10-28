@@ -1,5 +1,5 @@
 import { hasOwn } from "../../shared/object";
-import { isDisabled } from "./dom";
+import { inDisabledFieldset, isConcealed, isDisabled } from "./dom";
 import { agentFields, schemaFromForm, validateInput, type Field } from "./formSchema";
 import type { AgentActionResult } from "./types";
 
@@ -63,9 +63,10 @@ function settle(ms: number, signal?: AbortSignal): Promise<boolean> {
   });
 }
 
-function submit(form: HTMLFormElement): void {
+function submit(form: HTMLFormElement, button: Submitter | null): void {
   if (typeof form.requestSubmit === "function") {
-    form.requestSubmit();
+    // Through the default button, so its name/value, formaction and formmethod apply.
+    form.requestSubmit(button ?? undefined);
     return;
   }
   const ev = new Event("submit", { bubbles: true, cancelable: true });
@@ -89,12 +90,14 @@ export async function runFormAction(
   return submitFormAction(form, checked.value, opts);
 }
 
-/** The form's default button: its first submit button, or null. */
-function defaultButton(form: HTMLFormElement): Element | null {
-  for (const el of Array.from(form.elements)) {
-    if ((el.tagName === "BUTTON" || el.tagName === "INPUT") && /^(submit|image)$/.test((el as HTMLInputElement).type)) {
-      return el;
-    }
+type Submitter = HTMLButtonElement | HTMLInputElement;
+
+/** The form's default button: its first submit or image button in tree order, `form=` owners included. */
+function defaultButton(form: HTMLFormElement): Submitter | null {
+  const root = form.getRootNode() as ParentNode;
+  const scope = typeof root.querySelectorAll === "function" ? root : form;
+  for (const el of Array.from(scope.querySelectorAll<Submitter>("button, input"))) {
+    if (el.form === form && /^(submit|image)$/.test(el.type)) return el;
   }
   return null;
 }
@@ -107,7 +110,8 @@ export async function submitFormAction(
 ): Promise<AgentActionResult> {
   if (opts.signal?.aborted) return { status: "error", message: "aborted" };
   const button = defaultButton(form);
-  if (form.closest("fieldset[disabled]") || (button && isDisabled(button))) {
+  if (isConcealed(form) || (button && isConcealed(button))) return { status: "error", message: "form is hidden or inert" };
+  if (inDisabledFieldset(form) || (button && isDisabled(button))) {
     return { status: "error", message: "form submit is disabled" };
   }
 
@@ -120,7 +124,7 @@ export async function submitFormAction(
     return { status: "invalid", errors };
   }
 
-  submit(form);
+  submit(form, button);
 
   if (!(await settle(opts.settleMs ?? 300, opts.signal))) return { status: "error", message: "aborted" };
 

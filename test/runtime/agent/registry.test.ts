@@ -257,15 +257,24 @@ describe("registry", () => {
     expect(clicked).not.toHaveBeenCalled();
   });
 
+  it("a button in the first legend of a disabled fieldset is clickable", async () => {
+    document.body.innerHTML = `<fieldset disabled><legend><button id="l">L</button></legend><legend><button id="m">M</button></legend></fieldset>`;
+    reg({ name: "l", description: "l" }, () => document.getElementById("l"));
+    reg({ name: "m", description: "m" }, () => document.getElementById("m"));
+    expect(await executeAgentAction("l", {})).toEqual({ status: "clicked" });
+    expect(await executeAgentAction("m", {})).toEqual({ status: "error", message: "element is disabled" });
+  });
+
   it("clicking an element inside an inert or hidden region returns an error and does not click", async () => {
-    document.body.innerHTML = `<div inert><button id="i">I</button></div><div hidden><button id="h">H</button></div><button id="s" hidden>S</button>`;
+    document.body.innerHTML = `<div inert><button id="i">I</button></div><div hidden><button id="h">H</button></div><button id="s" hidden>S</button><div aria-hidden="true"><button id="a">A</button></div><dialog><button id="d">D</button></dialog><details><summary>x</summary><button id="c">C</button></details>`;
     const clicked = vi.fn();
-    for (const id of ["i", "h", "s"]) {
+    const ids = ["i", "h", "s", "a", "d", "c"];
+    for (const id of ids) {
       const el = document.getElementById(id)!;
       el.addEventListener("click", clicked);
       reg({ name: id, description: id }, () => el);
     }
-    for (const id of ["i", "h", "s"]) {
+    for (const id of ids) {
       expect(await executeAgentAction(id, {})).toEqual({ status: "error", message: "element is hidden or inert" });
     }
     expect(clicked).not.toHaveBeenCalled();
