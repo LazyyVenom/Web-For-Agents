@@ -1,10 +1,11 @@
 import type { RendererName } from "../options";
 import { createChromeRenderer } from "./chrome";
-import { createHappyDomRenderer } from "./happyDom";
+import { createIsolatedHappyDomRenderer } from "./happyDomProcess";
 import type { Renderer } from "./renderCore";
 
 export { createChromeRenderer } from "./chrome";
 export { createHappyDomRenderer } from "./happyDom";
+export { createIsolatedHappyDomRenderer } from "./happyDomProcess";
 export {
   RenderError,
   errorMessage,
@@ -21,7 +22,15 @@ export interface RendererPool {
 }
 
 /** Lazily creates one renderer per name. */
-export function createRendererPool(opts: { executablePath?: string }): RendererPool {
+export function createRendererPool(opts: {
+  executablePath?: string;
+  allowOrigins?: readonly string[];
+  idleMs?: number;
+  /** prerender.isolation.codeGeneration. Default false. */
+  codeGeneration?: boolean;
+  /** See HappyDomRendererOptions.syncResources. */
+  syncResources?: Record<string, { body: string; contentType: string }>;
+}): RendererPool {
   const made = new Map<RendererName, Promise<Renderer>>();
   return {
     get(name) {
@@ -29,11 +38,21 @@ export function createRendererPool(opts: { executablePath?: string }): RendererP
       if (!r) {
         r =
           name === "happy-dom"
-            ? Promise.resolve(createHappyDomRenderer())
-            : createChromeRenderer(
-                name,
-                opts.executablePath !== undefined ? { executablePath: opts.executablePath } : {},
-              );
+            ? Promise.resolve(
+                createIsolatedHappyDomRenderer(
+                  {
+                    allowOrigins: opts.allowOrigins ?? [],
+                    ...(opts.idleMs !== undefined ? { idleMs: opts.idleMs } : {}),
+                    ...(opts.syncResources ? { syncResources: opts.syncResources } : {}),
+                  },
+                  { codeGeneration: opts.codeGeneration === true },
+                ),
+              )
+            : createChromeRenderer(name, {
+                ...(opts.executablePath !== undefined ? { executablePath: opts.executablePath } : {}),
+                allowOrigins: opts.allowOrigins ?? [],
+                ...(opts.idleMs !== undefined ? { idleMs: opts.idleMs } : {}),
+              });
         made.set(name, r);
       }
       return r;

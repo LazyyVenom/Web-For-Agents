@@ -1,13 +1,18 @@
-import { Browser, type BrowserPage } from "happy-dom";
-import { READY_CHECK, type ReadyState } from "./probe";
+import { Browser, PropertySymbol, type BrowserPage } from "happy-dom";
+import { IDLE_MS, SETTLED_IDLE_MS, readyCheck, type ReadyState } from "./probe";
 import {
   RenderError,
   SERIALIZE_EXPR,
+  blockedHint,
   createDeadline,
+  createOriginPolicy,
   errorMessage,
+  POLL_MS,
+  SETTLED_POLL_MS,
   readyTimeoutMessage,
   runInPage,
   waitForReady,
+  withoutBlockedLoads,
   type Renderer,
 } from "./renderCore";
 
@@ -106,7 +111,85 @@ function pageSink(page: BrowserPage): Sink & { failed: Promise<never>; done(): v
   };
 }
 
-export function createHappyDomRenderer(): Renderer {
+export interface HappyDomRendererOptions {
+  /** Origins pages may load from besides the prerender server. Default []. */
+  allowOrigins?: readonly string[];
+  /**
+   * Readiness quiet window in ms (prerender.idleMs). Default: SETTLED_IDLE_MS when happy-dom reports
+   * the page settled within its cap, else IDLE_MS.
+   */
+  idleMs?: number;
+  /**
+   * Bodies of the shell's classic (synchronously loaded) scripts, by absolute URL. happy-dom loads
+   * such scripts with a synchronous request, which it makes by spawning a process; these are served
+   * from memory instead, so they work where spawning is not allowed (the isolated render process).
+   */
+  syncResources?: Record<string, { body: string; contentType: string }>;
+}
+
+/** Scheme a blocked request is rewritten to, so happy-dom rejects it like a network error before connecting. */
+const BLOCKED_SCHEME = "wfa-blocked:";
+
+/** False under Node's permission model without --allow-child-process. */
+const canSpawn = (process as { permission?: { has(scope: string): boolean } }).permission?.has("child") ?? true;
+
+/** A synchronous request the render process refused: a classic script's load, or a synchronous XHR. */
+export interface SyncRefusal {
+  url: string;
+  kind: "script" | "xhr";
+}
+
+/** One sentence per refused synchronous request, with the remedy for its kind. */
+export function syncRefusalText(r: SyncRefusal): string {
+  return r.kind === "script"
+    ? `the classic script ${r.url} loads synchronously (no async, defer or type="module"), which the isolated ` +
+        `happy-dom renderer cannot do: add type="module" or defer to it, or render the route with Chrome (prerender.routeRenderers)`
+    : `the synchronous XMLHttpRequest to ${r.url} cannot run in the isolated happy-dom renderer: make the request ` +
+        `asynchronous, or render the route with Chrome (prerender.routeRenderers)`;
+}
+
+/** Text appended to a failed render's message when synchronous requests were refused. */
+export function syncHint(refused: readonly SyncRefusal[]): string {
+  const unique = [...new Map(refused.map((r) => [r.kind + r.url, r])).values()];
+  return unique.slice(0, 3).map((r) => "; " + syncRefusalText(r)).join("");
+}
+
+export function createHappyDomRenderer(opts: HappyDomRendererOptions = {}): Renderer {
+  const allowed = createOriginPolicy(opts.allowOrigins);
+  /** Origins of the URLs rendered so far: the prerender server. */
+  const local = new Set<string>();
+  interface Active {
+    page: BrowserPage;
+    origin: string;
+    blocked: string[];
+    /** Synchronous requests refused because this process may not spawn (see beforeSyncRequest). */
+    syncRefused: SyncRefusal[];
+  }
+  const active = new Set<Active>();
+  const ownerOf = (window: unknown): Active | undefined => {
+    for (const a of active) {
+      try {
+        if (a.page.frames.some((f) => f.window === window)) return a;
+      } catch {
+        // page closing
+      }
+    }
+    return undefined;
+  };
+  /** True (and recorded) when the window's page may not request `url`. */
+  const blocks = (url: string, window: unknown): boolean => {
+    const owner = ownerOf(window);
+    if (owner ? allowed(url, owner.origin) : [...local].some((o) => allowed(url, o))) return false;
+    owner?.blocked.push(url);
+    return true;
+  };
+  // Every fetch, XHR, script, module, stylesheet and frame navigation goes through these hooks. A
+  // blocked request gets an unsupported scheme, which happy-dom rejects as a network error right
+  // after the hook returns (throwing from the async hook would leak one of happy-dom's pending tasks).
+  const poison = (request: object) => {
+    const r = request as Record<symbol, URL>;
+    r[PropertySymbol.url] = new URL(BLOCKED_SCHEME + r[PropertySymbol.url]!.href);
+  };
   const browser = new Browser({
     settings: {
       enableJavaScriptEvaluation: true,
@@ -115,6 +198,55 @@ export function createHappyDomRenderer(): Renderer {
       // probe and Vite's CSS preload for lazy chunks. "handleDisabledFileLoadingAsSuccess" is no
       // substitute: it fires "load" synchronously on append, before Vite's helper listens for it.
       enableCSSFileLoading: true,
+      fetch: {
+        interceptor: {
+          async beforeAsyncRequest({ request, window }) {
+            if (blocks(request.url, window)) poison(request);
+          },
+          beforeSyncRequest({ request, window }) {
+            if (blocks(request.url, window)) return poison(request);
+            const known = opts.syncResources?.[request.url.split("#")[0]!];
+            if (known && request.method === "GET") {
+              const W = window as unknown as { Headers: new (init: Record<string, string>) => unknown };
+              return {
+                status: 200,
+                statusText: "OK",
+                ok: true,
+                url: request.url,
+                redirected: false,
+                headers: new W.Headers({ "content-type": known.contentType }) as never,
+                body: Buffer.from(known.body),
+              };
+            }
+            // happy-dom makes synchronous requests by spawning a process, which the render process's
+            // permission model forbids: fail them cleanly and explain why.
+            if (!canSpawn) {
+              // A script element whose src is this URL is loading it; otherwise it is a synchronous XHR.
+              const doc = (window as unknown as { document: Document }).document;
+              const isScript = Array.from(doc.querySelectorAll("script[src]")).some(
+                (el) => (el as HTMLScriptElement).src === request.url,
+              );
+              ownerOf(window)?.syncRefused.push({ url: request.url, kind: isScript ? "script" : "xhr" });
+              poison(request);
+            }
+          },
+        },
+      },
+      navigation: {
+        // WebSockets connect without the fetch hooks.
+        beforeContentCallback(window) {
+          const Native = window.WebSocket;
+          (window as unknown as { WebSocket: unknown }).WebSocket = class extends Native {
+            constructor(url: string | URL, protocols?: string | string[]) {
+              const href = new URL(String(url), window.location.href).href;
+              if (blocks(href, window)) {
+                throw new window.DOMException(`Refused to connect to "${href}": blocked during prerendering`, "SecurityError");
+              }
+              super(href, protocols);
+            }
+          };
+        },
+      },
     },
   });
 
@@ -123,7 +255,11 @@ export function createHappyDomRenderer(): Renderer {
     async render(url, timeoutMs, inPage) {
       const deadline = createDeadline(timeoutMs);
       const timeoutText = readyTimeoutMessage(timeoutMs);
+      const origin = new URL(url).origin;
+      local.add(origin);
       const page = browser.newPage();
+      const state: Active = { page, origin, blocked: [], syncRefused: [] };
+      active.add(state);
       // happy-dom's VirtualConsole throws "Method not implemented." for these; React dev builds
       // call console.timeStamp, so make them no-ops (the page console is per page, kept across goto).
       const pageConsole = page.console as unknown as Record<string, unknown>;
@@ -136,20 +272,26 @@ export function createHappyDomRenderer(): Renderer {
         try {
           await step(page.goto(url));
           let timer: ReturnType<typeof setTimeout> | undefined;
-          await step(
+          const settled = await step(
             Promise.race([
-              page.waitUntilComplete(),
-              new Promise<void>((r) => (timer = setTimeout(r, Math.min(deadline.remaining(), 2000)))),
+              page.waitUntilComplete().then(() => true),
+              new Promise<boolean>((r) => (timer = setTimeout(() => r(false), Math.min(deadline.remaining(), 2000)))),
             ]).finally(() => clearTimeout(timer)),
           );
+          const idleMs = opts.idleMs ?? (settled ? SETTLED_IDLE_MS : IDLE_MS);
+          const check = readyCheck(idleMs);
           await step(
-            waitForReady(async () => {
-              const r = page.evaluate(READY_CHECK) as ReadyState;
-              return { ready: r.ready, errors: [...r.errors] };
-            }, timeoutMs),
+            waitForReady(
+              async () => {
+                const r = page.evaluate(check) as ReadyState;
+                return { ready: r.ready, errors: withoutBlockedLoads([...r.errors], state.blocked) };
+              },
+              timeoutMs,
+              Math.min(settled ? SETTLED_POLL_MS : POLL_MS, idleMs),
+            ),
           );
         } catch (e) {
-          throw new RenderError("happy-dom", errorMessage(e));
+          throw new RenderError("happy-dom", errorMessage(e) + blockedHint(state.blocked) + syncHint(state.syncRefused));
         }
         const html = page.evaluate(SERIALIZE_EXPR) as string;
         const finalPath = new URL(page.url).pathname;
@@ -160,8 +302,17 @@ export function createHappyDomRenderer(): Renderer {
           deadline,
           timeoutMs,
         );
-        return { html, finalPath, inPage: results };
+        return {
+          html,
+          finalPath,
+          inPage: results,
+          // The page rendered anyway, but without what the refused requests would have loaded.
+          ...(state.syncRefused.length > 0
+            ? { warnings: [...new Map(state.syncRefused.map((r) => [r.kind + r.url, r])).values()].map(syncRefusalText) }
+            : {}),
+        };
       } finally {
+        active.delete(state);
         await page.close().catch(() => {});
         // Rejections caused by closing (aborted fetches) are emitted after the current tick.
         await new Promise((r) => setImmediate(r));

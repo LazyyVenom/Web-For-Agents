@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { crawlRoutes, formatFailures, type CrawlOptions, type RenderFn } from "../../../src/vite/prerender/crawl";
+import {
+  crawlRoutes,
+  formatFailures,
+  type CrawlOptions,
+  type RenderFn,
+} from "../../../src/vite/prerender/crawl";
 import { RenderError } from "../../../src/vite/prerender/renderers";
 
 const ORIGIN = "http://127.0.0.1:1234";
@@ -229,6 +234,23 @@ describe("crawlRoutes", () => {
     expect(off.pages[0]!.html).not.toContain('type="text/markdown"');
   });
 
+  it("skips routes whose file names would be too long, without failing", async () => {
+    const calls: string[] = [];
+    const long = "/" + "x".repeat(300);
+    const deep = "/" + Array.from({ length: 60 }, () => "y".repeat(20)).join("/");
+    const wide = "/" + "%C3%A9".repeat(130); // 130 "é" = 260 bytes decoded
+    const render = fakeRender(
+      { "/": page(a(long) + a(deep) + a(wide) + a("/ok")), "/ok": page("OK"), [long]: page("L") },
+      calls,
+    );
+    const r = await crawlRoutes(opts({ seeds: ["/", "/" + "z".repeat(256)] }), render);
+    expect(r.pages.map((p) => p.route)).toEqual(["/", "/ok"]);
+    expect(r.failures).toEqual([]);
+    expect(r.tooLongRoutes).toEqual([long, "/" + "z".repeat(256), deep, wide].sort());
+    expect(calls).toEqual(expect.arrayContaining(["/", "/ok"]));
+    expect(calls).toHaveLength(2);
+  });
+
   it("reports body-fallback routes", async () => {
     const r = await crawlRoutes(
       opts(),
@@ -253,6 +275,74 @@ describe("crawlRoutes", () => {
     }
     expect(new Set(runs).size).toBe(1);
     expect(runs[0]).toBe("/,/r00,/r01,/r02,/r03,/r04");
+  });
+
+  it("keeps truncation identical to a level-by-level crawl when a fast deep chain races slow shallow pages", async () => {
+    // "/" links to slow leaves /s0../s5 and to a fast chain /c1 -> /c2 -> ... Rendered in discovery
+    // order, the chain would fill maxRoutes before the leaves finish; the kept set must not depend on that.
+    const render: RenderFn = async (url) => {
+      const path = new URL(url).pathname;
+      const leaves = Array.from({ length: 6 }, (_, i) => a(`/s${i}`)).join("");
+      if (path === "/") return { html: page(leaves + a("/c1")), finalPath: path, inPage: {} };
+      if (path.startsWith("/s")) {
+        await new Promise((r) => setTimeout(r, 40));
+        return { html: page("leaf"), finalPath: path, inPage: {} };
+      }
+      const n = Number(path.slice(2));
+      return { html: page(a(`/c${n + 1}`)), finalPath: path, inPage: {} };
+    };
+    const runs = new Set<string>();
+    for (const concurrency of [1, 3, 8]) {
+      const r = await crawlRoutes(opts({ maxRoutes: 10, concurrency }), render);
+      expect(r.truncated).toBe(true);
+      runs.add(r.pages.map((p) => p.route).join(","));
+    }
+    expect([...runs]).toEqual(["/,/c1,/c2,/c3,/s0,/s1,/s2,/s3,/s4,/s5"]);
+  });
+
+  it("pipelines across levels: a chain renders while slow pages it links to are still rendering", async () => {
+    // 60 chain pages each link to the next and to one slow leaf page.
+    const render: RenderFn = async (url) => {
+      const path = new URL(url).pathname;
+      if (path.startsWith("/leaf")) {
+        await new Promise((r) => setTimeout(r, 30));
+        return { html: page("leaf"), finalPath: path, inPage: {} };
+      }
+      await new Promise((r) => setTimeout(r, 2));
+      const n = path === "/" ? 0 : Number(path.slice(6));
+      const next = n < 59 ? a(`/chain${n + 1}`) : "";
+      return { html: page(next + a(`/leaf${n}`)), finalPath: path, inPage: {} };
+    };
+    const time = async (concurrency: number) => {
+      const t = Date.now();
+      const r = await crawlRoutes(opts({ concurrency }), render);
+      expect(r.pages).toHaveLength(120);
+      return Date.now() - t;
+    };
+    const serial = await time(1);
+    const parallel = await time(8);
+    // Level by level, every level waits for its slow leaf: ~60 x 30 ms whatever the concurrency.
+    expect(parallel * 3).toBeLessThan(serial);
+  });
+
+  it("reports an interrupted renderer instead of failing every route", async () => {
+    let n = 0;
+    const calls: string[] = [];
+    const links = Array.from({ length: 20 }, (_, i) => a(`/p${i}`)).join("");
+    const render: RenderFn = async (url, renderer) => {
+      const path = new URL(url).pathname;
+      calls.push(path + " " + renderer);
+      if (path !== "/" && ++n >= 3) {
+        const e = new RenderError("chrome", "Target page, context or browser has been closed");
+        e.interrupted = true;
+        throw e;
+      }
+      return { html: page(path === "/" ? links : "x"), finalPath: path, inPage: {} };
+    };
+    const err = await crawlRoutes(opts({ fallback: "chrome", concurrency: 2 }), render).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RenderError);
+    expect(calls.filter((c) => c.endsWith("chrome"))).toEqual([]); // no fallback retry
+    expect(calls.length).toBeLessThan(10); // stopped scheduling
   });
 
   it("records a throwing rendererFor as a failure", async () => {

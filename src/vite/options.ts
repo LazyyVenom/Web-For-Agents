@@ -62,10 +62,26 @@ export interface PrerenderOptions {
   executablePath?: string;
   /** Per-route readiness timeout in milliseconds. Default 15000. */
   timeoutMs?: number;
-  /** Routes rendered at once. Default 4. */
+  /** Routes rendered at once. Default 8 with happy-dom only, 4 when any route renders in Chrome or Edge. */
   concurrency?: number;
   /** Stop discovering routes after this many (a warning is logged). Default 500. */
   maxRoutes?: number;
+  /**
+   * Origins ("https://cdn.example.com") pages may load from while prerendering. Every other request
+   * that does not go to the build's own files is blocked and fails like a network error. Default [].
+   */
+  allowOrigins?: string[];
+  /**
+   * How long, in ms, a page must be quiet (no DOM changes, no requests in flight) to count as rendered.
+   * Default: 50 for happy-dom once it reports every timer and request settled, else 200 (always 200 for Chrome).
+   */
+  idleMs?: number;
+  /**
+   * The happy-dom render process. `codeGeneration: true` lets page code build functions from
+   * strings with happy-dom's own (Node) Function; it is off because it is how page code escapes
+   * happy-dom. Prefer rendering such routes with Chrome. Default { codeGeneration: false }.
+   */
+  isolation?: { codeGeneration?: boolean };
 }
 
 export interface MarkdownOptions {
@@ -80,8 +96,10 @@ export interface LlmsOptions {
   description?: string;
 }
 
-export type ResolvedPrerender = Required<Omit<PrerenderOptions, "executablePath">> & {
+export type ResolvedPrerender = Required<Omit<PrerenderOptions, "executablePath" | "idleMs" | "isolation">> & {
   executablePath?: string;
+  idleMs?: number;
+  isolation: { codeGeneration: boolean };
 };
 
 export interface ResolvedOptions {
@@ -123,6 +141,42 @@ export function isExcluded(route: string, exclude: Array<string | RegExp>): bool
 
 const RENDERERS: readonly string[] = ["happy-dom", "chrome", "msedge"];
 
+/** Validates prerender.allowOrigins: http(s) origins only, normalized ("https://A.com/" -> "https://a.com"). */
+function resolveAllowOrigins(input: unknown, bad: (field: string, expected: string) => never): string[] {
+  if (input === undefined) return [];
+  const expected = 'an array of http(s) origins such as "https://cdn.example.com"';
+  if (!Array.isArray(input)) bad("allowOrigins", expected);
+  const out = new Set<string>();
+  for (const o of input as unknown[]) {
+    let u: URL | undefined;
+    try {
+      u = typeof o === "string" ? new URL(o) : undefined;
+    } catch {
+      u = undefined;
+    }
+    if (
+      !u ||
+      (u.protocol !== "http:" && u.protocol !== "https:") ||
+      u.username !== "" ||
+      u.password !== "" ||
+      u.pathname !== "/" ||
+      /[?#]/.test(o as string)
+    ) {
+      bad("allowOrigins", `${expected} (got ${JSON.stringify(o)})`);
+    }
+    out.add(u!.origin);
+  }
+  return [...out].sort();
+}
+
+function resolveIsolation(input: unknown, bad: (field: string, expected: string) => never): { codeGeneration: boolean } {
+  if (input === undefined) return { codeGeneration: false };
+  if (typeof input !== "object" || input === null) bad("isolation", "an object such as { codeGeneration: false }");
+  const cg = (input as { codeGeneration?: unknown }).codeGeneration;
+  if (cg !== undefined && typeof cg !== "boolean") bad("isolation.codeGeneration", "a boolean");
+  return { codeGeneration: cg === true };
+}
+
 function resolvePrerender(input: PrerenderOptions): ResolvedPrerender {
   const bad = (field: string, expected: string): never => {
     throw new Error(`${LOG_PREFIX} prerender.${field} must be ${expected}`);
@@ -149,16 +203,27 @@ function resolvePrerender(input: PrerenderOptions): ResolvedPrerender {
   if (input.executablePath !== undefined && typeof input.executablePath !== "string") {
     bad("executablePath", "a string");
   }
+  const allowOrigins = resolveAllowOrigins(input.allowOrigins, bad);
+  // A browser page costs far more memory than a happy-dom one. The fallback renders failures only.
+  const usesBrowser = renderer !== "happy-dom" || routeRenderers.some((rr) => rr.renderer !== "happy-dom");
   const out: ResolvedPrerender = {
     crawl: input.crawl ?? true,
     renderer,
     fallback,
     routeRenderers,
     timeoutMs: posInt("timeoutMs", input.timeoutMs, 15000),
-    concurrency: posInt("concurrency", input.concurrency, 4),
+    concurrency: posInt("concurrency", input.concurrency, usesBrowser ? 4 : 8),
     maxRoutes: posInt("maxRoutes", input.maxRoutes, 500),
+    allowOrigins,
+    isolation: resolveIsolation(input.isolation, bad),
   };
   if (input.executablePath !== undefined) out.executablePath = input.executablePath;
+  if (input.idleMs !== undefined) {
+    if (typeof input.idleMs !== "number" || !Number.isInteger(input.idleMs) || input.idleMs < 0) {
+      bad("idleMs", "a non-negative integer");
+    }
+    out.idleMs = input.idleMs;
+  }
   return out;
 }
 
@@ -209,6 +274,10 @@ function resolveOverlay(
 }
 
 export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
+  // The URL parser drops tabs and line breaks, but siteUrl is used verbatim in robots.txt and llms.txt.
+  if (typeof input?.siteUrl === "string" && /[\s\u0000-\u001f\u007f]/.test(input.siteUrl)) {
+    throw new Error(`${LOG_PREFIX} siteUrl must not contain whitespace or control characters`);
+  }
   let url: URL | undefined;
   try {
     url = new URL(input?.siteUrl);

@@ -48,3 +48,27 @@ describe("createFileStager", () => {
     expect(existsSync(path.join(outDir, "robots.txt"))).toBe(false);
   });
 });
+
+describe("flush is all-or-nothing", () => {
+  it("writes nothing when a name is too long", () => {
+    const { outDir, stager } = setup();
+    stager.stage("ok.txt", "x");
+    stager.stage("d/" + "n".repeat(256) + ".txt", "x");
+    expect(() => stager.flush()).toThrow(/longer than 255 bytes; nothing was written/);
+    expect(existsSync(path.join(outDir, "ok.txt"))).toBe(false);
+  });
+
+  it("restores overwritten files and removes new files and directories when a write fails", () => {
+    const { outDir, stager } = setup();
+    mkdirSync(outDir, { recursive: true });
+    writeFileSync(path.join(outDir, "index.html"), "shell");
+    writeFileSync(path.join(outDir, "blocker"), "a file");
+    stager.stage("index.html", "rendered");
+    stager.stage("a/b/c.html", "new");
+    stager.stage("blocker/x.json", "{}");
+    expect(() => stager.flush()).toThrow(/rolled back/);
+    expect(readFileSync(path.join(outDir, "index.html"), "utf8")).toBe("shell");
+    expect(existsSync(path.join(outDir, "a"))).toBe(false);
+    expect(readFileSync(path.join(outDir, "blocker"), "utf8")).toBe("a file");
+  });
+});

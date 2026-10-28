@@ -411,6 +411,62 @@ describe("createBuildPlugin", () => {
     expect(t.info.mock.calls.some((c) => /prerendered \d+ routes/.test(String(c[0])))).toBe(true);
   }, 30_000);
 
+  it("skips a crawled link with a too-long name and still writes the site", async () => {
+    const t = make({});
+    const long = "n".repeat(300);
+    writeFileSync(
+      path.join(t.outDir, "assets/extra.js"),
+      EXTRA + `if (p === "/") root.querySelector("main").insertAdjacentHTML("beforeend", '<a href="/${long}">L</a>');\n`,
+    );
+    await t.run();
+    expect(t.has("index.md")).toBe(true);
+    expect(t.read("index.html")).toContain(long); // the link stays in the page
+    expect(t.warnings().some((w) => w.includes("skipped 1 route(s) whose file names would be too long"))).toBe(true);
+  }, 30_000);
+
+  it("writes nothing when a generated file name is too long", async () => {
+    const t = make({ prerender: { crawl: false } }, [
+      { name: "long", finalize: (ctx) => ctx.emitFile("x".repeat(300) + ".json", "{}") },
+    ]);
+    await expect(t.run()).rejects.toThrow(/longer than 255 bytes; nothing was written/);
+    expect(t.read("index.html")).toBe(SHELL);
+    for (const f of ["200.html", "robots.txt", "sitemap.xml", "llms.txt", "index.md"]) expect(t.has(f), f).toBe(false);
+  }, 30_000);
+
+  it("rolls back what was written when a write fails", async () => {
+    const t = make({ routes: ["/fetch"] }, [
+      { name: "clash", finalize: (ctx) => ctx.emitFile("blocker/x.json", "{}") },
+    ]);
+    writeFileSync(path.join(t.outDir, "blocker"), "a file where a directory is needed");
+    await expect(t.run()).rejects.toThrow(/rolled back/);
+    expect(t.read("index.html")).toBe(SHELL);
+    for (const f of ["200.html", "fetch/index.html", "fetch.md", "robots.txt", "sitemap.xml", "llms.txt"]) {
+      expect(t.has(f), f).toBe(false);
+    }
+    expect(t.has("fetch")).toBe(false); // created directories are removed too
+    expect(t.read("blocker")).toBe("a file where a directory is needed");
+  }, 30_000);
+
+  it("does not warn about the permission model on a Node that has it", async () => {
+    const t = make({ prerender: { crawl: false } });
+    await t.run();
+    expect(t.warnings().some((m) => m.includes("has no permission model"))).toBe(
+      !process.allowedNodeEnvironmentFlags.has("--permission"),
+    );
+  }, 30_000);
+
+  it.skipIf(!process.allowedNodeEnvironmentFlags.has("--permission"))(
+    "logs a refused synchronous request once, with the routes it affected",
+    async () => {
+      const t = make({ routes: ["/syncxhr", "/syncxhr2"], prerender: { crawl: false } });
+      await t.run();
+      const lines = t.warnings().filter((w) => w.includes("synchronous XMLHttpRequest"));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("(2 routes: /syncxhr, /syncxhr2)");
+    },
+    30_000,
+  );
+
   it("warns when routes are truncated", async () => {
     const t = make({ prerender: { maxRoutes: 2, concurrency: 1 } });
     await t.run();

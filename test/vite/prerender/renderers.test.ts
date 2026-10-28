@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
@@ -9,6 +11,7 @@ import {
   RenderError,
   createChromeRenderer,
   createHappyDomRenderer,
+  createIsolatedHappyDomRenderer,
   createRendererPool,
   waitForReady,
   type Renderer,
@@ -21,6 +24,9 @@ import { formatFailures } from "../../../src/vite/prerender/crawl";
 import { startStaticServer, type StaticServer } from "../../../src/vite/prerender/server";
 import type { RendererName } from "../../../src/vite/options";
 import { probeChrome } from "../../helpers/chrome";
+import { canObserveModuleLoads, wrappersInstalledBeforeHappyDom } from "../../helpers/childOrder";
+import { CACHE_TOUCH_MS, childEntryFile, keepFresh } from "../../../src/vite/prerender/happyDomProcess";
+import { isSyncResources } from "../../../src/vite/prerender/renderChild";
 
 const dir = fileURLToPath(new URL("../../fixtures/static-app/", import.meta.url));
 const shell = prepareShell(readFileSync(dir + "index.html", "utf8"), { relativeBase: false });
@@ -30,8 +36,33 @@ const chromeAvailable = await probeChrome();
 let server: StaticServer;
 let hanging: Server;
 let hangingOrigin: string;
+/** A second origin a page may try to load from; records every request and upgrade it gets. */
+let other: Server;
+let otherOrigin: string;
+const otherHits: string[] = [];
 beforeAll(async () => {
   server = await startStaticServer({ dir, base: "/", shell });
+  other = createServer((req, res) => {
+    otherHits.push(req.url ?? "");
+    const body: Record<string, [string, string]> = {
+      "/evil.js": ["text/javascript", 'document.documentElement.setAttribute("data-evil", "ran");'],
+      "/evil.css": ["text/css", "h1 { color: red }"],
+      "/data.json": ["application/json", '{"text":"from the other origin"}'],
+      "/evil.png": ["image/svg+xml", '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>'],
+    };
+    const hit = body[req.url ?? ""];
+    res.writeHead(hit ? 200 : 404, {
+      "content-type": hit?.[0] ?? "text/plain",
+      "access-control-allow-origin": "*",
+    });
+    res.end(hit?.[1] ?? "");
+  });
+  other.on("upgrade", (req, socket) => {
+    otherHits.push("upgrade " + req.url);
+    socket.destroy();
+  });
+  await new Promise<void>((res) => other.listen(0, "127.0.0.1", res));
+  otherOrigin = `http://127.0.0.1:${(other.address() as AddressInfo).port}`;
   // accepts connections and never answers
   hanging = createServer(() => {});
   await new Promise<void>((res) => hanging.listen(0, "127.0.0.1", res));
@@ -39,6 +70,8 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await server?.close();
+  other?.closeAllConnections();
+  await new Promise((res) => other?.close(res));
   hanging?.closeAllConnections();
   await new Promise((res) => hanging?.close(res));
 });
@@ -50,7 +83,7 @@ afterAll(async () => {
 const RENDER_MS = 15_000;
 const SUITE_TIMEOUT_MS = 30_000;
 
-const suite = (name: RendererName, make: () => Promise<Renderer>) => {
+const suite = (name: RendererName, make: (opts?: { allowOrigins?: string[] }) => Promise<Renderer>) => {
   let r: Renderer;
   beforeAll(async () => {
     r = await make();
@@ -59,6 +92,55 @@ const suite = (name: RendererName, make: () => Promise<Renderer>) => {
     await r?.close();
   }, SUITE_TIMEOUT_MS);
   const url = (p: string) => server.origin + p;
+
+  describe("hermetic network", () => {
+    const from = () => "?from=" + encodeURIComponent(otherOrigin);
+
+    it("blocks a cross-origin script, stylesheet and image without failing the render", async () => {
+      otherHits.length = 0;
+      const res = await r.render(url("/xorigin" + from()), RENDER_MS);
+      expect(res.html).toContain("<h1>Cross</h1>");
+      expect(res.html).not.toContain("data-evil");
+      expect(otherHits).toEqual([]);
+    });
+
+    it("fails a blocked fetch like a network error", async () => {
+      otherHits.length = 0;
+      const res = await r.render(url("/xfetch" + from()), RENDER_MS);
+      expect(res.html).toContain("xfetch failed");
+      expect(otherHits).toEqual([]);
+    });
+
+    it("names the blocked URL and prerender.allowOrigins when the render depends on it", async () => {
+      const err = await r.render(url("/xneeds" + from()), RENDER_MS).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(RenderError);
+      const msg = (err as Error).message;
+      expect(msg).toContain(`requests to other origins were blocked: ${otherOrigin}/data.json`);
+      expect(msg).toContain(`prerender: { allowOrigins: ["${otherOrigin}"] }`);
+    });
+
+    it("blocks WebSockets to other origins", async () => {
+      otherHits.length = 0;
+      const res = await r.render(url("/xsocket" + from()), RENDER_MS);
+      if (name === "happy-dom") expect(res.html).toContain("socket refused SecurityError");
+      await new Promise((res) => setTimeout(res, 100));
+      expect(otherHits).toEqual([]);
+    });
+
+    it("loads from an allowed origin", async () => {
+      const allowed = await make({ allowOrigins: [otherOrigin] });
+      try {
+        otherHits.length = 0;
+        const res = await allowed.render(url("/xorigin" + from()), RENDER_MS);
+        expect(res.html).toContain('data-evil="ran"');
+        expect(otherHits).toContain("/evil.js");
+        const fetched = await allowed.render(url("/xfetch" + from()), RENDER_MS);
+        expect(fetched.html).toContain("xfetch ok from the other origin");
+      } finally {
+        await allowed.close();
+      }
+    });
+  });
 
   it("renders fetched data", async () => {
     const res = await r.render(url("/fetch"), RENDER_MS);
@@ -211,11 +293,285 @@ const suite = (name: RendererName, make: () => Promise<Renderer>) => {
 };
 
 describe("happy-dom renderer", { timeout: SUITE_TIMEOUT_MS }, () => {
-  suite("happy-dom", async () => createHappyDomRenderer());
+  suite("happy-dom", async (opts) => createHappyDomRenderer(opts));
+});
+
+describe("happy-dom readiness window", { timeout: SUITE_TIMEOUT_MS }, () => {
+  const timed = async (r: Renderer, path: string) => {
+    try {
+      const t = Date.now();
+      await r.render(server.origin + path, RENDER_MS);
+      return Date.now() - t;
+    } finally {
+      await r.close();
+    }
+  };
+
+  it("honours prerender.idleMs", async () => {
+    expect(await timed(createHappyDomRenderer({ idleMs: 700 }), "/fetch")).toBeGreaterThanOrEqual(700);
+  });
+
+  it("waits the short window once the page settled", async () => {
+    const settled = await timed(createHappyDomRenderer(), "/fetch");
+    expect(settled).toBeLessThan(200);
+    // a running interval keeps happy-dom busy until its 2s cap
+    expect(await timed(createHappyDomRenderer(), "/interval")).toBeGreaterThanOrEqual(1900);
+  });
+});
+
+describe("isolated happy-dom renderer (child process)", { timeout: SUITE_TIMEOUT_MS }, () => {
+  suite("happy-dom", async (opts) => createIsolatedHappyDomRenderer(opts));
+});
+
+describe.skipIf(!canObserveModuleLoads)("render process load order", { timeout: SUITE_TIMEOUT_MS }, () => {
+  it("installs the network wrappers before happy-dom is evaluated (dev bundle)", async () => {
+    expect(await wrappersInstalledBeforeHappyDom(await childEntryFile())).toBe(true);
+  });
+});
+
+describe("happy-dom render process isolation", { timeout: SUITE_TIMEOUT_MS }, () => {
+  const SECRET = "wfa-test-secret-value";
+  let tmp: string;
+  beforeAll(() => {
+    process.env.WFA_TEST_SECRET = SECRET;
+    tmp = mkdtempSync(join(tmpdir(), "wfa-escape-"));
+  });
+  afterAll(() => {
+    delete process.env.WFA_TEST_SECRET;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const escape = async (r: Renderer, target: string) => {
+    try {
+      const res = await r.render(server.origin + "/escape?write=" + encodeURIComponent(target), RENDER_MS);
+      const json = /<pre id="escape">(.*?)<\/pre>/.exec(res.html)?.[1];
+      return JSON.parse(json!.replace(/&quot;/g, '"')) as Record<string, unknown>;
+    } finally {
+      await r.close();
+    }
+  };
+
+  it("cannot build code from strings, so the constructor escape fails", async () => {
+    const target = join(tmp, "a.txt");
+    const out = await escape(createIsolatedHappyDomRenderer(), target);
+    expect(out).toEqual({ escaped: false, error: "EvalError" });
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it("an escaped script sees no secrets and cannot change the build's environment", async () => {
+    const target = join(tmp, "b.txt");
+    const out = await escape(createIsolatedHappyDomRenderer({}, { codeGeneration: true }), target);
+    expect(out.escaped).toBe(true);
+    expect(out.secret).toBe(null);
+    const kept = ["PATH", "HOME", "TMPDIR", "TMP", "TEMP", "NODE_ENV", "WFA_RENDER_CHILD", "WFA_RENDER_OPTIONS", "SystemRoot", "SYSTEMROOT", "windir", "USERPROFILE"];
+    // macOS adds __CF_USER_TEXT_ENCODING to every process.
+    expect((out.keys as string[]).filter((k) => !kept.includes(k) && !k.startsWith("__CF_"))).toEqual([]);
+    expect(process.env.WFA_TEST_SECRET).toBe(SECRET);
+    if (process.allowedNodeEnvironmentFlags.has("--permission")) {
+      // the permission model: no writes outside what the child was granted (nothing)
+      expect(out.wrote).toBe("ERR_ACCESS_DENIED");
+      expect(existsSync(target)).toBe(false);
+    }
+  });
+
+  it("an escaped script cannot reach the network beyond the prerender server", async () => {
+    otherHits.length = 0;
+    const r = createIsolatedHappyDomRenderer({}, { codeGeneration: true });
+    try {
+      const res = await r.render(server.origin + "/netescape?other=" + encodeURIComponent(otherOrigin + "/"), RENDER_MS);
+      const json = /<pre id="escape">(.*?)<\/pre>/.exec(res.html)?.[1];
+      const out = JSON.parse(json!.replace(/&quot;/g, '"')) as { restoreAttempt: string; results: string[] };
+      expect(out.restoreAttempt).toBe("TypeError"); // the wrappers cannot be redefined
+      // net.connect, new Socket().connect, http.get, tls.connect, dns.lookup, dns.promises.lookup, fetch, UDP
+      expect(out.results.slice(0, 8)).toEqual(Array(8).fill("ERR_WFA_NETWORK_BLOCKED"));
+      // TLS over a socket to the prerender server is allowed (it fails later, in the handshake) ...
+      expect(out.results[8]).not.toBe("ERR_WFA_NETWORK_BLOCKED");
+      expect(out.results[8]).not.toBe("timeout");
+      // ... TLS over an unchecked socket is not
+      expect(out.results[9]).toBe("ERR_WFA_NETWORK_BLOCKED");
+      await new Promise((res) => setTimeout(res, 100));
+      expect(otherHits).toEqual([]);
+    } finally {
+      await r.close();
+    }
+  });
+
+  it("explains a page that needs code generation, and prerender.isolation.codeGeneration allows it", async () => {
+    const off = createIsolatedHappyDomRenderer();
+    try {
+      const err = (await off.render(server.origin + "/codegen", RENDER_MS).catch((e: unknown) => e)) as RenderError;
+      expect(err).toBeInstanceOf(RenderError);
+      expect(err.message).toContain("Code generation from strings disallowed");
+      expect(err.message).toContain("build a function from a string with Node's own Function");
+      expect(err.message).toContain("The page's own eval and new Function are not affected");
+      expect(err.message).toContain("prerender: { isolation: { codeGeneration: true } }");
+      expect(err.message).toContain("weakens the sandbox");
+      expect(err.message).toContain("Chrome");
+    } finally {
+      await off.close();
+    }
+    const pool = createRendererPool({ codeGeneration: true });
+    try {
+      const res = await (await pool.get("happy-dom")).render(server.origin + "/codegen", RENDER_MS);
+      expect(res.html).toContain("codegen 7");
+    } finally {
+      await pool.closeAll();
+    }
+  });
+
+  it("explains a classic synchronous script the permission model cannot load", async () => {
+    const r = createIsolatedHappyDomRenderer();
+    try {
+      const res = await r.render(server.origin + "/syncscript", RENDER_MS).catch((e: unknown) => e);
+      if (process.allowedNodeEnvironmentFlags.has("--permission")) {
+        expect(res).toBeInstanceOf(RenderError);
+        const msg = (res as Error).message;
+        expect(msg).toContain(`the classic script ${server.origin}/classic.js loads synchronously`);
+        expect(msg).toContain('add type="module" or defer to it');
+        expect(msg).toContain("Chrome");
+      } else {
+        // without the permission model the child may spawn, so the load works
+        expect((res as { html: string }).html).toContain("<h1>Classic</h1>");
+      }
+    } finally {
+      await r.close();
+    }
+  });
+
+  it("the in-process renderer is what the escape would reach without isolation", async () => {
+    // documents the threat: in-process, the escape reaches the build's own process
+    const target = join(tmp, "c.txt");
+    const out = await escape(createHappyDomRenderer(), target);
+    expect(out.escaped).toBe(true);
+    expect(out.secret).toBe(SECRET);
+    process.env.WFA_TEST_SECRET = SECRET;
+  });
+
+  it("marks renders cut off by Ctrl-C (SIGINT to the render process) as interrupted", async () => {
+    const r = createIsolatedHappyDomRenderer();
+    try {
+      await r.render(server.origin + "/fetch", RENDER_MS);
+      const pending = r.render(server.origin + "/held", RENDER_MS);
+      r.childProcess()!.kill("SIGINT");
+      const err = (await pending.catch((e: unknown) => e)) as RenderError;
+      expect(err).toBeInstanceOf(RenderError);
+      expect(err.interrupted).toBe(true);
+    } finally {
+      await r.close();
+    }
+  });
+
+  it("accepts only well-formed resources messages", async () => {
+    expect(isSyncResources({})).toBe(true);
+    expect(isSyncResources({ "http://x/a.js": { body: "1", contentType: "text/javascript" } })).toBe(true);
+    for (const bad of [null, "x", [], new Map(), { a: { body: 1, contentType: "t" } }, { a: { body: "1" } }, { a: null }]) {
+      expect(isSyncResources(bad), JSON.stringify(bad)).toBe(false);
+    }
+    // a malformed message is ignored: the good map sent before it still serves the page's sync script
+    const r = createIsolatedHappyDomRenderer();
+    try {
+      await r.render(server.origin + "/fetch", RENDER_MS);
+      const cp = r.childProcess()!;
+      const good = {
+        [server.origin + "/classic.js"]: {
+          body: 'document.getElementById("root").innerHTML = "<main><h1>From the good map</h1></main>";',
+          contentType: "text/javascript",
+        },
+      };
+      cp.send({ type: "resources", syncResources: good });
+      cp.send({ type: "resources", syncResources: { [server.origin + "/classic.js"]: { body: 1 } } });
+      const res = await r.render(server.origin + "/syncscript", RENDER_MS);
+      expect(res.html).toContain("<h1>From the good map</h1>");
+    } finally {
+      await r.close();
+    }
+  });
+
+  it("fails renders cleanly when the render process dies right after starting", async () => {
+    const uncaught = vi.fn();
+    process.on("uncaughtException", uncaught);
+    const r = createIsolatedHappyDomRenderer(
+      { syncResources: { [server.origin + "/x.js"]: { body: "1", contentType: "text/javascript" } } },
+      { extraEnv: { WFA_RENDER_TEST_EXIT_AFTER_READY: "1" } },
+    );
+    try {
+      for (let i = 0; i < 3; i++) {
+        const err = await r.render(server.origin + "/fetch", RENDER_MS).catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(RenderError);
+      }
+      await new Promise((res) => setTimeout(res, 200));
+      expect(uncaught).not.toHaveBeenCalled();
+    } finally {
+      process.off("uncaughtException", uncaught);
+      await r.close();
+    }
+  });
+
+  it("keeps the dev bundle's cache entry fresh while the renderer lives, and stops on close", async () => {
+    // The real bundle directory is shared with other test files running in parallel, which touch it
+    // too, so the refresh is observed through an injected keepFresh instead of the directory's mtime.
+    const calls: Array<string | undefined> = [];
+    let stopped = 0;
+    const r = createIsolatedHappyDomRenderer({}, {
+      keepFresh: (dir) => {
+        calls.push(dir);
+        return () => stopped++;
+      },
+    });
+    try {
+      await r.render(server.origin + "/fetch", RENDER_MS);
+      await r.render(server.origin + "/fetch", RENDER_MS);
+    } finally {
+      await r.close();
+    }
+    const entry = await childEntryFile();
+    expect(calls).toEqual([(await import("node:path")).dirname(entry)]); // once, for the dev bundle
+    expect(stopped).toBe(1);
+  });
+
+  it("keepFresh touches the directory every CACHE_TOUCH_MS until stopped", async () => {
+    const { mkdtempSync, rmSync, statSync, utimesSync } = await import("node:fs");
+    const dir = mkdtempSync(join(tmpdir(), "wfa-fresh-"));
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      const hourAgo = new Date(Date.now() - 3_600_000);
+      utimesSync(dir, hourAgo, hourAgo);
+      const ageMs = () => Date.now() - statSync(dir).mtimeMs;
+      const stop = keepFresh(dir);
+      expect(ageMs()).toBeGreaterThan(3_000_000); // nothing yet
+      vi.advanceTimersByTime(CACHE_TOUCH_MS);
+      expect(ageMs()).toBeLessThan(5_000); // touched
+      stop();
+      utimesSync(dir, hourAgo, hourAgo);
+      vi.advanceTimersByTime(CACHE_TOUCH_MS * 3);
+      expect(ageMs()).toBeGreaterThan(3_000_000); // no touches after stop
+      expect(keepFresh(undefined)).toBeTypeOf("function"); // package build: no-op
+    } finally {
+      vi.useRealTimers();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports a crashed render process and recovers", async () => {
+    const r = createIsolatedHappyDomRenderer();
+    try {
+      await r.render(server.origin + "/fetch", RENDER_MS);
+      const pending = r.render(server.origin + "/held", RENDER_MS);
+      r.childProcess()!.kill("SIGKILL");
+      const err = await pending.catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(RenderError);
+      expect((err as Error).message).toContain("killed by SIGKILL");
+      expect((err as Error).message).toContain("lower prerender.concurrency");
+      const again = await r.render(server.origin + "/fetch", RENDER_MS);
+      expect(again.html).toContain("Fetched data text");
+    } finally {
+      await r.close();
+    }
+  });
 });
 
 describe.skipIf(!chromeAvailable)("chrome renderer", { timeout: SUITE_TIMEOUT_MS }, () => {
-  suite("chrome", () => createChromeRenderer("chrome"));
+  suite("chrome", (opts) => createChromeRenderer("chrome", opts));
 });
 
 describe("shared render helpers", () => {
@@ -276,7 +632,7 @@ describe("chrome page lifecycle", () => {
     const r = await createChromeRenderer(
       "chrome",
       {},
-      fakeChrome({ newPage: () => later(400, async () => ({ close })) }),
+      fakeChrome({ newPage: () => later(400, async () => ({ close, route: async () => {} })) }),
     );
     const err = await r.render("http://127.0.0.1/", 300).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(RenderError);
@@ -305,6 +661,7 @@ describe("chrome page lifecycle", () => {
   it("does not wait forever for a page that never closes", async () => {
     const page = {
       on: () => {},
+      route: async () => {},
       goto: async () => null,
       evaluate: async (expr: string) =>
         expr === SERIALIZE_EXPR ? "<!DOCTYPE html>\n<html></html>" : { ready: true, errors: [], path: "/" },
@@ -316,6 +673,46 @@ describe("chrome page lifecycle", () => {
     const res = await r.render("http://127.0.0.1/", 1000);
     expect(res.html).toBe("<!DOCTYPE html>\n<html></html>");
     expect(Date.now() - t).toBeLessThan(1000);
+  });
+});
+
+describe("chrome interruptions and crashes", () => {
+  const fakeBrowser = (page: Record<string, unknown>) => {
+    const handlers: Array<() => void> = [];
+    const load = () =>
+      Promise.resolve({
+        chromium: {
+          launch: () =>
+            Promise.resolve({
+              close: async () => {},
+              on: (ev: string, h: () => void) => ev === "disconnected" && handlers.push(h),
+              newPage: async () => ({ on: () => {}, route: async () => {}, close: async () => {}, url: () => "http://127.0.0.1/", ...page }),
+            }),
+        },
+      } as unknown as typeof import("playwright-core"));
+    return { load, disconnect: () => handlers.forEach((h) => h()) };
+  };
+
+  it("marks renders failing because the browser went away (Ctrl-C) as interrupted", async () => {
+    let fail!: (e: Error) => void;
+    const b = fakeBrowser({ goto: () => new Promise((_, rej) => (fail = rej)) });
+    const r = await createChromeRenderer("chrome", {}, b.load);
+    const pending = r.render("http://127.0.0.1/", 5000).catch((e: unknown) => e);
+    await vi.waitFor(() => expect(fail).toBeTypeOf("function"));
+    b.disconnect();
+    fail(new Error("Target page, context or browser has been closed"));
+    const err = (await pending) as RenderError;
+    expect(err).toBeInstanceOf(RenderError);
+    expect(err.interrupted).toBe(true);
+    expect(err.message).toContain("the Chrome browser was closed");
+  });
+
+  it("suggests lowering concurrency when a page crashes", async () => {
+    const b = fakeBrowser({ goto: () => Promise.reject(new Error("page.goto: Target crashed")) });
+    const r = await createChromeRenderer("chrome", {}, b.load);
+    const err = (await r.render("http://127.0.0.1/", 5000).catch((e: unknown) => e)) as RenderError;
+    expect(err.interrupted).toBeUndefined();
+    expect(err.message).toContain("possibly out of memory: lower prerender.concurrency");
   });
 });
 

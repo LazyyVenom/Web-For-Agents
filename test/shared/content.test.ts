@@ -58,6 +58,28 @@ describe("selectContentRegion", () => {
   });
 });
 
+describe("selectContentRegion inPlace", () => {
+  const cases = [
+    `<main><p>a</p><script>x</script><nav>n</nav></main><footer>f</footer>`,
+    `<div data-wfa-content>A<div data-wfa-content>N</div></div><p>out</p><div data-wfa-content>B</div>`,
+    `<header>h</header><p>body <b>text</b></p><aside>s</aside><div hidden>x</div>`,
+  ];
+  it.each(cases)("selects the same region as the cloning mode: %s", (body) => {
+    setBody(body);
+    const cloned = selectContentRegion(document);
+    const moved = selectContentRegion(document, { inPlace: true });
+    expect(moved.source).toBe(cloned.source);
+    expect(moved.element.innerHTML).toBe(cloned.element.innerHTML);
+  });
+
+  it("moves the region out of the document instead of cloning", () => {
+    setBody(`<main><p>a</p></main><p>rest</p>`);
+    const { element } = selectContentRegion(document, { inPlace: true });
+    expect(element.querySelector("main")).not.toBeNull();
+    expect(document.querySelector("main")).toBeNull();
+  });
+});
+
 describe("DEFAULT_CONTENT_SELECTOR", () => {
   it("is main", () => {
     expect(DEFAULT_CONTENT_SELECTOR).toBe("main");

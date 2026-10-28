@@ -17,6 +17,15 @@ describe("resolveOptions", () => {
     );
   });
 
+  it("rejects whitespace and control characters in siteUrl (they would inject robots.txt and llms.txt lines)", () => {
+    for (const siteUrl of ["https://a.com\r\nDisallow: /", "https://a.com/\nx", "https://a.com\t", "https://a.com/a b", "https://a.com/\u0000"]) {
+      expect(() => resolveOptions({ siteUrl, robots }), JSON.stringify(siteUrl)).toThrow(
+        "[web-for-agents] siteUrl must not contain whitespace or control characters",
+      );
+    }
+    expect(resolveOptions({ siteUrl: "https://a.com/x%20y", robots }).siteUrl).toBe("https://a.com/x%20y");
+  });
+
   it("requires explicit AI policy", () => {
     const msg = "robots.ai.training and robots.ai.search are required";
     expect(() => resolveOptions({ siteUrl: "https://a.com" } as never)).toThrow(msg);
@@ -114,6 +123,51 @@ describe("normalizeRoute", () => {
 describe("prerender and output options", () => {
   const base = { siteUrl: "https://a.com", robots } as const;
 
+  it("defaults concurrency to 8 for happy-dom and 4 when a browser renders", () => {
+    const c = (prerender: object) => (resolveOptions({ ...base, prerender }).prerender as { concurrency: number }).concurrency;
+    expect(c({})).toBe(8);
+    expect(c({ fallback: "chrome" })).toBe(8);
+    expect(c({ renderer: "chrome" })).toBe(4);
+    expect(c({ renderer: "msedge" })).toBe(4);
+    expect(c({ routeRenderers: [{ match: "/app/*", renderer: "chrome" }] })).toBe(4);
+    expect(c({ renderer: "chrome", concurrency: 2 })).toBe(2);
+  });
+
+  it("validates prerender.isolation", () => {
+    const iso = (isolation: unknown) => (resolveOptions({ ...base, prerender: { isolation } as never }).prerender as { isolation: unknown }).isolation;
+    expect(iso(undefined)).toEqual({ codeGeneration: false });
+    expect(iso({})).toEqual({ codeGeneration: false });
+    expect(iso({ codeGeneration: true })).toEqual({ codeGeneration: true });
+    expect(() => iso(true)).toThrow("prerender.isolation must be an object");
+    expect(() => iso({ codeGeneration: "yes" })).toThrow("prerender.isolation.codeGeneration must be a boolean");
+  });
+
+  it("validates prerender.idleMs", () => {
+    expect(resolveOptions({ ...base, prerender: { idleMs: 0 } }).prerender).toMatchObject({ idleMs: 0 });
+    expect(resolveOptions({ ...base, prerender: {} }).prerender).not.toHaveProperty("idleMs");
+    for (const idleMs of [-1, 1.5, "50"]) {
+      expect(() => resolveOptions({ ...base, prerender: { idleMs: idleMs as number } })).toThrow(
+        "prerender.idleMs must be a non-negative integer",
+      );
+    }
+  });
+
+  it("validates and normalizes prerender.allowOrigins", () => {
+    const r = resolveOptions({
+      ...base,
+      prerender: { allowOrigins: ["https://CDN.example.com/", "http://127.0.0.1:8080", "https://cdn.example.com:443"] },
+    });
+    expect(r.prerender && r.prerender.allowOrigins).toEqual(["http://127.0.0.1:8080", "https://cdn.example.com"]);
+    for (const bad of ["cdn.example.com", "ftp://x.com", "https://x.com/path", "https://x.com/?q", "https://x.com#h", "https://u:p@x.com", "", 1]) {
+      expect(() => resolveOptions({ ...base, prerender: { allowOrigins: [bad as string] } }), String(bad)).toThrow(
+        /prerender\.allowOrigins must be an array of http\(s\) origins/,
+      );
+    }
+    expect(() => resolveOptions({ ...base, prerender: { allowOrigins: "https://x.com" as never } })).toThrow(
+      /prerender\.allowOrigins/,
+    );
+  });
+
   it("prerender defaults", () => {
     const r = resolveOptions({ ...base, robots: { ai: { training: "allow", search: "allow" } } });
     expect(r.prerender).toEqual({
@@ -122,8 +176,10 @@ describe("prerender and output options", () => {
       fallback: false,
       routeRenderers: [],
       timeoutMs: 15000,
-      concurrency: 4,
+      concurrency: 8,
       maxRoutes: 500,
+      allowOrigins: [],
+      isolation: { codeGeneration: false },
     });
     expect(r.markdown).toEqual({ contentSelector: "main" });
     expect(r.llms).toEqual({});

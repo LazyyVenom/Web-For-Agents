@@ -68,6 +68,38 @@ export function isSafeRoute(route: string): boolean {
   return true;
 }
 
+/** Longest file name most file systems accept, in UTF-8 bytes. */
+export const MAX_NAME_BYTES = 255;
+/**
+ * Longest decoded route segment written to disk, in UTF-8 bytes: a file name, and the last
+ * segment also gets a ".md" suffix.
+ */
+export const MAX_SEGMENT_BYTES = MAX_NAME_BYTES - ".md".length;
+/** Longest decoded route, in UTF-8 bytes, so dist paths stay well inside OS path limits. */
+export const MAX_ROUTE_BYTES = 1024;
+
+/** True when a route's file names would be too long to write (see MAX_SEGMENT_BYTES, MAX_ROUTE_BYTES). */
+export function isRouteTooLong(route: string): boolean {
+  let segs: string[];
+  try {
+    segs = decodeSegments(route);
+  } catch {
+    return false; // not our concern: isSafeRoute rejects undecodable routes
+  }
+  let total = 0;
+  for (const s of segs) {
+    const n = Buffer.byteLength(s, "utf8");
+    if (n > MAX_SEGMENT_BYTES) return true;
+    total += n + 1;
+  }
+  return total > MAX_ROUTE_BYTES;
+}
+
+/** A route shortened for log messages. */
+export function shortRoute(route: string, max = 80): string {
+  return route.length <= max ? route : route.slice(0, max - 1) + "\u2026";
+}
+
 export function linkToRoute(href: string, origin: string, base: string): string | null {
   let u: URL;
   try {

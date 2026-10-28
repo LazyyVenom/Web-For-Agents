@@ -7,9 +7,10 @@ import { errorMessage, LOG_PREFIX, withPrefix } from "../shared/errors";
 import { createFileStager, type FileStager } from "./fileStager";
 import { buildLlmsFullTxt, buildLlmsTxt, type LlmsPage, type LlmsSection } from "./llms";
 import type { ResolvedOptions } from "./options";
-import { prerenderSite, type CrawlResult } from "./prerender/index";
+import { NO_PERMISSION_MODEL_WARNING, hasPermissionModel } from "./prerender/happyDomProcess";
+import { mayUseHappyDom, prerenderSite, type CrawlResult } from "./prerender/index";
 import type { ExtensionContext, ExtensionPage, PrerenderExtension } from "./prerender/extensions";
-import { publicMdUrl, publicUrl, routeHtmlFile, routeMdFile } from "./prerender/paths";
+import { MAX_ROUTE_BYTES, MAX_SEGMENT_BYTES, publicMdUrl, publicUrl, routeHtmlFile, routeMdFile, shortRoute } from "./prerender/paths";
 import { buildRobots } from "./robots";
 import { buildSitemap } from "./sitemap";
 
@@ -52,6 +53,7 @@ export function createBuildPlugin(resolved: ResolvedOptions, extensions: Prerend
   let ssr = false;
   let wrote = false;
   let loggedWarnings = false;
+  let warnedPermission = false;
 
   interface Rendered {
     result: CrawlResult;
@@ -66,6 +68,12 @@ export function createBuildPlugin(resolved: ResolvedOptions, extensions: Prerend
     if (!fs.existsSync(shellFile)) throw new Error(`${LOG_PREFIX} ${shellFile} not found`);
     const shell = fs.readFileSync(shellFile, "utf8");
     stager.stage(SPA_FALLBACK_FILE, shell);
+
+    const pr = resolved.prerender;
+    if (pr !== false && mayUseHappyDom(pr) && !hasPermissionModel() && !warnedPermission) {
+      warnedPermission = true;
+      logger.warn(NO_PERMISSION_MODEL_WARNING);
+    }
 
     let result: CrawlResult;
     try {
@@ -174,6 +182,26 @@ export function createBuildPlugin(resolved: ResolvedOptions, extensions: Prerend
     if (result.truncated) {
       logger.warn(
         `${LOG_PREFIX} stopped after ${pr.maxRoutes} routes (prerender.maxRoutes); raise it to include more routes`,
+      );
+    }
+    for (const w of result.warnings ?? []) logger.warn(`${LOG_PREFIX} ${w}`);
+    // One line per distinct problem (a refused URL), with the routes it affected.
+    const byMessage = new Map<string, string[]>();
+    for (const { route, message } of result.renderWarnings) {
+      const routes = byMessage.get(message) ?? [];
+      routes.push(route);
+      byMessage.set(message, routes);
+    }
+    for (const [message, routes] of byMessage) {
+      const shown = routes.slice(0, 3).join(", ") + (routes.length > 3 ? ", ..." : "");
+      logger.warn(`${LOG_PREFIX} ${message} (${routes.length} route${routes.length === 1 ? "" : "s"}: ${shown})`);
+    }
+    if (result.tooLongRoutes.length > 0) {
+      logger.warn(
+        `${LOG_PREFIX} skipped ${result.tooLongRoutes.length} route(s) whose file names would be too long ` +
+          `(a path segment over ${MAX_SEGMENT_BYTES} bytes or a path over ${MAX_ROUTE_BYTES} bytes): ` +
+          result.tooLongRoutes.slice(0, 5).map((r) => shortRoute(r)).join(", ") +
+          (result.tooLongRoutes.length > 5 ? ", ..." : ""),
       );
     }
     if (markdown && result.bodyFallbackRoutes.length > 0) {

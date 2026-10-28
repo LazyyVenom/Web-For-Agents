@@ -5,7 +5,13 @@ export const PROBE_ATTR = "data-wfa-probe";
 export const TEMP_BASE_ATTR = "data-wfa-temp-base";
 /** Marks a script whose "./x" src prepareShell changed to "/x"; finalizeHtml restores it. */
 export const REL_SRC_ATTR = "data-wfa-rel-src";
+/** Quiet time (no DOM changes, no requests) a page needs before it counts as ready. Chrome's default. */
 export const IDLE_MS = 200;
+/**
+ * happy-dom's quiet time once happy-dom reports every timer and request settled (waitUntilComplete
+ * resolved before its cap). The settled page leaves little to wait for, so the window is short.
+ */
+export const SETTLED_IDLE_MS = 50;
 /** Window property the probe stores its state in. */
 export const PROBE_GLOBAL = "__WFA_PROBE__";
 
@@ -63,13 +69,18 @@ export interface ReadyState {
   path: string;
 }
 
-/** JS expression evaluating to a ReadyState. */
-export const READY_CHECK = `(function () {
+/** JS expression evaluating to a ReadyState; ready once the page has been quiet for `idleMs`. */
+export function readyCheck(idleMs: number = IDLE_MS): string {
+  return `(function () {
   var p = window.${PROBE_GLOBAL};
   if (!p) return { ready: false, errors: [], path: location.pathname };
-  var ready = document.readyState === "complete" && p.inflight === 0 && Date.now() - p.last >= ${IDLE_MS} && window.${READY_GLOBAL} !== false;
+  var ready = document.readyState === "complete" && p.inflight === 0 && Date.now() - p.last >= ${idleMs} && window.${READY_GLOBAL} !== false;
   return { ready: ready, errors: p.errors.slice(), path: location.pathname };
 })()`;
+}
+
+/** readyCheck with the default IDLE_MS. */
+export const READY_CHECK = readyCheck(IDLE_MS);
 
 export function prepareShell(html: string, opts: { relativeBase: boolean }): string {
   const m = /<head(?=[\s>])[^>]*>/i.exec(html);
