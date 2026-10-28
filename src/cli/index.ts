@@ -38,6 +38,7 @@ export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<num
     timeoutMs: args.timeoutMs,
     ...(args.agentMap === undefined ? {} : { agentMapPath: args.agentMap }),
     ...(args.blockPrivateRedirects ? { blockPrivateRedirects: true } : {}),
+    ...(args.siteUrl === undefined ? {} : { siteUrl: args.siteUrl }),
   });
   // --json keeps page data raw; safeJson only writes terminal-active characters as \u escapes.
   io.stdout(args.json ? safeJson(report, 2) + "\n" : formatText(report));

@@ -31,6 +31,13 @@ export interface AuditOptions {
    * against accidental internal fetches, not a sandbox.
    */
   blockPrivateRedirects?: boolean;
+  /**
+   * The origin the audited site was built for (its `siteUrl`, typically production). URLs on exactly
+   * this origin (canonical, markdown alternate, robots.txt `Sitemap:` line, sitemap `<loc>` entries)
+   * are treated as the audited page's own origin and fetched there, with the same path. URLs on any
+   * other origin are never mapped. Must be an http(s) origin without credentials, path, query or hash.
+   */
+  siteUrl?: string;
 }
 
 /**
@@ -52,6 +59,29 @@ export interface AuditReport {
   error?: string;
   /** Redirects that crossed from a public host to a private address. Absent when there were none. */
   warnings?: string[];
+  /** Informational lines, such as the `siteUrl` mapping in effect. Absent when there are none. */
+  notes?: string[];
+}
+
+/** Origin of `siteUrl` for `AuditOptions.siteUrl`; throws an Error with a user-facing message if invalid. */
+export function parseSiteOrigin(siteUrl: string): string {
+  const input = siteUrl.trim();
+  let u: URL;
+  try {
+    u = new URL(input);
+  } catch {
+    throw new Error(`invalid site URL "${siteUrl}": expected an absolute http(s) URL`);
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") {
+    throw new Error(`invalid site URL "${siteUrl}": only http and https are supported`);
+  }
+  if (u.username !== "" || u.password !== "") {
+    throw new Error(`invalid site URL "${siteUrl}": must not contain credentials`);
+  }
+  if ((u.pathname !== "/" && u.pathname !== "") || u.search !== "" || u.hash !== "") {
+    throw new Error(`invalid site URL "${siteUrl}": give the origin only (for example https://example.com)`);
+  }
+  return u.origin;
 }
 
 /** At most this many directories (root included) are probed for llms.txt and the agent map. */
@@ -85,6 +115,14 @@ async function probe(get: (u: string) => Promise<FetchResult>, urls: string[]): 
   return { result: found ?? results[0]!, tried: urls };
 }
 
+/** Rewrites each `<loc>` URL of sitemap XML through `map` (entities decoded, re-escaped when changed). */
+function mapSitemapLocs(body: string, map: (u: string) => string): string {
+  return body.replace(/<loc>(\s*)([^<]*?)(\s*)<\/loc>/gi, (all, pre: string, loc: string, post: string) => {
+    const mapped = map(loc.replace(/&amp;/g, "&"));
+    return mapped === loc.replace(/&amp;/g, "&") ? all : `<loc>${pre}${mapped.replace(/&/g, "&amp;")}${post}</loc>`;
+  });
+}
+
 const sameOrigin = (a: string, b: string): boolean => new URL(a).origin === new URL(b).origin;
 
 /** Audits `url` for AI-agent readiness. Fatal problems are reported in `error`, not thrown. */
@@ -107,6 +145,15 @@ export async function auditWithHooks(url: string, opts: AuditOptions = {}, hooks
     return p;
   };
   const report: AuditReport = { url, finalUrl: url, redirected: false, score: 0, maxScore: 100, checks: [] };
+  let siteOrigin: string | undefined;
+  if (opts.siteUrl !== undefined) {
+    try {
+      siteOrigin = parseSiteOrigin(opts.siteUrl);
+    } catch (e) {
+      report.error = errorMessage(e);
+      return report;
+    }
+  }
   const warnings = new Set<string>();
   const get = async (u: string, accept?: string): Promise<FetchResult> => {
     const r = await fetchText(u, {
@@ -140,13 +187,32 @@ export async function auditWithHooks(url: string, opts: AuditOptions = {}, hooks
       return report;
     }
     const html = extractHtmlFacts(page.body);
+    // siteUrl mapping: an absolute URL on exactly the siteUrl origin becomes the same path on the
+    // audited origin. Anything else is returned untouched, so a mapping never leads to a third origin.
+    const auditedOrigin = new URL(page.finalUrl).origin;
+    const mapping = siteOrigin !== undefined && siteOrigin !== auditedOrigin;
+    const mapUrl = (u: string): string => {
+      if (!mapping) return u;
+      const t = u.trim();
+      let parsed: URL;
+      try {
+        parsed = new URL(t);
+      } catch {
+        return u;
+      }
+      return parsed.origin === siteOrigin ? auditedOrigin + parsed.pathname + parsed.search + parsed.hash : u;
+    };
+    if (mapping) {
+      for (const l of html.links) if (l.href !== undefined) l.href = mapUrl(l.href);
+      report.notes = [`mapped ${siteOrigin} \u2192 ${auditedOrigin}`];
+    }
     const at = (path: string): string => new URL(path, page.finalUrl).href;
     /** Cross-origin site files are reported, not fetched: a local preview must not call production. */
     const getSameOrigin = (u: string, accept?: string): Promise<FetchResult> =>
       sameOrigin(u, page.finalUrl) ? get(u, accept) : Promise.resolve(notFetched(u));
 
     const alt = markdownAlternate(html);
-    const altUrl = alt === null ? null : tryResolveUrl(alt, page.finalUrl);
+    const altUrl = alt === null ? null : tryResolveUrl(mapUrl(alt), page.finalUrl);
     const pagePath = new URL(page.finalUrl).pathname;
     const markdownUrl = altUrl ?? at(markdownPathFor(pagePath));
 
@@ -168,15 +234,16 @@ export async function auditWithHooks(url: string, opts: AuditOptions = {}, hooks
     const robotsP = get(at(ROBOTS_PATH));
     const sitemapP = robotsP.then((robots) => {
       const listed = isOk(robots) ? parseRobots(robots.body).sitemaps[0] : undefined;
-      return getSameOrigin((listed && tryResolveUrl(listed, page.finalUrl)) || at(SITEMAP_PATH));
+      return getSameOrigin((listed && tryResolveUrl(mapUrl(listed), page.finalUrl)) || at(SITEMAP_PATH));
     });
-    const [robots, sitemap, llmsTxt, markdown, agentMap] = await Promise.all([
+    const [robots, rawSitemap, llmsTxt, markdown, agentMap] = await Promise.all([
       robotsP,
       sitemapP,
       probe(get, inDirs(LLMS_TXT_PATH.slice(1))),
       getSameOrigin(markdownUrl, `${MARKDOWN_MIME},*/*;q=0.5`),
       probe(get, agentMapUrls),
     ]);
+    const sitemap = mapping ? { ...rawSitemap, body: mapSitemapLocs(rawSitemap.body, mapUrl) } : rawSitemap;
     report.checks = runChecks({
       page,
       html,

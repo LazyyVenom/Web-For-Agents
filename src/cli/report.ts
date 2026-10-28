@@ -9,6 +9,7 @@ export function formatText(report: AuditReport): string {
   const lines = [
     `web-for-agents audit: ${safeText(report.finalUrl)}${report.redirected ? ` (redirected from ${safeText(report.url)})` : ""}`,
   ];
+  for (const n of report.notes ?? []) lines.push(`Note: ${safeText(n)}`);
   for (const w of report.warnings ?? []) lines.push(`Warning: ${safeText(w)}`);
   if (report.error !== undefined) {
     lines.push(`Error: ${safeText(report.error)}`);
