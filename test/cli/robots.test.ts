@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isAllowed, parseRobots } from "../../src/cli/robots";
+import { AI_BOTS } from "../../src/shared/bots";
+import { runChecks } from "../../src/cli/checks";
+import type { FetchResult } from "../../src/cli/fetch";
+import { extractHtmlFacts } from "../../src/cli/html";
+import { MAX_PATTERN_CHARS, MAX_RULES_PER_GROUP, isAllowed, matches, parseRobots } from "../../src/cli/robots";
 
 const ok = (txt: string, ua: string, p: string) => isAllowed(parseRobots(txt), ua, p);
 
@@ -81,5 +85,60 @@ describe("robots", () => {
   it("specific group with only empty Disallow does not fall back to *", () => {
     const t = "User-agent: *\nDisallow: /\n\nUser-agent: GPTBot\nDisallow:\n";
     expect(ok(t, "GPTBot", "/a")).toBe(true);
+  });
+  it("ignores patterns over MAX_PATTERN_CHARS and rules past MAX_RULES_PER_GROUP", () => {
+    expect(ok(`User-agent: *\nDisallow: /${"a".repeat(MAX_PATTERN_CHARS)}\n`, "x", "/" + "a".repeat(600))).toBe(true);
+    const many = Array.from({ length: MAX_RULES_PER_GROUP }, (_, i) => `Allow: /keep${i}`).join("\n");
+    expect(ok(`User-agent: *\n${many}\nDisallow: /\n`, "x", "/a")).toBe(true);
+  });
+});
+
+describe("matches", () => {
+  it("handles anchors and empty pieces", () => {
+    expect(matches("/a*$", "/abc")).toBe(true);
+    expect(matches("/a**c$", "/abc")).toBe(true);
+    expect(matches("/a*c$", "/acb")).toBe(false);
+    expect(matches("/*c*c$", "/c")).toBe(false);
+    expect(matches("/*c*c$", "/ccc")).toBe(true);
+    expect(matches("/a$b", "/a$bc")).toBe(true);
+    expect(matches("$", "")).toBe(true);
+  });
+});
+
+describe("hostile robots.txt", () => {
+  const lines = ["User-agent: *"];
+  // About 40 KB of distinct backtracking bait in the group every bot falls back to: "/*aaa...a<n>b" costs
+  // a two-pointer glob O(path x pattern) per rule, and "/*a*a*...*a<n>b$" stacks wildcards.
+  for (let i = 0; lines.join("\n").length < 40_000; i++) {
+    lines.push(i % 2 ? `Disallow: /*${"a".repeat(400)}${i}b` : `Disallow: /${"*a".repeat(150)}${i}b$`);
+  }
+  const body = lines.join("\n") + "\n";
+  const path = "/" + "a".repeat(4000);
+  const res = (url: string, b = ""): FetchResult => ({
+    url,
+    finalUrl: url,
+    redirected: false,
+    status: 200,
+    contentType: "text/plain",
+    body: b,
+    truncated: false,
+  });
+
+  it("checks every AI bot in well under a second", () => {
+    const t0 = performance.now();
+    const parsed = parseRobots(body);
+    for (const bot of ["*", ...AI_BOTS.search, ...AI_BOTS.training]) expect(isAllowed(parsed, bot, path)).toBe(true);
+    const page = res("https://a.com" + path, "<html><title>x</title></html>");
+    const checks = runChecks({
+      page,
+      html: extractHtmlFacts(page.body),
+      robots: res("https://a.com/robots.txt", body),
+      sitemap: res("https://a.com/sitemap.xml"),
+      markdown: res("https://a.com/index.md"),
+      llmsTxt: res("https://a.com/llms.txt"),
+      agentMap: res("https://a.com/agents.json"),
+    });
+    expect(checks.find((c) => c.id === "robots")!.status).toBe("pass");
+    expect(performance.now() - t0).toBeLessThan(300);
   });
 });
