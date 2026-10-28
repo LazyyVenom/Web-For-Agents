@@ -258,6 +258,8 @@ describe("concealed fields", () => {
       <input type="checkbox" name="noLabel" hidden>
       <input type="checkbox" name="hiddenLabel" id="hl" hidden><label for="hl" hidden>x</label>
       <input type="checkbox" name="ariaToo" id="a" hidden aria-hidden="true"><label for="a">a</label>
+      <input type="checkbox" name="ariaOnly" id="ao" aria-hidden="true"><label for="ao">ao</label>
+      <input type="checkbox" name="inertToo" id="it" hidden inert><label for="it">it</label>
       <div hidden><input type="checkbox" name="inHidden" id="ih"></div><label for="ih">ih</label>
       <input type="text" name="text" id="tx" hidden><label for="tx">tx</label>`);
     expect(Object.keys(schemaFromForm(f).properties!)).toEqual(["terms", "plan", "peer"]);

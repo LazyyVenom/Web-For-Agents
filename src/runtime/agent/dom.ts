@@ -1,7 +1,8 @@
 import { HIDDEN_SELECTOR } from "../../shared/conventions";
 
-const NOT_HIDDEN_ATTR = '[aria-hidden="true"], [inert], dialog:not([open]), details:not([open]) > :not(summary)';
-const CONCEALED = `${HIDDEN_SELECTOR}, ${NOT_HIDDEN_ATTR}`;
+/** Concealment beyond the hidden/aria-hidden markup shared with markdown extraction. */
+const INERT_OR_CLOSED = "[inert], dialog:not([open]), details:not([open]) > :not(summary)";
+const CONCEALED = `${HIDDEN_SELECTOR}, ${INERT_OR_CLOSED}`;
 
 /** Disabled by a `fieldset[disabled]` ancestor, except inside that fieldset's first `<legend>`. */
 export function inDisabledFieldset(el: Element): boolean {
@@ -29,7 +30,8 @@ export function isConcealed(el: Element): boolean {
     : null;
   return !(
     labels &&
-    !el.matches(NOT_HIDDEN_ATTR) &&
+    el.getAttribute("aria-hidden") !== "true" &&
+    !el.matches(INERT_OR_CLOSED) &&
     !el.parentElement?.closest(CONCEALED) &&
     Array.from(labels).some((l) => !isConcealed(l) && !isDisabled(l))
   );
