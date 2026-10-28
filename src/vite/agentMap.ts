@@ -2,6 +2,7 @@ import {
   ACTION_ATTR,
   ACTION_DESCRIPTION_ATTR,
   ACTION_DESTRUCTIVE_ATTR,
+  ACTION_KIND_ATTR,
   AGENT_GLOBAL,
   LINK_ACTION_SELECTOR,
 } from "../shared/conventions";
@@ -38,6 +39,7 @@ export interface AgentPageInPageArg {
   nameAttr: string;
   descriptionAttr: string;
   destructiveAttr: string;
+  kindAttr: string;
 }
 
 export const AGENT_PAGE_IN_PAGE_ARG: AgentPageInPageArg = {
@@ -46,12 +48,14 @@ export const AGENT_PAGE_IN_PAGE_ARG: AgentPageInPageArg = {
   nameAttr: ACTION_ATTR,
   descriptionAttr: ACTION_DESCRIPTION_ATTR,
   destructiveAttr: ACTION_DESTRUCTIVE_ATTR,
+  kindAttr: ACTION_KIND_ATTR,
 };
 
 /**
  * Runs inside the page (happy-dom or Chrome). Must stay self-contained: no imports or outer
  * helpers, so it survives toString() / page.evaluate. Reads the registry global and the raw link
  * action markup (same fields as markupLinks); hrefs are checked outside the page, never followed.
+ * An `<a href>` whose kind attribute names another kind ("handler", "click") is not a link action.
  */
 export function collectAgentPageInPage(arg: AgentPageInPageArg): AgentPageData {
   const api = (window as unknown as Record<string, Partial<AgentGlobal> | undefined>)[arg.globalKey];
@@ -59,7 +63,8 @@ export function collectAgentPageInPage(arg: AgentPageInPageArg): AgentPageData {
   const links: LinkActionMarkup[] = [];
   document.querySelectorAll(arg.linkSelector).forEach((el) => {
     const name = (el.getAttribute(arg.nameAttr) || "").trim();
-    if (!name) return;
+    const kind = (el.getAttribute(arg.kindAttr) || "").trim();
+    if (!name || kind === "handler" || kind === "click") return;
     links.push({
       name,
       description: el.getAttribute(arg.descriptionAttr) || null,

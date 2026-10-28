@@ -1,8 +1,9 @@
-import { ACTION_NAME_RULE, isValidActionName, type AgentActionDescriptor } from "./agent";
+import { ACTION_NAME_RULE, isValidActionName, type ActionKind, type AgentActionDescriptor } from "./agent";
 import {
   ACTION_ATTR,
   ACTION_DESCRIPTION_ATTR,
   ACTION_DESTRUCTIVE_ATTR,
+  ACTION_KIND_ATTR,
   LINK_ACTION_SELECTOR,
   WEBMCP_TOOLDESCRIPTION_ATTR,
   WEBMCP_TOOLNAME_ATTR,
@@ -14,12 +15,37 @@ export interface MarkupAction {
   name: string;
   /** The description attribute, or null when absent or empty. */
   description: string | null;
-  /** "link" for an `<a href>` (LINK_ACTION_SELECTOR), "form" for a `<form>`, otherwise "click". */
-  kind: "form" | "click" | "link";
+  /** See markupKind. */
+  kind: ActionKind;
   destructive: boolean;
   source: "markup" | "webmcp-declarative";
   /** Link actions only: the raw href attribute, not yet checked (see resolveLinkHref). */
   href?: string;
+}
+
+/**
+ * The kind of a `data-agent-action` element. The `data-agent-kind` attribute (ACTION_KIND_ATTR,
+ * written by the runtime hint props) wins when the element can have that kind: "handler" and
+ * "click" on any element, "form" on a `<form>`, "link" on an `<a href>`. Otherwise (no attribute,
+ * an unknown value, or a kind the element cannot have) it is inferred as before: "form" for a
+ * `<form>`, "link" for an `<a href>` (LINK_ACTION_SELECTOR), else "click".
+ */
+export function markupKind(el: Element): ActionKind {
+  const isForm = el.tagName === "FORM";
+  const isLink = el.matches(LINK_ACTION_SELECTOR);
+  switch (el.getAttribute(ACTION_KIND_ATTR)?.trim()) {
+    case "handler":
+      return "handler";
+    case "click":
+      return "click";
+    case "form":
+      if (isForm) return "form";
+      break;
+    case "link":
+      if (isLink) return "link";
+      break;
+  }
+  return isForm ? "form" : isLink ? "link" : "click";
 }
 
 /**
@@ -33,12 +59,13 @@ export function markupActions(doc: ParentNode): MarkupAction[] {
   doc.querySelectorAll(`[${ACTION_ATTR}]`).forEach((el) => {
     const name = el.getAttribute(ACTION_ATTR)?.trim();
     if (!name) return;
-    const link = el.matches(LINK_ACTION_SELECTOR);
+    const kind = markupKind(el);
+    const link = kind === "link";
     out.push({
       element: el,
       name,
       description: el.getAttribute(ACTION_DESCRIPTION_ATTR) || null,
-      kind: el.tagName === "FORM" ? "form" : link ? "link" : "click",
+      kind,
       destructive: el.getAttribute(ACTION_DESTRUCTIVE_ATTR) === "true",
       source: "markup",
       ...(link ? { href: el.getAttribute("href") ?? "" } : {}),

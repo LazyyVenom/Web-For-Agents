@@ -1,6 +1,7 @@
 import { Window } from "happy-dom";
 import { describe, expect, it } from "vitest";
-import { actionGroups, firstPerName, linkActions, markupActions, markupLinks, resolveLinkHref } from "../../src/shared/markupActions";
+import { actionGroups, firstPerName, linkActions, markupActions, markupKind, markupLinks, resolveLinkHref } from "../../src/shared/markupActions";
+import { staticActions } from "../../src/vite/generateActions";
 
 describe("markupActions", () => {
   it("finds data-agent-action elements, then WebMCP forms, with trimmed names and no dedupe", () => {
@@ -19,6 +20,60 @@ describe("markupActions", () => {
       { tag: "FORM", name: "search", description: "Search posts", kind: "form", destructive: false, source: "webmcp-declarative" },
       { tag: "FORM", name: "contact", description: null, kind: "form", destructive: false, source: "webmcp-declarative" },
     ]);
+    window.happyDOM.close();
+  });
+});
+
+describe("markupKind", () => {
+  const kinds = (html: string) => {
+    const window = new Window();
+    const doc = window.document as unknown as Document;
+    doc.body.innerHTML = html;
+    const out = [...doc.querySelectorAll("[data-agent-action]")].map((el) => [el.getAttribute("data-agent-action"), markupKind(el)]);
+    window.happyDOM.close();
+    return out;
+  };
+
+  it("reads data-agent-kind when the element can have that kind", () => {
+    expect(
+      kinds(`
+        <button data-agent-action="h" data-agent-kind="handler">x</button>
+        <form data-agent-action="fh" data-agent-kind="handler"></form>
+        <a href="/x" data-agent-action="ah" data-agent-kind="handler">x</a>
+        <a href="/x" data-agent-action="ac" data-agent-kind="click">x</a>
+        <form data-agent-action="f" data-agent-kind="form"></form>
+        <a href="/x" data-agent-action="l" data-agent-kind=" link ">x</a>
+        <div data-agent-action="c" data-agent-kind="click">x</div>`),
+    ).toEqual([["h", "handler"], ["fh", "handler"], ["ah", "handler"], ["ac", "click"], ["f", "form"], ["l", "link"], ["c", "click"]]);
+  });
+
+  it("falls back to inference when the attribute is missing, unknown or impossible", () => {
+    expect(
+      kinds(`
+        <form data-agent-action="f"></form>
+        <a href="/x" data-agent-action="l"></a>
+        <button data-agent-action="c"></button>
+        <button data-agent-action="unknown" data-agent-kind="magic"></button>
+        <button data-agent-action="not-form" data-agent-kind="form"></button>
+        <a data-agent-action="no-href" data-agent-kind="link"></a>
+        <a href="/x" data-agent-action="link-form" data-agent-kind="form"></a>`),
+    ).toEqual([["f", "form"], ["l", "link"], ["c", "click"], ["unknown", "click"], ["not-form", "click"], ["no-href", "click"], ["link-form", "link"]]);
+  });
+
+  it("gives generate's static actions and links the true kind", () => {
+    const window = new Window();
+    const doc = window.document as unknown as Document;
+    doc.body.innerHTML = `
+      <form data-agent-action="subscribe" data-agent-kind="handler"><input name="email"></form>
+      <a href="/x" data-agent-action="share" data-agent-kind="handler">x</a>
+      <form data-agent-action="contact" data-agent-kind="form"><input name="email"></form>
+      <a href="/cv.pdf" data-agent-action="resume" data-agent-kind="link">CV</a>`;
+    expect(staticActions(doc).map((a) => [a.name, a.kind, Object.keys(a.inputSchema.properties ?? {})])).toEqual([
+      ["contact", "form", ["email"]],
+      ["share", "handler", []],
+      ["subscribe", "handler", []],
+    ]);
+    expect(markupLinks(doc).map((l) => l.name)).toEqual(["resume"]);
     window.happyDOM.close();
   });
 });

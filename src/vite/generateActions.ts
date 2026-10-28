@@ -6,7 +6,8 @@ import { EMPTY_OBJECT_SCHEMA, schemaFromForm } from "../runtime/agent/formSchema
 /**
  * Agent actions declared in a page's static markup (see markupActions), with form fields as the
  * input schema. Handler-only actions registered without markup exist only at runtime and are not
- * found here. Link actions are left out: they go through `linkActions` (see markupLinks), as on the
+ * found here; a handler action with markup is listed with kind "handler" and an empty input schema
+ * (its schema lives in code). Link actions are left out: they go through `linkActions` (see markupLinks), as on the
  * prerender path. Sorted by name; the first element with a name wins; invalid names are skipped.
  */
 export function staticActions(document: Document): AgentActionDescriptor[] {
@@ -20,7 +21,7 @@ export function staticActions(document: Document): AgentActionDescriptor[] {
         a.kind === "form" ? schemaFromForm(a.element as HTMLFormElement) : { ...EMPTY_OBJECT_SCHEMA, properties: {} },
       destructive: a.destructive,
       readOnly: false,
-      kind: a.kind as "form" | "click",
+      kind: a.kind,
     });
   }
   return [...out.values()].sort((a, b) => compareStrings(a.name, b.name));
