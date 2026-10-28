@@ -498,6 +498,46 @@ describe("chrome page lifecycle", () => {
   });
 });
 
+describe("chrome interruptions and crashes", () => {
+  const fakeBrowser = (page: Record<string, unknown>) => {
+    const handlers: Array<() => void> = [];
+    const load = () =>
+      Promise.resolve({
+        chromium: {
+          launch: () =>
+            Promise.resolve({
+              close: async () => {},
+              on: (ev: string, h: () => void) => ev === "disconnected" && handlers.push(h),
+              newPage: async () => ({ on: () => {}, route: async () => {}, close: async () => {}, url: () => "http://127.0.0.1/", ...page }),
+            }),
+        },
+      } as unknown as typeof import("playwright-core"));
+    return { load, disconnect: () => handlers.forEach((h) => h()) };
+  };
+
+  it("marks renders failing because the browser went away (Ctrl-C) as interrupted", async () => {
+    let fail!: (e: Error) => void;
+    const b = fakeBrowser({ goto: () => new Promise((_, rej) => (fail = rej)) });
+    const r = await createChromeRenderer("chrome", {}, b.load);
+    const pending = r.render("http://127.0.0.1/", 5000).catch((e: unknown) => e);
+    await vi.waitFor(() => expect(fail).toBeTypeOf("function"));
+    b.disconnect();
+    fail(new Error("Target page, context or browser has been closed"));
+    const err = (await pending) as RenderError;
+    expect(err).toBeInstanceOf(RenderError);
+    expect(err.interrupted).toBe(true);
+    expect(err.message).toContain("the Chrome browser was closed");
+  });
+
+  it("suggests lowering concurrency when a page crashes", async () => {
+    const b = fakeBrowser({ goto: () => Promise.reject(new Error("page.goto: Target crashed")) });
+    const r = await createChromeRenderer("chrome", {}, b.load);
+    const err = (await r.render("http://127.0.0.1/", 5000).catch((e: unknown) => e)) as RenderError;
+    expect(err.interrupted).toBeUndefined();
+    expect(err.message).toContain("possibly out of memory: lower prerender.concurrency");
+  });
+});
+
 describe("chrome loading errors", () => {
   it("explains a missing playwright-core", async () => {
     const err = await createChromeRenderer("chrome", {}, () =>

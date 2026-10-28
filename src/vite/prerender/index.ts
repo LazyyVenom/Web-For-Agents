@@ -2,11 +2,11 @@ import { DEFAULT_CONTENT_SELECTOR } from "../../shared/content";
 import { LOG_PREFIX } from "../../shared/errors";
 import type { ResolvedOptions, ResolvedPrerender } from "../options";
 import { isExcluded } from "../options";
-import { crawlRoutes, formatFailures, type CrawlResult } from "./crawl";
+import { PrerenderInterruptedError, crawlRoutes, formatFailures, type CrawlResult } from "./crawl";
 import { assertExtensionNames, inPageExpression, type PrerenderExtension } from "./extensions";
 import { isFullUrlBase, isRelativeBase, publicMdUrl } from "./paths";
 import { prepareShell } from "./probe";
-import { createRendererPool, type InPageScripts } from "./renderers";
+import { RenderError, createRendererPool, type InPageScripts } from "./renderers";
 import { startStaticServer } from "./server";
 
 export type { CrawlFailure, CrawlResult, PrerenderedPage } from "./crawl";
@@ -76,7 +76,10 @@ export async function prerenderSite(input: {
           skipRoute: input.skipRoute,
         },
         async (url, renderer, timeoutMs, scripts) => (await pool.get(renderer)).render(url, timeoutMs, scripts),
-      );
+      ).catch((e: unknown) => {
+        if (e instanceof RenderError && e.interrupted) throw new PrerenderInterruptedError(e.message);
+        throw e;
+      });
       if (result.failures.length > 0) throw new Error(formatFailures(result.failures, pr.fallback));
       return result;
     } finally {
