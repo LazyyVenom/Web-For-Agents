@@ -1,6 +1,6 @@
 import { fork, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -53,40 +53,67 @@ function nodeModulesRoot(file: string): string {
 
 /**
  * The file to fork. Built, it is the bundle chunk holding renderChild. Run from source (tests, the
- * repo's demo), the .ts module is bundled with esbuild (a dev dependency) on every first use, and
- * written to node_modules/.cache under the hash of the bundle itself, so a cached file is never stale.
+ * repo's demo), the .ts module is bundled with esbuild (a dev dependency) on first use, split like
+ * the package build so happy-dom loads only after containNetwork, and written to
+ * node_modules/.cache under the hash of the bundle itself, so a cached copy is never stale.
  */
 let sourceEntry: Promise<string> | undefined;
-async function childEntryFile(): Promise<string> {
+export async function childEntryFile(): Promise<string> {
   const { CHILD_ENTRY } = await import("./renderChild");
   const file = fileURLToPath(CHILD_ENTRY);
   if (!file.endsWith(".ts")) return file;
   return (sourceEntry ??= bundleFromSource(file));
 }
 
+/** Cache entries younger than this are kept: another build may be using them. */
+const PRUNE_AFTER_MS = 60_000;
+
 async function bundleFromSource(file: string): Promise<string> {
   const name = "esbuild"; // not a literal, so the package bundle never includes it
   const esbuild = (await import(name)) as typeof import("esbuild");
+  const cacheDir = path.join(path.resolve(path.dirname(file), "../../.."), "node_modules", ".cache", "web-for-agents");
+  const staging = path.join(cacheDir, "staging");
   const result = await esbuild.build({
-    entryPoints: [file],
+    entryPoints: { renderChild: file },
     bundle: true,
+    splitting: true,
     platform: "node",
     format: "esm",
     packages: "external",
+    outdir: staging,
+    entryNames: "[name]",
     write: false,
     logLevel: "silent",
   });
-  const code = result.outputFiles[0]!.contents;
-  const outDir = path.join(path.resolve(path.dirname(file), "../../.."), "node_modules", ".cache", "web-for-agents");
-  const out = path.join(outDir, `render-child-${createHash("sha256").update(code).digest("hex").slice(0, 16)}.mjs`);
-  if (!existsSync(out)) {
-    mkdirSync(outDir, { recursive: true });
-    // Written aside and renamed, so a concurrent build never forks a half-written file.
-    const tmp = `${out}.${process.pid}.tmp`;
-    writeFileSync(tmp, code);
-    renameSync(tmp, out);
+  const hash = createHash("sha256");
+  const files = result.outputFiles
+    .map((f) => ({ rel: path.relative(staging, f.path), contents: f.contents }))
+    .sort((x, y) => (x.rel < y.rel ? -1 : 1));
+  for (const f of files) hash.update(f.rel).update("\0").update(f.contents);
+  const id = `render-child-${hash.digest("hex").slice(0, 16)}`;
+  const outDir = path.join(cacheDir, id);
+  if (!existsSync(outDir)) {
+    // Written aside and renamed, so a concurrent build never forks a half-written bundle.
+    const tmp = path.join(cacheDir, `${id}.${process.pid}.tmp`);
+    mkdirSync(tmp, { recursive: true });
+    for (const f of files) writeFileSync(path.join(tmp, f.rel), f.contents);
+    try {
+      renameSync(tmp, outDir);
+    } catch {
+      rmSync(tmp, { recursive: true, force: true }); // another build won the race
+    }
   }
-  return out;
+  // Keep only the current bundle (older ones are stale), sparing any another build just wrote.
+  for (const entry of readdirSync(cacheDir)) {
+    if (entry === id || !entry.startsWith("render-child-")) continue;
+    const p = path.join(cacheDir, entry);
+    try {
+      if (Date.now() - statSync(p).mtimeMs > PRUNE_AFTER_MS) rmSync(p, { recursive: true, force: true });
+    } catch {
+      // gone already
+    }
+  }
+  return path.join(outDir, "renderChild.js");
 }
 
 function hasFlag(flag: string): boolean {

@@ -24,6 +24,8 @@ import { formatFailures } from "../../../src/vite/prerender/crawl";
 import { startStaticServer, type StaticServer } from "../../../src/vite/prerender/server";
 import type { RendererName } from "../../../src/vite/options";
 import { probeChrome } from "../../helpers/chrome";
+import { canObserveModuleLoads, wrappersInstalledBeforeHappyDom } from "../../helpers/childOrder";
+import { childEntryFile } from "../../../src/vite/prerender/happyDomProcess";
 
 const dir = fileURLToPath(new URL("../../fixtures/static-app/", import.meta.url));
 const shell = prepareShell(readFileSync(dir + "index.html", "utf8"), { relativeBase: false });
@@ -318,6 +320,12 @@ describe("happy-dom readiness window", { timeout: SUITE_TIMEOUT_MS }, () => {
 
 describe("isolated happy-dom renderer (child process)", { timeout: SUITE_TIMEOUT_MS }, () => {
   suite("happy-dom", async (opts) => createIsolatedHappyDomRenderer(opts));
+});
+
+describe.skipIf(!canObserveModuleLoads)("render process load order", { timeout: SUITE_TIMEOUT_MS }, () => {
+  it("installs the network wrappers before happy-dom is evaluated (dev bundle)", async () => {
+    expect(await wrappersInstalledBeforeHappyDom(await childEntryFile())).toBe(true);
+  });
 });
 
 describe("happy-dom render process isolation", { timeout: SUITE_TIMEOUT_MS }, () => {

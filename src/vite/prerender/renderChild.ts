@@ -30,7 +30,9 @@ export type ChildMessage =
 async function runRenderChild(): Promise<void> {
   const send = (m: ChildMessage) => process.send!(m);
   const options = JSON.parse(process.env[CHILD_OPTIONS_ENV] ?? "{}") as ChildOptions;
-  // Contain the network before happy-dom (or anything a page could reach) is loaded.
+  // Contain the network before happy-dom (or anything a page could reach) is loaded. happy-dom is
+  // imported dynamically below; both the package build and the dev bundle split it into its own
+  // chunk, so it is not evaluated before this line (tested in renderers.test.ts and pack.test.ts).
   const allow = createAllowList();
   for (const o of [...(options.localOrigins ?? []), ...(options.allowOrigins ?? [])]) allowOrigin(allow, o);
   containNetwork(allow);
@@ -51,7 +53,7 @@ async function runRenderChild(): Promise<void> {
   process.on("disconnect", () => process.exit(0));
 }
 
-// Started only in the forked process; deferred so the whole bundle has evaluated first.
+// Started only in the forked process, on the next turn so this chunk has finished evaluating.
 if (process.env[CHILD_ENV] === "1" && typeof process.send === "function") {
   setImmediate(() => {
     runRenderChild().catch((e: unknown) => {
