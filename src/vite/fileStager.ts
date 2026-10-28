@@ -5,12 +5,17 @@ import { MAX_NAME_BYTES } from "./prerender/paths";
 
 export type StageStatus = "staged" | "replaced" | "skipped";
 
+/** File content: text (written as UTF-8) or raw bytes. */
+export type StageSource = string | Uint8Array;
+
 export interface FileStager {
   /**
-   * Stages outDir/fileName. Skipped (with a one-time warning) when publicDir/fileName exists;
-   * "replaced" when the file was already staged. Throws on empty or traversing names.
+   * Stages outDir/fileName. Skipped (with a one-time warning) when publicDir/fileName exists, or when
+   * the target or a directory on its way inside outDir is a symbolic link (nothing is written through
+   * a link, so nothing lands outside outDir); "replaced" when the file was already staged. Throws on
+   * empty or traversing names.
    */
-  stage(fileName: string, source: string): { file: string; status: StageStatus };
+  stage(fileName: string, source: StageSource): { file: string; status: StageStatus };
   /** True (and warns once) when publicDir/file exists, so the generated file must not be written. */
   inPublicDir(file: string): boolean;
   /**
@@ -31,10 +36,27 @@ export function outputFileName(fileName: string): string {
 }
 
 
+/** The first path inside outDir on the way to `rel` that is a symbolic link, or null. */
+export function symlinkOnPath(outDir: string, rel: string): string | null {
+  let p = outDir;
+  const parts = rel.split("/");
+  for (let i = 0; i < parts.length; i++) {
+    p = path.join(p, parts[i]!);
+    let st: fs.Stats;
+    try {
+      st = fs.lstatSync(p);
+    } catch {
+      return null; // does not exist yet: nothing below it can be a link
+    }
+    if (st.isSymbolicLink()) return parts.slice(0, i + 1).join("/");
+  }
+  return null;
+}
+
 const short = (s: string, max: number) => (s.length <= max ? s : s.slice(0, max - 1) + "\u2026");
 
 export function createFileStager(opts: { outDir: string; publicDir: string; warn(msg: string): void }): FileStager {
-  const files = new Map<string, string>();
+  const files = new Map<string, StageSource>();
   const warned = new Set<string>();
 
   const inPublicDir = (file: string): boolean => {
@@ -50,6 +72,14 @@ export function createFileStager(opts: { outDir: string; publicDir: string; warn
     stage(fileName, source) {
       const file = outputFileName(fileName);
       if (inPublicDir(file)) return { file, status: "skipped" };
+      const link = symlinkOnPath(opts.outDir, file);
+      if (link !== null) {
+        if (!warned.has("link:" + file)) {
+          warned.add("link:" + file);
+          opts.warn(`${LOG_PREFIX} ${link} is a symbolic link; not writing ${file} through it`);
+        }
+        return { file, status: "skipped" };
+      }
       const status: StageStatus = files.has(file) ? "replaced" : "staged";
       files.set(file, source);
       return { file, status };

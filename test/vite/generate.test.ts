@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { generateAgentFiles, routeOfHtmlFile, type GenerateOptions } from "../../src/vite/generate";
+import { generateAgentFiles, type GenerateOptions } from "../../src/vite/generate";
+import { routeMdFile, routeOfHtmlFile } from "../../src/vite/prerender/paths";
 
 const tmpDirs: string[] = [];
 afterAll(() => tmpDirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
@@ -53,6 +54,16 @@ describe("routeOfHtmlFile", () => {
     expect(routeOfHtmlFile("about/index.html")).toBe("/about");
     expect(routeOfHtmlFile("a/b.html")).toBe("/a/b");
     expect(routeOfHtmlFile("café.html")).toBe("/caf%C3%A9");
+  });
+
+  it("encodes segments the way browsers write paths, and round-trips to the file name", () => {
+    expect(routeOfHtmlFile("c++.html")).toBe("/c++");
+    expect(routeOfHtmlFile("a b.html")).toBe("/a%20b");
+    expect(routeOfHtmlFile("100%.html")).toBe("/100%25");
+    expect(routeOfHtmlFile("x/@me:1,2;a=b$&.html")).toBe("/x/@me:1,2;a=b$&");
+    for (const name of ["c++", "a b", "100%", "café", "q?#"]) {
+      expect(routeMdFile(routeOfHtmlFile(`${name}.html`))).toBe(`${name}.md`);
+    }
   });
 });
 
@@ -152,6 +163,55 @@ describe("generateAgentFiles", () => {
     const r = await t.run();
     expect(r.fileLayout).toBe("flat");
     expect(r.warnings).toContain("[web-for-agents] Title longer than 60 characters on /about (61)");
+  });
+
+  it("keeps the bytes of a windows-1252 page and inserts the link as ASCII", async () => {
+    const head = '<!doctype html><html><head><meta charset="windows-1252"><title>Caf\xe9</title></head>';
+    const latin = Buffer.from(head + "<body><main><h1>Caf\xe9 cr\xe8me \x80</h1></main></body></html>\n", "latin1");
+    const t = setup({ "index.html": SITE["index.html"]! });
+    writeFileSync(path.join(t.dir, "café.html"), latin);
+    await t.run();
+    const out = readFileSync(path.join(t.dir, "café.html"));
+    const link = Buffer.from('<link rel="alternate" type="text/markdown" href="https://me.dev/caf%C3%A9.md">', "latin1");
+    const at = latin.indexOf("</head>");
+    expect(out.equals(Buffer.concat([latin.subarray(0, at), link, latin.subarray(at)]))).toBe(true);
+    // The page was decoded as windows-1252 for its markdown (0x80 is the euro sign there).
+    expect(t.read("café.md")).toContain("# Café crème €");
+  });
+
+  it("skips symbolic links, never writes through one, and warns before replacing a .md", async () => {
+    const outside = mkdtempSync(path.join(os.tmpdir(), "wfa-gen-out-"));
+    tmpDirs.push(outside);
+    writeFileSync(path.join(outside, "target.md"), "outside\n");
+    const t = setup({ "index.html": SITE["index.html"]!, "about.html": SITE["about.html"]!, "about.md": "my own notes\n" });
+    symlinkSync(path.join(outside, "target.md"), path.join(t.dir, "index.md"));
+    symlinkSync(path.join(t.dir, "about.html"), path.join(t.dir, "alias.html"));
+    const r = await t.run();
+    expect(readFileSync(path.join(outside, "target.md"), "utf8")).toBe("outside\n");
+    expect(r.pages.map((p) => p.route)).toEqual(["/", "/about"]);
+    expect(r.warnings).toEqual(
+      expect.arrayContaining([
+        "[web-for-agents] alias.html is a symbolic link; skipped",
+        "[web-for-agents] index.md is a symbolic link; not writing index.md through it",
+        "[web-for-agents] about.md already exists with different content; replacing it with the markdown of /about",
+      ]),
+    );
+    expect(t.read("about.md")).toContain("I build things.");
+  });
+
+  it("skips /index, whose index.md is the markdown of /", async () => {
+    const t = setup({ "index.html": SITE["index.html"]!, "index/index.html": page("Index", "<p>Other</p>") });
+    const r = await t.run();
+    expect(r.pages.map((p) => p.route)).toEqual(["/"]);
+    expect(t.read("index.md")).toContain("Welcome.");
+    expect(r.warnings).toContain("[web-for-agents] skipped /index: its file index.md is already the file of /");
+  });
+
+  it("warns about unknown options and unusable file names", async () => {
+    const t = setup({ "index.html": SITE["index.html"]!, "a\\b.html": page("Bad", "<p>x</p>") });
+    const r = await t.run({ siteURL: "x", prerender: {} } as never);
+    expect(r.warnings).toContain("[web-for-agents] unknown options ignored: siteURL, prerender");
+    expect(r.warnings).toContain("[web-for-agents] a\\b.html cannot be a page URL (its name has a backslash or similar); skipped");
   });
 
   it("validates options", async () => {

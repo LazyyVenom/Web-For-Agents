@@ -4,8 +4,8 @@ import { CONTENT_ATTR, LLMS_FULL_TXT_PATH, LLMS_TXT_PATH, MARKDOWN_MIME, ROBOTS_
 import { LOG_PREFIX, withPrefix } from "../shared/errors";
 import { compareStrings } from "../shared/sort";
 import { agentMapExtension, type AgentPageData } from "./agentMap";
-import { fileOf, pageLengthWarnings, pageMarkdown, prefixed, SPA_FALLBACK_FILE, stageSiteFiles, type SitePage } from "./siteFiles";
-import { createFileStager, type FileStager } from "./fileStager";
+import { dropFileCollisions, fileOf, pageLengthWarnings, pageMarkdown, prefixed, SPA_FALLBACK_FILE, stageSiteFiles, type SitePage } from "./siteFiles";
+import { createFileStager, type FileStager, type StageSource } from "./fileStager";
 import { staticActions } from "./generateActions";
 import {
   isExcluded,
@@ -17,7 +17,8 @@ import {
 } from "./options";
 import { analyzeDocument } from "./prerender/analyze";
 import { parseHtml } from "./prerender/dom";
-import { byRoute, isSafeRoute, publicMdUrl, publicUrl, routeMdFile, shortRoute } from "./prerender/paths";
+import { byRoute, isSafeRoute, publicMdUrl, publicUrl, routeMdFile, routeOfHtmlFile, shortRoute } from "./prerender/paths";
+import { decodeHtml, insertMarkdownLink } from "./generateHtml";
 import { buildRobots } from "./robots";
 import { buildSitemap } from "./sitemap";
 
@@ -69,17 +70,21 @@ export interface GenerateResult {
 
 /** Top-level directories that never hold pages. */
 const SKIP_DIRS = new Set(["assets", "node_modules"]);
-/** Host fallback pages, not routes. */
+/** Host fallback pages, at any depth, not routes. */
 const SKIP_FILES = new Set([SPA_FALLBACK_FILE, "404.html"]);
 
-/** HTML files under outDir, relative with "/" separators, sorted. */
-function htmlFiles(outDir: string): string[] {
+/** HTML files under outDir, relative with "/" separators, sorted. Symbolic links are skipped with a warning. */
+function htmlFiles(outDir: string, warn: (m: string) => void): string[] {
   const out: string[] = [];
   const walk = (dir: string, rel: string) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       if (e.name.startsWith(".")) continue;
       const r = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isDirectory()) {
+      if (e.isSymbolicLink()) {
+        if (e.name.endsWith(".html") || fs.statSync(path.join(dir, e.name), { throwIfNoEntry: false })?.isDirectory()) {
+          warn(`${LOG_PREFIX} ${r} is a symbolic link; skipped`);
+        }
+      } else if (e.isDirectory()) {
         if (!(rel === "" && SKIP_DIRS.has(e.name))) walk(path.join(dir, e.name), r);
       } else if (e.isFile() && e.name.endsWith(".html") && !SKIP_FILES.has(e.name)) {
         out.push(r);
@@ -90,23 +95,12 @@ function htmlFiles(outDir: string): string[] {
   return out.sort(compareStrings);
 }
 
-/** "index.html" -> "/", "about.html" and "about/index.html" -> "/about". Segments are URL-encoded. */
-export function routeOfHtmlFile(file: string): string {
-  const segs = file.slice(0, -".html".length).split("/");
-  if (segs[segs.length - 1] === "index") segs.pop();
-  return "/" + segs.map((s) => encodeURIComponent(s)).join("/");
-}
-
 const MARKDOWN_LINK = `link[rel~="alternate"][type="${MARKDOWN_MIME}"]`;
 
-/** Adds the markdown alternate link before `</head>`; null when there is no `</head>`. */
-function insertMarkdownLink(html: string, href: string): string | null {
-  const m = /<\/head\s*>/i.exec(html);
-  if (!m) return null;
-  const attr = href.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-  const link = `<link rel="alternate" type="${MARKDOWN_MIME}" href="${attr}">`;
-  return html.slice(0, m.index) + link + html.slice(m.index);
-}
+/** Keys GenerateOptions has; others in a config file are reported, to catch typos. */
+export const GENERATE_OPTION_KEYS: readonly string[] = [
+  "outDir", "siteUrl", "robots", "exclude", "sitemap", "markdown", "llms", "agentMap", "linkMarkdown", "overwrite", "logger",
+];
 
 /**
  * Writes llms.txt, llms-full.txt, a `.md` copy of each page, robots.txt, sitemap.xml and agents.json
@@ -145,12 +139,20 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
     },
   };
   for (const w of resolved.warnings) logger.warn(w);
+  const unknown = Object.keys(options).filter((k) => !GENERATE_OPTION_KEYS.includes(k));
+  if (unknown.length > 0) {
+    logger.warn(`${LOG_PREFIX} unknown option${unknown.length === 1 ? "" : "s"} ignored: ${unknown.join(", ")}`);
+  }
 
   // Routes from files; the first file for a route wins (about.html before about/index.html).
   const fileByRoute = new Map<string, string>();
-  for (const file of htmlFiles(outDir)) {
+  for (const file of htmlFiles(outDir, (m) => logger.warn(m))) {
     const route = routeOfHtmlFile(file);
-    if (!isSafeRoute(route) || (route !== "/" && isExcluded(route, resolved.exclude))) continue;
+    if (!isSafeRoute(route)) {
+      logger.warn(`${LOG_PREFIX} ${file} cannot be a page URL (its name has a backslash or similar); skipped`);
+      continue;
+    }
+    if (route !== "/" && isExcluded(route, resolved.exclude)) continue;
     const other = fileByRoute.get(route);
     if (other !== undefined) {
       logger.warn(`${LOG_PREFIX} ${file} and ${other} are both ${shortRoute(route)}; using ${other}`);
@@ -169,12 +171,14 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
   const kept: string[] = [];
   const protectedFiles = new Set([fileOf(ROBOTS_PATH), fileOf(SITEMAP_PATH), fileOf(LLMS_TXT_PATH), fileOf(LLMS_FULL_TXT_PATH)]);
   if (resolved.agentMap) protectedFiles.add(resolved.agentMap.fileName);
+  const differs = (target: string, source: StageSource) =>
+    fs.existsSync(target) && !fs.readFileSync(target).equals(typeof source === "string" ? Buffer.from(source) : source);
   const guarded: FileStager = {
     ...stager,
     stage(fileName, source) {
       const file = fileName.replace(/^\/+/, "");
       const target = path.join(outDir, file);
-      if (!options.overwrite && protectedFiles.has(file) && fs.existsSync(target) && fs.readFileSync(target, "utf8") !== source) {
+      if (!options.overwrite && protectedFiles.has(file) && differs(target, source)) {
         if (!kept.includes(file)) {
           kept.push(file);
           logger.warn(`${LOG_PREFIX} ${file} already exists with different content; kept it (use overwrite to replace it)`);
@@ -192,8 +196,16 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
   const mdByRoute = new Map<string, string>();
   const bodyFallback: string[] = [];
   const noHead: string[] = [];
-  for (const [route, file] of [...fileByRoute].sort((a, b) => compareStrings(a[0], b[0]))) {
-    const html = fs.readFileSync(path.join(outDir, file), "utf8");
+  // "/index" (index/index.html) would write index.md, the markdown of "/".
+  const routes = dropFileCollisions(
+    [...fileByRoute].map(([route, file]) => ({ route, file })).sort(byRoute),
+    (p) => (markdown ? [routeMdFile(p.route)] : []),
+    new Map(),
+    (m) => logger.warn(m),
+  );
+  for (const { route, file } of routes) {
+    const bytes = fs.readFileSync(path.join(outDir, file));
+    const { charset, text: html } = decodeHtml(bytes);
     const url = publicUrl(siteUrl, route);
     const { document, dispose } = parseHtml(html);
     let page: SitePage;
@@ -219,9 +231,13 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
     if (page.info.contentSource === "body") bodyFallback.push(route);
     const md = await pageMarkdown(markdown, { route, url, info: page.info, html });
     mdByRoute.set(route, md);
-    guarded.stage(routeMdFile(route), md);
+    const mdFile = routeMdFile(route);
+    if (differs(path.join(outDir, mdFile), md)) {
+      logger.warn(`${LOG_PREFIX} ${mdFile} already exists with different content; replacing it with the markdown of ${shortRoute(route)}`);
+    }
+    guarded.stage(mdFile, md);
     if (linkMarkdown && !hasLink) {
-      const next = insertMarkdownLink(html, publicMdUrl(siteUrl, route));
+      const next = insertMarkdownLink(bytes, charset, publicMdUrl(siteUrl, route));
       if (next === null) noHead.push(file);
       else guarded.stage(file, next);
     }
@@ -247,7 +263,7 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
     );
   }
   if (noHead.length > 0) {
-    logger.warn(`${LOG_PREFIX} no </head> in ${noHead.join(", ")}; the markdown link was not added`);
+    logger.warn(`${LOG_PREFIX} no </head> (or a UTF-16 file) in ${noHead.join(", ")}; the markdown link was not added`);
   }
   for (const w of pageLengthWarnings(listed)) logger.warn(w);
   base.info(`${LOG_PREFIX} generated agent files for ${pages.length} pages (${listed.length} listed) in ${outDir}`);

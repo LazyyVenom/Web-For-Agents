@@ -34,6 +34,25 @@ function decodeSegments(route: string): string[] {
  * The HTML file for a route. "directory": "/about" -> "about/index.html". "flat": "/about" ->
  * "about.html". "/" is "index.html" in both.
  */
+/**
+ * One decoded path segment, percent-encoded the way browsers write URL paths: "c++" stays "c++",
+ * "a b" becomes "a%20b", "é" becomes "%C3%A9". "%" is encoded too, so the route decodes back to
+ * the file name.
+ */
+export function encodePathSegment(segment: string): string {
+  return encodeURIComponent(segment).replace(/%(24|26|2B|2C|3B|3D|3A|40)/g, (m) => decodeURIComponent(m));
+}
+
+/**
+ * The inverse of routeHtmlFile, for either layout: "index.html" -> "/", "about.html" and
+ * "about/index.html" -> "/about". `file` is relative to outDir with "/" separators.
+ */
+export function routeOfHtmlFile(file: string): string {
+  const segs = file.slice(0, -".html".length).split("/");
+  if (segs[segs.length - 1] === "index") segs.pop();
+  return "/" + segs.map(encodePathSegment).join("/");
+}
+
 export function routeHtmlFile(route: string, layout: "directory" | "flat" = "directory"): string {
   const segs = decodeSegments(route);
   if (segs.length === 0) return "index.html";

@@ -142,6 +142,16 @@ describe("generate e2e (bring your own prerender)", () => {
     }
   }, 60_000);
 
+  it("warns about unknown keys in a --config file", async () => {
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "wfa-gen-cfg-"));
+    tmpDirs.push(tmp);
+    writeFileSync(path.join(tmp, "index.html"), "<!doctype html><html><head><title>Home</title></head><body><main><p>x</p></main></body></html>");
+    writeFileSync(path.join(tmp, "c.json"), JSON.stringify({ siteURL: "https://typo.example", robots: { ai: { training: "allow", search: "allow" } } }));
+    const r = await cli(["generate", tmp, "--site-url", "https://a.com", "--config", path.join(tmp, "c.json")]);
+    expect(r.code).toBe(0);
+    expect(r.err).toContain("unknown option ignored: siteURL");
+  });
+
   it("requires an explicit robots policy and a site URL", async () => {
     const r = await cli(["generate", "dist", "--site-url", "https://a.com", "--ai-training", "allow"]);
     expect(r.code).toBe(2);
