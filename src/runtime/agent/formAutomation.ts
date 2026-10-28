@@ -90,17 +90,6 @@ function settle(ms: number, signal?: AbortSignal): Promise<boolean> {
   });
 }
 
-function submit(form: HTMLFormElement, button: Submitter | null): void {
-  if (typeof form.requestSubmit === "function") {
-    // Through the default button, so its name/value, formaction and formmethod apply.
-    form.requestSubmit(button ?? undefined);
-    return;
-  }
-  const ev = new Event("submit", { bubbles: true, cancelable: true });
-  form.dispatchEvent(ev);
-  if (!ev.defaultPrevented) form.submit();
-}
-
 export interface FormActionOptions {
   settleMs?: number;
   signal?: AbortSignal;
@@ -129,6 +118,28 @@ function defaultButton(form: HTMLFormElement): Submitter | null {
   return null;
 }
 
+/** A field element, or a RadioNodeList of same-named elements (which always holds one). */
+const isNamedField = (n: Element | RadioNodeList | null): boolean =>
+  !!n && (!(n instanceof Element) || /^(INPUT|SELECT|TEXTAREA)$/.test(n.tagName));
+
+/**
+ * Why the form action cannot run now, or null. Checked before any confirm dialog and again before
+ * filling: a hidden or inert form or default button, a disabled default button or fieldset, and
+ * keys that name no element of the form at all (so a partial fill only happens when a real field
+ * stays concealed).
+ */
+export function checkFormAction(form: HTMLFormElement, value: Record<string, unknown>): AgentActionResult | null {
+  const button = defaultButton(form);
+  if (isConcealed(form) || (button && isConcealed(button))) return { status: "error", message: "form is hidden or inert" };
+  if (inDisabledFieldset(form) || (button && isDisabled(button))) {
+    return { status: "error", message: "form submit is disabled" };
+  }
+  const errors = Object.keys(value)
+    .filter((k) => value[k] !== undefined && !isNamedField(form.elements.namedItem(k)))
+    .map((field) => ({ field, message: "is not an allowed field" }));
+  return errors.length ? { status: "invalid", errors } : null;
+}
+
 /** Fills and submits already-validated input (the caller ran validateFormInput(schemaFromForm(form))). */
 export async function submitFormAction(
   form: HTMLFormElement,
@@ -136,11 +147,8 @@ export async function submitFormAction(
   opts: FormActionOptions = {},
 ): Promise<AgentActionResult> {
   if (opts.signal?.aborted) return { status: "error", message: "aborted" };
-  const button = defaultButton(form);
-  if (isConcealed(form) || (button && isConcealed(button))) return { status: "error", message: "form is hidden or inert" };
-  if (inDisabledFieldset(form) || (button && isDisabled(button))) {
-    return { status: "error", message: "form submit is disabled" };
-  }
+  const blocked = checkFormAction(form, value);
+  if (blocked) return blocked;
 
   const fillErrors = fill(form, value);
   if (fillErrors.length) return { status: "invalid", errors: fillErrors };
@@ -152,7 +160,8 @@ export async function submitFormAction(
     return { status: "invalid", errors };
   }
 
-  submit(form, button);
+  // Through the default button, so its name/value, formaction and formmethod apply.
+  form.requestSubmit(defaultButton(form) ?? undefined);
 
   if (!(await settle(opts.settleMs ?? 300, opts.signal))) return { status: "error", message: "aborted" };
 

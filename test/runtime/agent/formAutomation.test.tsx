@@ -310,6 +310,23 @@ describe("runFormAction", () => {
       expect((f.elements.namedItem("company") as HTMLInputElement).value).toBe("");
     });
 
+    it("rejects a key naming no form element before writing anything", async () => {
+      const f = revealing();
+      expect(await run(f, { business: true, nothing: "x" })).toEqual({
+        status: "invalid",
+        errors: [{ field: "nothing", message: "is not an allowed field" }],
+      });
+      expect((f.elements.namedItem("business") as HTMLInputElement).checked).toBe(false);
+    });
+
+    it("submits through requestSubmit with the default button", async () => {
+      const f = mount(`<form><input name="q"><button id="go">Go</button></form>`);
+      f.addEventListener("submit", (e) => e.preventDefault());
+      const spy = vi.spyOn(f, "requestSubmit");
+      expect((await run(f, { q: "x" })).status).toBe("submitted");
+      expect(spy).toHaveBeenCalledWith(document.getElementById("go"));
+    });
+
     it("rejects a name whose field never appears, without submitting", async () => {
       const f = revealing();
       const submitted = vi.fn();
