@@ -10,7 +10,7 @@ SEO and LLM-readiness helpers for React + Vite. At runtime it manages `<head>` m
 npm i @anubhav-choubey/web-for-agents
 ```
 
-Requires Node 20.19 or later. The runtime components and hooks need `react >=18` and `react-dom >=18`, and the Vite plugin needs `vite >=5`; CI tests it against Vite 5, 6, 7 and 8. All three are optional peers, so the CLI works without them.
+Requires Node 20.19 or later; Node 22.13 or later is recommended for builds, because prerendering is better isolated there (see [Security](#security)). The runtime components and hooks need `react >=18` and `react-dom >=18`, and the Vite plugin needs `vite >=5`; CI tests it against Vite 5, 6, 7 and 8. All three are optional peers, so the CLI works without them.
 
 ## Quick start
 
@@ -89,7 +89,11 @@ webForAgents({
 });
 ```
 
-Known limit: a synchronous infinite loop in a page cannot be interrupted under happy-dom, so it hangs the build instead of timing out. Render such pages with the Chrome renderer (`routeRenderers` or `renderer: "chrome"`), which enforces the timeout.
+happy-dom renders in a separate, locked-down Node.js process, and pages can only load your build's own files unless you allow other origins with `prerender.allowOrigins`. See [Security](#security) for what that means for your pages.
+
+A synchronous infinite loop in a page cannot be interrupted inside happy-dom. The render process is killed `prerender.timeoutMs` plus 10 seconds after the route started, which fails that route and any others rendering in the same process. Render such pages with the Chrome renderer (`routeRenderers` or `renderer: "chrome"`), which enforces the timeout per page.
+
+Pressing Ctrl-C during prerendering reports `prerender interrupted` rather than a list of failed routes.
 
 happy-dom 21 fails to load a module when a regex literal follows a character outside its narrow list of punctuation, such as `return`, `!`, `typeof`, `-`, whitespace or `)`. This is common in minified code, e.g. `return/^[a-z]+:/i.test(e)`. When any route may render under happy-dom, the local prerender server works around it by wrapping each regex literal in the JS it serves in parentheses. With mixed renderers, Chrome gets the same rewritten JS, which is harmless. Your `dist` files are not changed.
 
@@ -97,7 +101,7 @@ Set `prerender: false` to skip all of this; `markdown`, `llms` and `agentMap` th
 
 ### Readiness
 
-A route is captured once the page has loaded, no `fetch`/XHR is in flight, and the DOM has been quiet for a moment. If you load data some other way (timers, a custom client, a Suspense boundary), tell the renderer to wait:
+A route is captured once the page has loaded, no `fetch`/XHR is in flight, and the DOM has been quiet for a moment (`prerender.idleMs`). If you load data some other way (timers, a custom client, a Suspense boundary), tell the renderer to wait:
 
 ```tsx
 import { holdPrerender } from "@anubhav-choubey/web-for-agents";
@@ -179,6 +183,8 @@ Every prerendered page gets a markdown twin: `/about` is served as `/about.md` a
 
 `llms.txt` lists your pages with links to their `.md` versions (title and description come from the root page unless you set `llms.title` / `llms.description`). `llms-full.txt` concatenates every page's markdown, each prefixed with `Source: <url>`. `llms-full.txt` needs `markdown` enabled.
 
+Page titles and descriptions are written into `llms.txt`, `llms-full.txt` and each page's markdown heading on a single line, with `\`, `[`, `]` and `<` backslash-escaped, so they cannot close link text or open raw HTML (`Vec<T>` is written `Vec\<T>`). Page bodies are converted from HTML with their text escaped, so text that looks like HTML never becomes live HTML, and `<script>`, `<style>`, `<noscript>` and `<template>` elements are dropped.
+
 ## Blocked AI crawlers
 
 If `robots.ai.training` or `robots.ai.search` is `"block"` while `.md` files, `llms.txt`, `llms-full.txt` or `agents.json` are enabled, the build logs a warning: those files are still generated and publicly fetchable, so blocking bots in `robots.txt` does not hide them. Set `markdown: false`, `llms: false` and/or `agentMap: false` if you do not want them published.
@@ -204,11 +210,20 @@ import { AgentForm, agentParam } from "@anubhav-choubey/web-for-agents";
 </AgentForm>
 ```
 
-The derived schema uses each field's `name`, type (`email`, `url`, `number`, `checkbox`, ...), `required`, `min`/`max`, `minlength`/`maxlength` and `pattern`; `<select>` options and radio groups become an `enum`. Disabled and `readonly` fields, fields inside a `<fieldset disabled>`, fields without a `name`, and hidden, password and file inputs (and buttons) are never exposed: they do not appear in the schema or in `agents.json`, and an agent cannot fill them, even through another field with the same name.
+The derived schema uses each field's `name`, type (`email`, `url`, `number`, `checkbox`, ...), `required`, `min`/`max`, `minlength`/`maxlength` and `pattern`; `<select>` options and radio groups become an `enum`. Some fields are never exposed: they do not appear in the schema or in `agents.json`, and an agent cannot fill them, even through another field with the same name. These are:
+
+- disabled and `readonly` fields, and fields inside a `<fieldset disabled>` (except in its first `<legend>`);
+- fields without a `name`;
+- hidden, password and file inputs, and buttons;
+- fields hidden by markup: inside a `hidden`, `inert` or `aria-hidden="true"` element, a closed `<dialog>`, or the content of a closed `<details>`.
+
+Visibility is read from markup only, not CSS. One exception: a checkbox or radio with its own `hidden` attribute is still exposed when it has a visible, enabled `<label>` (the styled-label pattern). Options that are disabled, `hidden` or inside a disabled `<optgroup>` are left out of the `enum`.
 
 A form action without a `handler` has exactly one schema: the one derived from the form. It is what the tool advertises and what the input is checked against, using the form's fields at the moment the action runs. If you also pass `inputSchema`, it is ignored and a warning is logged once; add a `handler` if you want your own schema.
 
-A form action reports `{ status: "submitted", url, messages }`, where `messages` is the text of any `role="alert"`, `role="status"` or `aria-live` element in the form shortly after submit, or `{ status: "invalid", errors }` when the input or the browser's form validation fails.
+Fields are re-read after every value the agent sets, so a field revealed by an earlier one (a "Company" box behind a "Business account" checkbox) is filled in the same call, and its value is checked when it appears. A key that names no field of the form is rejected before anything is written; a key whose field stays hidden is rejected without submitting. The advertised WebMCP schema is not rebuilt on every render: after you reveal fields (open a modal, switch a tab, move to a wizard step), call `refreshAgentActions({ force: true })`.
+
+A form action reports `{ status: "submitted", url, messages }`, where `messages` is the text of any `role="alert"`, `role="status"` or `aria-live` element in the form shortly after submit, or `{ status: "invalid", errors }` when the input or the browser's form validation fails. The form is submitted through its default button (its first submit or image button, including one outside the form linked by `form="..."`), so that button's `name`/`value`, `formaction` and `formmethod` apply. If that button is disabled or hidden by markup, or the form is hidden or inside a `<fieldset disabled>`, the agent gets `{ status: "error" }` and nothing is filled or submitted.
 
 ### `useAgentAction`
 
@@ -232,11 +247,11 @@ function DeleteAccount() {
 }
 ```
 
-With a `handler`, the agent's input is validated against `inputSchema` (an object JSON Schema, empty when omitted) and passed to it. Nested objects and array items are checked the same way, with errors reported by path (`addr.zip`, `items[0].id`); keys not listed in `properties` are rejected unless that object sets `additionalProperties: true`. The handler's return value is reported as `{ status: "ok", result }`. Without a `handler`, `ref` decides: a `<form>` uses the form fallback above, any other element is clicked (`{ status: "clicked" }`), unless it is disabled (`disabled`, `aria-disabled="true"` or inside a `<fieldset disabled>`), which reports `{ status: "error" }` instead. An action with neither a handler nor an attached element is not exposed. If a handler throws, the error is caught and reported to the agent as `{ status: "error", message }`.
+With a `handler`, the agent's input is validated against `inputSchema` (an object JSON Schema, empty when omitted) and passed to it. Nested objects and array items are checked the same way, with errors reported by path (`addr.zip`, `items[0].id`); keys not listed in `properties` are rejected unless that object sets `additionalProperties: true`. A string longer than 10,000 characters is rejected, without running the regex, when its schema has a `pattern` or `format: "email"`; this keeps slow polynomial patterns fast, but does not make exponential ones such as `(a+)+$` safe, so avoid those. The handler's return value is reported as `{ status: "ok", result }`. Without a `handler`, `ref` decides: a `<form>` uses the form fallback above, any other element is clicked (`{ status: "clicked" }`), unless it is disabled (`disabled`, `aria-disabled="true"` or inside a `<fieldset disabled>`) or hidden by markup (as above), which reports `{ status: "error" }` instead. An action with neither a handler nor an attached element is not exposed. If a handler throws, the error is caught and reported to the agent as `{ status: "error", message }`.
 
 `hintProps` puts `data-agent-action`, `data-agent-description`, `aria-description` and, for destructive actions, `data-agent-destructive="true"` on the element, so the hints are also in the prerendered HTML. `agentParam(description)` adds `data-agent-param` to a form field; it is used as that field's description in the schema (otherwise its `<label>`, `aria-label` or `placeholder`).
 
-`listAgentActions()` and `executeAgentAction(name, input)` give you the same registry directly.
+`listAgentActions()` and `executeAgentAction(name, input)` give you the same registry directly. `refreshAgentActions()` re-checks the registry; pass `{ force: true }` to also re-describe actions that are already registered with WebMCP and re-register any whose schema changed.
 
 ### Names and duplicates
 
@@ -244,11 +259,15 @@ Names must be 1 to 128 characters of `A-Z a-z 0-9 _ - .`; an invalid name throws
 
 ### Destructive actions
 
-`destructive: true` asks the user before the action runs, with `window.confirm` by default (pass `confirm` for your own dialog, `confirmMessage` for the text). The default text names the action and shows the input, labelled "Agent-provided input" and cut to 500 characters. If the user declines, the agent gets `{ status: "cancelled", reason: "user-declined" }` and nothing runs. It also sets the WebMCP `consequentialHint`; `readOnly: true` sets `readOnlyHint`.
+`destructive: true` asks the user before the action runs, with `window.confirm` by default (pass `confirm` for your own dialog, `confirmMessage` for the text). The checks that would make the action fail (invalid input, a disabled or hidden submit button, a hidden form or element, keys that name no field) run first, so the user is never asked to approve an action that cannot run.
+
+The default text names the action, states how many fields the agent provided, and lists every field on its own line as `path: value` (nested values as `address.zip` or `items[0].id`). Fields declared in the schema come first, in schema order, and are always all shown; for a form action, every key the agent sends is listed. Each name and value is cut to `max(24, 1000 / declared fields)` characters with a "…(truncated)" marker. Keys outside the schema follow, capped at about 1,000 characters in total, with a note of how many were omitted. Unusual keys and all values are JSON-encoded, and bidi, line-separator, invisible and control characters are shown as `\uXXXX` escapes, so the input cannot reorder, hide or add lines.
+
+If the user declines, the agent gets `{ status: "cancelled", reason: "user-declined" }` and nothing runs. It also sets the WebMCP `consequentialHint`; `readOnly: true` sets `readOnlyHint`.
 
 ### WebMCP
 
-WebMCP is feature-detected: when `document.modelContext` (or the older `navigator.modelContext`) exists, each exposed action is registered with `registerTool`; otherwise nothing is registered and nothing breaks. Nothing branches on the user agent. Tools are unregistered when their component unmounts, so the tool list follows what is on screen. The advertised `inputSchema` is captured when the tool is registered: a tool is registered again when its name, title, description, flags, `inputSchema` or handler presence changes, but not when a form's fields change. Execution never relies on that snapshot; it always validates against the current schema (for a form, its current fields). A failed registration is logged as a warning, does not affect the page, and is retried the next time the action list is updated.
+WebMCP is feature-detected: when `document.modelContext` (or the older `navigator.modelContext`) exists, each exposed action is registered with `registerTool`; otherwise nothing is registered and nothing breaks. Nothing branches on the user agent. Tools are unregistered when their component unmounts, so the tool list follows what is on screen. The advertised `inputSchema` is captured when the tool is registered: a tool is registered again when its name, title, description, flags, `inputSchema` or handler presence changes, but not when a form's fields change. Execution never relies on that snapshot; it always validates against the current schema (for a form, its current fields). A failed registration is logged as a warning, does not affect the page, and is retried the next time the action list is updated. If `modelContext` appears after the page loads (for example, injected by an extension), actions are registered on the next mount, unmount or `refreshAgentActions()` call.
 
 ### agents.json
 
@@ -376,8 +395,11 @@ The default is the lowest-priority layer, so an explicit `canonical` on any `<Se
 | `prerender.routeRenderers` | `Array<{ match: string \| RegExp; renderer }>` | Per-route renderer; `match` uses `exclude` semantics, first match wins. Default `[]`. |
 | `prerender.executablePath` | `string` | Browser binary to launch instead of the installed Chrome/Edge channel. |
 | `prerender.timeoutMs` | `number` | Per-route readiness timeout. Default `15000`. |
-| `prerender.concurrency` | `number` | Routes rendered at once. Default `4`. |
+| `prerender.concurrency` | `number` | Routes rendered at once. Default `8` when only happy-dom renders, `4` when `renderer` or any `routeRenderers` entry is `"chrome"` or `"msedge"` (`fallback` does not count). |
 | `prerender.maxRoutes` | `number` | Stop discovering after this many routes (a warning is logged). Default `500`. |
+| `prerender.allowOrigins` | `string[]` | http(s) origins (`"https://cdn.example.com"`) pages may load from while prerendering. Every other request outside your build is blocked and fails like a network error. Default `[]`. |
+| `prerender.idleMs` | `number` | How long, in ms, a page must be quiet (no DOM changes, no requests in flight) to count as rendered. Default `50` for happy-dom once every timer and request has settled, else `200`; always `200` for Chrome. |
+| `prerender.isolation` | `{ codeGeneration?: boolean }` | The happy-dom render process. `codeGeneration: true` lets code build functions from strings with Node's own `Function`, which also lets page code escape happy-dom; prefer rendering such routes with Chrome. The page's own `eval` and `new Function` work either way. Default `{ codeGeneration: false }`. |
 | `markdown` | `{ contentSelector?: string } \| false` | Write `.md` files. `false` disables them and `llms-full.txt`. Default `{ contentSelector: "main" }`. |
 | `llms` | `{ title?: string; description?: string } \| false` | Write `llms.txt` and `llms-full.txt`. Default on. |
 | `agentMap` | `boolean \| { fileName?: string }` | Write `agents.json` and link it from `llms.txt`. Needs prerender. Default `{ fileName: "agents.json" }`. |
@@ -418,10 +440,11 @@ npx @anubhav-choubey/web-for-agents audit https://example.com/docs --json --min-
 
 Flags:
 
-- `--json` prints the report as one JSON document on stdout.
+- `--json` prints the report as one JSON document on stdout. Page data is kept as the site sent it (see [Security](#cli-audit)).
 - `--min-score <0-100>` exits with code 1 when the score is lower.
 - `--timeout <ms>` sets the per-request timeout (default 10000).
 - `--agent-map <path>` sets where the agent map lives. A file name (`map.json`) is looked for in the same places as `agents.json`. A path starting with `/` or a full URL is fetched as given.
+- `--no-private-redirects` refuses redirects from a public host to a private, loopback or link-local address. By default they are followed with a warning.
 - `-h`, `--help` prints usage.
 
 A URL without a scheme gets `http://` for `localhost`, `127.0.0.1` and `[::1]`, and `https://` for every other host.
@@ -467,6 +490,45 @@ WARN  Canonical URL                 2.5/5  Canonical https://example.com/ points
 ```
 
 To get a clean local score, build with `siteUrl` set to the preview origin, for example `siteUrl: process.env.SITE_URL ?? "https://example.com"` with `SITE_URL=http://localhost:4173 npx vite build`. Otherwise, audit the deployed site.
+
+## Security
+
+### Prerendering
+
+Prerendering runs your app's JavaScript at build time, including anything it loads. happy-dom is **not a sandbox**: code in a happy-dom page can, in principle, escape to the Node.js process that runs it. Several layers sit between a prerendered page and your build machine:
+
+- **Hermetic network.** Pages can only load your build's own files from the local prerender server on 127.0.0.1. Requests to any other origin (scripts, stylesheets, `fetch`/XHR, frames, WebSockets) are blocked and fail like a network error. A blocked request is not fatal by itself; if the page needs it to render, the build fails and names the blocked URL. Allow its origin with `prerender: { allowOrigins: ["https://api.example.com"] }`, and only allow origins you trust: their code runs during your build.
+- **Isolated renderer.** happy-dom renders in a separate Node.js process with a scrubbed environment: only `PATH`, `HOME`, the temp directory variables and `NODE_ENV` (plus the system variables Windows needs for sockets). CI tokens, API keys and other environment variables are not visible to page code.
+- **No code generation from strings.** The render process cannot build functions from strings with Node's own `Function`, the usual way out of happy-dom. The page's own `eval` and `new Function` keep working. If a route fails because something needed Node-level code generation, the error says so; render that route with Chrome (`prerender.routeRenderers` or `prerender.fallback`), or set `prerender: { isolation: { codeGeneration: true } }`. That option lets page code escape happy-dom again, so use it only for code you trust.
+- **Contained network, even after an escape.** Inside the render process, Node's network APIs (TCP, TLS, HTTP, DNS, `fetch`, WebSockets and UDP) can only reach the prerender server and your `allowOrigins`. These wrappers are locked so code cannot remove them.
+- **Permission model.** On Node.js 22.13+ (or 23.5+), the render process also runs under Node's permission model: it can read only the renderer's own code and `node_modules`, and cannot write files, start processes or workers, or reach Node's internal bindings. Because Node cannot yet limit network access by host, this is what keeps the network wrappers above from being bypassed.
+- **Contained output.** The local server never serves files outside your build output, even through symlinks, and answers only requests addressed to 127.0.0.1. Routes whose file names would be too long are skipped with a warning, and if writing the output fails, the files already written are rolled back.
+
+**Older Node.js.** Without the permission model (Node.js before 22.13, or 23.x before 23.5), a build that renders with happy-dom logs a warning once. The layers above still apply, but code that escapes happy-dom could open raw sockets, start a child process (for example `curl`) or a worker, which loads without the network wrappers, and read or write any file the build user can access.
+
+**For untrusted scripts** (user-generated pages, third-party widgets you must allow), build on Node.js 22.13 or later, or use the Chrome renderer (`prerender: { renderer: "chrome" }`), which runs pages in Chrome's own sandbox with the same hermetic network. In Chrome, `<link rel="preconnect">` and `dns-prefetch` can still resolve DNS and open connections without sending a request, and blocking WebSockets needs playwright-core 1.48 or later.
+
+**Classic scripts.** Under the permission model, happy-dom cannot make synchronous requests itself. To keep classic `<script src>` tags in your `index.html` working (no `async`, `defer` or `type="module"`), they are fetched from your build ahead of time and served from memory: up to 4 MiB per script and 10 MiB in total. A script over a limit, or one that could not be fetched within `prerender.timeoutMs`, is skipped with a warning naming it. Only same-origin scripts are preloaded. Any other synchronous load, such as a classic script the page inserts later, one from an allowed origin, or a synchronous XHR, is refused: the build fails if the page needs it, and otherwise warns once per request, listing the routes. Add `type="module"` or `defer` to the script, make the request asynchronous, or render the route with Chrome. Vite's own scripts are modules and are unaffected.
+
+### Agent actions
+
+- Input is validated strictly against the action's schema before anything runs, including nested objects and arrays. Keys not in the schema are rejected unless `additionalProperties: true` is set. See [`useAgentAction`](#useagentaction).
+- Some form fields are never exposed: hidden, password and file inputs; disabled and `readonly` fields; and fields hidden by markup (`hidden`, `inert`, `aria-hidden="true"`, a closed `<dialog>` or `<details>`). A checkbox or radio hidden only by its own `hidden` attribute stays exposed through a visible, enabled label. See [`AgentForm`](#agentform).
+- Destructive actions ask the user first, and the default dialog shows every declared field, so the agent cannot hide a field by padding others. Actions that would fail are refused before the dialog. See [Destructive actions](#destructive-actions).
+- The WebMCP schema is captured when a tool is registered. After revealing fields, call `refreshAgentActions({ force: true })` so agents see the current form.
+
+### CLI audit
+
+- The text report strips terminal control and bidi characters from everything the audited site supplies (titles, URLs, error text), collapses whitespace and shortens very long values, so a page cannot rewrite your terminal.
+- `--json` keeps those values exactly as the site sent them, with control and bidi characters written as `\u` escapes. The JSON is safe to print, but tools that render its fields should sanitize them.
+- If a redirect goes from a public host to a private, loopback or link-local address (for example `169.254.169.254`), the audit follows it and adds a `Warning:` line (`warnings` in JSON). Pass `--no-private-redirects` (or `audit(url, { blockPrivateRedirects: true })`) to refuse such redirects. The check resolves each host before the request, and the request resolves it again, so a DNS-rebinding host can still reach a private address: treat it as a guard against accidents, not a sandbox.
+- robots.txt is read up to 500 KiB (as RFC 9309 allows), and patterns longer than 512 characters are ignored. When either limit is hit, the robots check says so in its message.
+
+## Performance and memory
+
+Prerendering is fast: the 12-page demo in `examples/demo` builds and prerenders in about 1.5 seconds, and a 500-page site prerenders in under 10 seconds with the default settings.
+
+Every page being rendered is held in memory at once. A typical page takes tens of MB, but a heavy page (a large DOM, big data payloads) can peak at around 500 MB. Peak memory is roughly `prerender.concurrency` times the heaviest page, plus about 150 MB for the build and 100 MB for the render process; the Chrome renderer adds Chrome's own processes on top. On small CI runners or containers (1 to 2 GB), lower `prerender.concurrency`, for example to `2`. If a render runs out of memory, the build fails with a message suggesting exactly that, rather than crashing.
 
 ## Dev overlay
 
