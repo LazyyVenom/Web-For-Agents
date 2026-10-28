@@ -201,6 +201,12 @@ function exitError(code: number | null, signal: NodeJS.Signals | null, stderr: s
   return err;
 }
 
+function closedError(): RenderError {
+  const e = new RenderError("happy-dom", "the renderer was closed");
+  e.interrupted = true;
+  return e;
+}
+
 export function createIsolatedHappyDomRenderer(
   options: HappyDomRendererOptions = {},
   iso: IsolationOptions = {},
@@ -209,6 +215,8 @@ export function createIsolatedHappyDomRenderer(
   childProcess(): ChildProcess | undefined;
   /** @internal The environment the latest child was started with. */
   childEnv(): Record<string, string> | undefined;
+  /** @internal Pids of every child started so far. */
+  childPids(): number[];
 } {
   interface Pending {
     resolve(r: RenderResult): void;
@@ -224,6 +232,7 @@ export function createIsolatedHappyDomRenderer(
   const retiring = new Set<ChildProcess>();
   let current: ChildProcess | undefined;
   let lastEnv: Record<string, string> | undefined;
+  const pids: number[] = [];
   /** Keeps the dev bundle's mtime fresh while this renderer lives, so other builds never prune it. */
   let toucher: ReturnType<typeof setInterval> | undefined;
 
@@ -275,6 +284,7 @@ export function createIsolatedHappyDomRenderer(
       stdio: ["ignore", "ignore", "pipe", "ipc"],
       serialization: "advanced",
     });
+    if (cp.pid !== undefined) pids.push(cp.pid);
     // For the child's whole life: a failed send or kill emits "error", which unhandled would crash the build.
     cp.on("error", () => {
       if (cp.exitCode === null && cp.signalCode === null) cp.kill("SIGKILL");
@@ -330,12 +340,9 @@ export function createIsolatedHappyDomRenderer(
     name: "happy-dom",
     childProcess: () => current,
     childEnv: () => lastEnv,
+    childPids: () => [...pids],
     async render(url: string, timeoutMs: number, inPage?: InPageScripts): Promise<RenderResult> {
-      if (closed) {
-        const e = new RenderError("happy-dom", "the renderer was closed");
-        e.interrupted = true;
-        throw e;
-      }
+      if (closed) throw closedError();
       const origin = new URL(url).origin;
       if (child && !childOrigins.has(origin)) {
         // The child's network allow list is fixed when it starts: start one that may reach this origin too.
@@ -358,6 +365,8 @@ export function createIsolatedHappyDomRenderer(
         });
       }
       let cp = await child;
+      // close() may have run while this render waited: never start a child after it.
+      if (closed) throw closedError();
       if (!cp.connected) {
         // It died after starting (its exit may not have been handled yet): start another.
         if (current === cp) {
@@ -372,6 +381,7 @@ export function createIsolatedHappyDomRenderer(
           });
         }
         cp = await child;
+        if (closed) throw closedError();
       }
       const id = ++nextId;
       return new Promise<RenderResult>((resolve, reject) => {
@@ -388,14 +398,23 @@ export function createIsolatedHappyDomRenderer(
           resolve: (r) => (clearTimeout(timer), resolve(r)),
           reject: (e) => (clearTimeout(timer), reject(e)),
         });
-        cp.send({ type: "render", id, url, timeoutMs, ...(inPage ? { inPage } : {}) } satisfies ParentMessage, (e) => {
-          if (!e || !settle(id)) return;
-          reject(new RenderError("happy-dom", `could not reach the happy-dom render process (${e.message}); it will be restarted`));
+        /** The child could not take the message: fail this render and drop the child, so the next one restarts. */
+        const unreachable = (e: Error) => {
+          const p = settle(id); // through the wrapper, which clears the backstop timer
           if (current === cp) {
             child = undefined;
             current = undefined;
           }
-        });
+          if (cp.exitCode === null && cp.signalCode === null) cp.kill("SIGKILL");
+          p?.reject(new RenderError("happy-dom", `could not reach the happy-dom render process (${e.message}); it will be restarted`));
+        };
+        try {
+          cp.send({ type: "render", id, url, timeoutMs, ...(inPage ? { inPage } : {}) } satisfies ParentMessage, (e) => {
+            if (e) unreachable(e);
+          });
+        } catch (e) {
+          unreachable(e instanceof Error ? e : new Error(String(e)));
+        }
       });
     },
     async close() {

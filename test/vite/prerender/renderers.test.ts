@@ -467,13 +467,21 @@ describe("happy-dom render process isolation", { timeout: SUITE_TIMEOUT_MS }, ()
     for (const bad of [null, "x", [], new Map(), { a: { body: 1, contentType: "t" } }, { a: { body: "1" } }, { a: null }]) {
       expect(isSyncResources(bad), JSON.stringify(bad)).toBe(false);
     }
-    // a malformed message is ignored: the process keeps rendering
+    // a malformed message is ignored: the good map sent before it still serves the page's sync script
     const r = createIsolatedHappyDomRenderer();
     try {
       await r.render(server.origin + "/fetch", RENDER_MS);
-      r.childProcess()!.send({ type: "resources", syncResources: { a: { body: 1 } } });
-      const res = await r.render(server.origin + "/fetch", RENDER_MS);
-      expect(res.html).toContain("Fetched data text");
+      const cp = r.childProcess()!;
+      const good = {
+        [server.origin + "/classic.js"]: {
+          body: 'document.getElementById("root").innerHTML = "<main><h1>From the good map</h1></main>";',
+          contentType: "text/javascript",
+        },
+      };
+      cp.send({ type: "resources", syncResources: good });
+      cp.send({ type: "resources", syncResources: { [server.origin + "/classic.js"]: { body: 1 } } });
+      const res = await r.render(server.origin + "/syncscript", RENDER_MS);
+      expect(res.html).toContain("<h1>From the good map</h1>");
     } finally {
       await r.close();
     }
@@ -505,20 +513,59 @@ describe("happy-dom render process isolation", { timeout: SUITE_TIMEOUT_MS }, ()
     const { utimesSync, statSync } = await import("node:fs");
     const r = createIsolatedHappyDomRenderer({}, { cacheTouchMs: 50 });
     try {
-      await r.render(server.origin + "/fetch", RENDER_MS);
+      try {
+        await r.render(server.origin + "/fetch", RENDER_MS);
+        const old = new Date(Date.now() - 3_600_000);
+        utimesSync(dir, old, old);
+        await vi.waitFor(() => expect(Date.now() - statSync(dir).mtimeMs).toBeLessThan(10_000), { timeout: 2000 });
+      } finally {
+        await r.close();
+      }
+      // stopped on close
       const old = new Date(Date.now() - 3_600_000);
       utimesSync(dir, old, old);
-      await vi.waitFor(() => expect(Date.now() - statSync(dir).mtimeMs).toBeLessThan(10_000), { timeout: 2000 });
+      await new Promise((res) => setTimeout(res, 200));
+      expect(Date.now() - statSync(dir).mtimeMs).toBeGreaterThan(3_000_000);
     } finally {
-      await r.close();
+      const now = new Date();
+      utimesSync(dir, now, now);
     }
-    // stopped on close
-    const old = new Date(Date.now() - 3_600_000);
-    utimesSync(dir, old, old);
-    await new Promise((res) => setTimeout(res, 200));
-    expect(Date.now() - statSync(dir).mtimeMs).toBeGreaterThan(3_000_000);
-    const now = new Date();
-    utimesSync(dir, now, now);
+  });
+
+  it("leaves no render process running when closed during a start or restart", async () => {
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    // Deterministic: the child is disconnected (render() would restart it) and close() runs before
+    // render() resumes from awaiting its child.
+    {
+      const r = createIsolatedHappyDomRenderer();
+      await r.render(server.origin + "/fetch", RENDER_MS);
+      r.childProcess()!.disconnect();
+      const pending = r.render(server.origin + "/fetch", RENDER_MS).catch((e: unknown) => e);
+      await r.close();
+      expect(((await pending) as RenderError).interrupted).toBe(true);
+      await new Promise((res) => setTimeout(res, 300));
+      expect(r.childPids()).toHaveLength(1);
+      await vi.waitFor(() => expect(r.childPids().filter(alive)).toEqual([]), { timeout: 3000 });
+    }
+    for (const delay of [0, 5, 30, 120]) {
+      // each child dies right after it starts, so renders keep restarting it
+      const r = createIsolatedHappyDomRenderer({}, { extraEnv: { WFA_RENDER_TEST_EXIT_AFTER_READY: "1" } });
+      const renders = Array.from({ length: 4 }, () => r.render(server.origin + "/fetch", RENDER_MS).catch((e: unknown) => e));
+      await new Promise((res) => setTimeout(res, delay));
+      await r.close();
+      const results = await Promise.all(renders);
+      for (const e of results) expect(e).toBeInstanceOf(RenderError);
+      const late = await r.render(server.origin + "/fetch", RENDER_MS).catch((e: unknown) => e);
+      expect((late as RenderError).interrupted).toBe(true);
+      await vi.waitFor(() => expect(r.childPids().filter(alive)).toEqual([]), { timeout: 3000 });
+    }
   });
 
   it("reports a crashed render process and recovers", async () => {
