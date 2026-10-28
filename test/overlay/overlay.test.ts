@@ -142,6 +142,21 @@ describe("mountOverlay", () => {
     expect(shadow().textContent).toContain("No agent actions detected");
   });
 
+  it("shows link actions as text only, with the href and the rejection reason", () => {
+    history.replaceState(null, "", "/about");
+    document.body.innerHTML = `<main><h1>Hi</h1>
+      <a href="/cv.pdf" data-agent-action="open-resume" data-agent-description="Resume">CV</a>
+      <a href="javascript:alert(1)" data-agent-action="evil">x</a></main>`;
+    handle = mountOverlay({ open: true, siteUrl: "https://dev.test" });
+    const text = shadow().textContent!;
+    expect(text).toContain("open-resume · link · markup");
+    expect(text).toContain("https://dev.test/cv.pdf");
+    expect(text).toContain("Not listed in agents.json: javascript: links are not allowed");
+    // The panel's only links are none: hrefs are never turned into anchors.
+    expect(shadow().querySelector("a")).toBeNull();
+    history.replaceState(null, "", "/");
+  });
+
   it("truncates long markdown", () => {
     document.body.innerHTML = `<main><p>${"x".repeat(25000)}</p></main>`;
     handle = mountOverlay({ open: true });

@@ -7,6 +7,7 @@ import { agentMapExtension, type AgentPageData } from "./agentMap";
 import { dropFileCollisions, fileOf, pageLengthWarnings, pageMarkdown, prefixed, SPA_FALLBACK_FILE, stageSiteFiles, type SitePage } from "./siteFiles";
 import { createFileStager, type FileStager, type StageSource } from "./fileStager";
 import { staticActions } from "./generateActions";
+import { markupLinks } from "../shared/markupActions";
 import {
   isExcluded,
   resolveOptions,
@@ -211,12 +212,13 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
     let page: SitePage;
     try {
       const actions = resolved.agentMap ? staticActions(document) : [];
+      const links = resolved.agentMap ? markupLinks(document) : [];
       const info = analyzeDocument(document, {
         pageUrl: url,
         contentSelector: markdown ? markdown.contentSelector : "main",
         route,
       });
-      const inPage: Record<string, unknown> = { "agent-map": { actions } satisfies AgentPageData };
+      const inPage: Record<string, unknown> = { "agent-map": { actions, links } satisfies AgentPageData };
       page = { route, info, listed: !info.noindex, inPage };
     } catch (e) {
       throw prefixed(e, `reading ${file} failed`);

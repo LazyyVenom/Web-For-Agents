@@ -44,3 +44,5 @@ export const WEBMCP_TOOLNAME_ATTR = "toolname";
 export const WEBMCP_TOOLDESCRIPTION_ATTR = "tooldescription";
 export const WEBMCP_TOOLPARAMDESCRIPTION_ATTR = "toolparamdescription";
 export const AGENT_GLOBAL = "__WEB_FOR_AGENTS__";
+/** Markup for a link action: a plain link an agent can open without JavaScript. */
+export const LINK_ACTION_SELECTOR = `a[href][${ACTION_ATTR}]`;

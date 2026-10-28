@@ -17,7 +17,8 @@ export type JsonSchema = {
   additionalProperties?: boolean;
 };
 
-export type ActionKind = "handler" | "form" | "click";
+/** "link": a plain `<a href>` an agent can open without JavaScript (see markupActions). */
+export type ActionKind = "handler" | "form" | "click" | "link";
 
 export interface AgentActionDescriptor {
   name: string;
@@ -27,6 +28,10 @@ export interface AgentActionDescriptor {
   destructive: boolean;
   readOnly: boolean;
   kind: ActionKind;
+  /** Link actions only: the absolute http(s), mailto: or tel: URL. */
+  href?: string;
+  /** Link actions with an http(s) href only: open it with a GET request. */
+  method?: "GET";
 }
 
 export type AgentActionResult =

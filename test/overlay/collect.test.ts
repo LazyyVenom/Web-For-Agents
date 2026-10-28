@@ -112,6 +112,35 @@ describe("collectPageReport", () => {
     ]);
   });
 
+  it("link actions from markup: resolved against the page URL, rejected hrefs carry a warning", () => {
+    history.replaceState(null, "", "/about");
+    document.body.innerHTML = `
+      <a href="files/cv.pdf" data-agent-action="open-resume" data-agent-description="Resume">CV</a>
+      <a href="mailto:me@x.test" data-agent-action="mail" data-agent-destructive="true">Mail</a>
+      <a href="data:text/html,x" data-agent-action="evil">x</a>
+      <a data-agent-action="no-href">x</a>`;
+    expect(collectPageReport(document, { siteUrl: "https://x.test" }).actions).toEqual([
+      { name: "evil", description: null, kind: "link", destructive: false, source: "markup", warning: "Not listed in agents.json: data: links are not allowed (only http(s), mailto: and tel:)" },
+      { name: "mail", description: null, kind: "link", destructive: true, source: "markup", href: "mailto:me@x.test" },
+      { name: "no-href", description: null, kind: "click", destructive: false, source: "markup" },
+      { name: "open-resume", description: "Resume", kind: "link", destructive: false, source: "markup", href: "https://x.test/files/cv.pdf" },
+    ]);
+    expect(collectPageReport(document).actions.find((a) => a.name === "open-resume")!.href).toBe(
+      new URL("/files/cv.pdf", location.href).href,
+    );
+  });
+
+  it("a registry action wins over a link action of the same name", () => {
+    (window as unknown as Record<string, unknown>)[AGENT_GLOBAL] = {
+      version: 1,
+      actions: () => [{ name: "open-resume", description: "Open", kind: "click", destructive: false }],
+    };
+    document.body.innerHTML = '<a href="/cv.pdf" data-agent-action="open-resume">CV</a>';
+    expect(collectPageReport(document).actions).toEqual([
+      { name: "open-resume", description: "Open", kind: "click", destructive: false, source: "registry" },
+    ]);
+  });
+
   it("actions from the agent action registry", () => {
     const w = window as unknown as Record<string, unknown>;
     w[AGENT_GLOBAL] = {

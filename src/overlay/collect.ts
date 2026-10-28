@@ -6,7 +6,7 @@ import { routeOf, trimTrailingSlash } from "../shared/url";
 
 export { routeOf };
 import { AGENT_GLOBAL } from "../shared/conventions";
-import { markupActions } from "../shared/markupActions";
+import { markupActions, resolveLinkHref } from "../shared/markupActions";
 import type { ActionKind, AgentGlobal } from "../shared/agent";
 import { errorMessage } from "../shared/errors";
 import { compareStrings } from "../shared/sort";
@@ -17,6 +17,10 @@ export interface OverlayAction {
   kind: ActionKind;
   destructive: boolean;
   source: "registry" | "markup" | "webmcp-declarative";
+  /** Link actions only: the absolute URL agents.json lists. Shown as text, never followed. */
+  href?: string;
+  /** Link actions only: why the link is left out of agents.json (for example a javascript: href). */
+  warning?: string;
 }
 
 export interface PageReport {
@@ -91,10 +95,14 @@ function registryActions(doc: Document): OverlayAction[] {
   }
 }
 
-function collectActions(doc: Document): OverlayAction[] {
-  const markup = markupActions(doc).map(
-    ({ name, description, kind, destructive, source }): OverlayAction => ({ name, description, kind, destructive, source }),
-  );
+function collectActions(doc: Document, pageUrl: string | undefined): OverlayAction[] {
+  const markup = markupActions(doc).map(({ name, description, kind, destructive, source, href }): OverlayAction => {
+    const a: OverlayAction = { name, description, kind, destructive, source };
+    if (kind !== "link") return a;
+    // The same check as agents.json, resolved against the same page URL as the markdown links.
+    const r = resolveLinkHref(href ?? "", pageUrl);
+    return r.ok ? { ...a, href: r.href } : { ...a, warning: `Not listed in agents.json: ${r.reason}` };
+  });
   const seen = new Set<string>();
   const out: OverlayAction[] = [];
   for (const a of [...registryActions(doc), ...markup]) {
@@ -146,7 +154,7 @@ export function collectPageReport(
     /* leave empty */
   }
   try {
-    actions = collectActions(doc);
+    actions = collectActions(doc, pageUrl);
   } catch {
     /* leave empty */
   }

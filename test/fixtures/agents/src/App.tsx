@@ -1,5 +1,5 @@
 import { useEffect, type ComponentType } from "react";
-import { AgentForm, Seo, agentParam, useAgentAction } from "../../../../src/index";
+import { AgentForm, Seo, agentLinkProps, agentParam, useAgentAction } from "../../../../src/index";
 
 /** Mounted twice on "/": the duplicate name keeps only the first mounted one. */
 function SubscribeButton({ where }: { where: string }) {
@@ -52,6 +52,11 @@ function Contact() {
         <input type="file" name="attachment" />
         <button type="submit">Send</button>
       </AgentForm>
+      {/* Link actions: no handler, no registration; listed from the markup. */}
+      <a href="/resume.pdf" {...agentLinkProps({ name: "open-resume", description: "Open the resume (PDF)" })}>Resume</a>
+      {/* Same name as the registered form: the registry wins. */}
+      <a href="mailto:hello@example.com" {...agentLinkProps({ name: "contact", description: "Email us" })}>Email</a>
+      <a href="data:text/html,hi" {...agentLinkProps({ name: "bad-link", description: "Never listed" })}>Bad</a>
     </main>
   );
 }
