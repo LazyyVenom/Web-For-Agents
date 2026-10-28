@@ -95,9 +95,13 @@ export async function audit(url: string, opts: AuditOptions = {}): Promise<Audit
     const getSameOrigin = (u: string, accept?: string): Promise<FetchResult> =>
       sameOrigin(u, page.finalUrl) ? get(u, accept) : Promise.resolve(notFetched(u));
 
-    const robots = await get(at(ROBOTS_PATH));
-    const listed = isOk(robots) ? parseRobots(robots.body).sitemaps[0] : undefined;
-    const sitemapUrl = (listed && tryResolveUrl(listed, page.finalUrl)) || at(SITEMAP_PATH);
+    // Only the sitemap location depends on robots.txt; every other file is fetched alongside it,
+    // so a slow or hanging robots.txt delays the sitemap alone.
+    const robotsP = get(at(ROBOTS_PATH));
+    const sitemapP = robotsP.then((robots) => {
+      const listed = isOk(robots) ? parseRobots(robots.body).sitemaps[0] : undefined;
+      return getSameOrigin((listed && tryResolveUrl(listed, page.finalUrl)) || at(SITEMAP_PATH));
+    });
     const alt = markdownAlternate(html);
     const altUrl = alt === null ? null : tryResolveUrl(alt, page.finalUrl);
     const pagePath = new URL(page.finalUrl).pathname;
@@ -115,8 +119,9 @@ export async function audit(url: string, opts: AuditOptions = {}): Promise<Audit
           ? [new URL(custom, page.finalUrl).href]
           : inDirs(custom.replace(/^\.\//, ""));
 
-    const [sitemap, llmsTxt, markdown, agentMap] = await Promise.all([
-      getSameOrigin(sitemapUrl),
+    const [robots, sitemap, llmsTxt, markdown, agentMap] = await Promise.all([
+      robotsP,
+      sitemapP,
       probe(get, inDirs(LLMS_TXT_PATH.slice(1))),
       getSameOrigin(markdownUrl, `${MARKDOWN_MIME},*/*;q=0.5`),
       probe(get, agentMapUrls),

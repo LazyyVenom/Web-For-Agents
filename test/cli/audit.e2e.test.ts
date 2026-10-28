@@ -223,4 +223,26 @@ describe("audit e2e", () => {
     expect(code).toBe(0);
     expect(JSON.parse(out).finalUrl).toBe(s.url + "/");
   });
+
+  it("a hanging robots.txt delays only the sitemap", async () => {
+    const seen = new Map<string, number>();
+    const t0 = Date.now();
+    const s = await serve({}, (req, res) => {
+      const path = (req.url ?? "/").split("?")[0]!;
+      seen.set(path, Date.now() - t0);
+      if (path === "/robots.txt") return; // never answers
+      if (path === "/") {
+        res.writeHead(200, htmlH);
+        res.end(spaShell);
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+    const timeout = 1500;
+    const { out } = await run(["audit", s.url + "/", "--json", "--timeout", String(timeout)]);
+    expect(JSON.parse(out).checks.find((c: Check) => c.id === "robots").message).toContain("timed out");
+    for (const p of ["/llms.txt", "/agents.json", "/index.md"]) expect(seen.get(p)).toBeLessThan(timeout / 2);
+    expect(seen.get("/sitemap.xml")).toBeGreaterThanOrEqual(timeout);
+  });
 });
