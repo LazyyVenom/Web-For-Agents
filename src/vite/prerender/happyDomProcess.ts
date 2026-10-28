@@ -211,7 +211,7 @@ export function createIsolatedHappyDomRenderer(
     if (cp.exitCode !== null || cp.signalCode !== null) return;
     const exited = new Promise<void>((r) => cp.once("exit", () => r()));
     try {
-      cp.send({ type: "close" } satisfies ParentMessage);
+      cp.send({ type: "close" } satisfies ParentMessage, (e) => e && cp.kill("SIGKILL"));
     } catch {
       cp.kill("SIGKILL");
     }
@@ -249,6 +249,10 @@ export function createIsolatedHappyDomRenderer(
       stdio: ["ignore", "ignore", "pipe", "ipc"],
       serialization: "advanced",
     });
+    // For the child's whole life: a failed send or kill emits "error", which unhandled would crash the build.
+    cp.on("error", () => {
+      if (cp.exitCode === null && cp.signalCode === null) cp.kill("SIGKILL");
+    });
     let stderr = "";
     cp.stderr?.setEncoding("utf8");
     cp.stderr?.on("data", (d: string) => {
@@ -273,7 +277,8 @@ export function createIsolatedHappyDomRenderer(
         cp.off("exit", onExit);
         cp.off("error", reject);
         // Sent before any render, and IPC keeps order, so every render sees them.
-        if (syncResources) cp.send({ type: "resources", syncResources } satisfies ParentMessage);
+        // A failed send means the child is gone; its exit handler fails or restarts the renders.
+        if (syncResources) cp.send({ type: "resources", syncResources } satisfies ParentMessage, () => {});
         resolve();
       });
     });
@@ -326,7 +331,22 @@ export function createIsolatedHappyDomRenderer(
           if (child === started) child = undefined;
         });
       }
-      const cp = await child;
+      let cp = await child;
+      if (!cp.connected) {
+        // It died after starting (its exit may not have been handled yet): start another.
+        if (current === cp) {
+          child = undefined;
+          current = undefined;
+        }
+        if (!child) {
+          const started = start([...childOrigins]);
+          child = started;
+          started.catch(() => {
+            if (child === started) child = undefined;
+          });
+        }
+        cp = await child;
+      }
       const id = ++nextId;
       return new Promise<RenderResult>((resolve, reject) => {
         // Backstop for a child whose event loop is stuck (an endless loop in page code): the child
@@ -342,7 +362,14 @@ export function createIsolatedHappyDomRenderer(
           resolve: (r) => (clearTimeout(timer), resolve(r)),
           reject: (e) => (clearTimeout(timer), reject(e)),
         });
-        cp.send({ type: "render", id, url, timeoutMs, ...(inPage ? { inPage } : {}) } satisfies ParentMessage);
+        cp.send({ type: "render", id, url, timeoutMs, ...(inPage ? { inPage } : {}) } satisfies ParentMessage, (e) => {
+          if (!e || !settle(id)) return;
+          reject(new RenderError("happy-dom", `could not reach the happy-dom render process (${e.message}); it will be restarted`));
+          if (current === cp) {
+            child = undefined;
+            current = undefined;
+          }
+        });
       });
     },
     async close() {

@@ -78,6 +78,8 @@ async function runRenderChild(): Promise<void> {
     }
   });
   send({ type: "ready" });
+  // @internal For tests: a process that dies right after starting.
+  if (process.env.WFA_RENDER_TEST_EXIT_AFTER_READY === "1") setImmediate(() => process.exit(3));
   // The parent went away (crashed or was killed): nothing left to render for.
   process.on("disconnect", () => process.exit(0));
 }

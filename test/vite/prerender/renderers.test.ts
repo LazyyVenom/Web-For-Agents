@@ -479,6 +479,26 @@ describe("happy-dom render process isolation", { timeout: SUITE_TIMEOUT_MS }, ()
     }
   });
 
+  it("fails renders cleanly when the render process dies right after starting", async () => {
+    const uncaught = vi.fn();
+    process.on("uncaughtException", uncaught);
+    const r = createIsolatedHappyDomRenderer(
+      { syncResources: { [server.origin + "/x.js"]: { body: "1", contentType: "text/javascript" } } },
+      { extraEnv: { WFA_RENDER_TEST_EXIT_AFTER_READY: "1" } },
+    );
+    try {
+      for (let i = 0; i < 3; i++) {
+        const err = await r.render(server.origin + "/fetch", RENDER_MS).catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(RenderError);
+      }
+      await new Promise((res) => setTimeout(res, 200));
+      expect(uncaught).not.toHaveBeenCalled();
+    } finally {
+      process.off("uncaughtException", uncaught);
+      await r.close();
+    }
+  });
+
   it("reports a crashed render process and recovers", async () => {
     const r = createIsolatedHappyDomRenderer();
     try {
