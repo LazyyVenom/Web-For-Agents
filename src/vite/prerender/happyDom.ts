@@ -1,5 +1,5 @@
 import { Browser, PropertySymbol, type BrowserPage } from "happy-dom";
-import { READY_CHECK, type ReadyState } from "./probe";
+import { IDLE_MS, SETTLED_IDLE_MS, readyCheck, type ReadyState } from "./probe";
 import {
   RenderError,
   SERIALIZE_EXPR,
@@ -7,6 +7,8 @@ import {
   createDeadline,
   createOriginPolicy,
   errorMessage,
+  POLL_MS,
+  SETTLED_POLL_MS,
   readyTimeoutMessage,
   runInPage,
   waitForReady,
@@ -112,6 +114,11 @@ function pageSink(page: BrowserPage): Sink & { failed: Promise<never>; done(): v
 export interface HappyDomRendererOptions {
   /** Origins pages may load from besides the prerender server. Default []. */
   allowOrigins?: readonly string[];
+  /**
+   * Readiness quiet window in ms (prerender.idleMs). Default: SETTLED_IDLE_MS when happy-dom reports
+   * the page settled within its cap, else IDLE_MS.
+   */
+  idleMs?: number;
 }
 
 /** Scheme a blocked request is rewritten to, so happy-dom rejects it like a network error before connecting. */
@@ -209,17 +216,23 @@ export function createHappyDomRenderer(opts: HappyDomRendererOptions = {}): Rend
         try {
           await step(page.goto(url));
           let timer: ReturnType<typeof setTimeout> | undefined;
-          await step(
+          const settled = await step(
             Promise.race([
-              page.waitUntilComplete(),
-              new Promise<void>((r) => (timer = setTimeout(r, Math.min(deadline.remaining(), 2000)))),
+              page.waitUntilComplete().then(() => true),
+              new Promise<boolean>((r) => (timer = setTimeout(() => r(false), Math.min(deadline.remaining(), 2000)))),
             ]).finally(() => clearTimeout(timer)),
           );
+          const idleMs = opts.idleMs ?? (settled ? SETTLED_IDLE_MS : IDLE_MS);
+          const check = readyCheck(idleMs);
           await step(
-            waitForReady(async () => {
-              const r = page.evaluate(READY_CHECK) as ReadyState;
-              return { ready: r.ready, errors: withoutBlockedLoads([...r.errors], state.blocked) };
-            }, timeoutMs),
+            waitForReady(
+              async () => {
+                const r = page.evaluate(check) as ReadyState;
+                return { ready: r.ready, errors: withoutBlockedLoads([...r.errors], state.blocked) };
+              },
+              timeoutMs,
+              Math.min(settled ? SETTLED_POLL_MS : POLL_MS, idleMs),
+            ),
           );
         } catch (e) {
           throw new RenderError("happy-dom", errorMessage(e) + blockedHint(state.blocked));

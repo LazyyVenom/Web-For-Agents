@@ -1,4 +1,4 @@
-import { READY_CHECK, type ReadyState } from "./probe";
+import { IDLE_MS, readyCheck, type ReadyState } from "./probe";
 import {
   RenderError,
   SERIALIZE_EXPR,
@@ -6,6 +6,7 @@ import {
   createDeadline,
   createOriginPolicy,
   errorMessage,
+  POLL_MS,
   readyTimeoutMessage,
   runInPage,
   waitForReady,
@@ -36,6 +37,8 @@ export async function createChromeRenderer(
     executablePath?: string;
     /** Origins pages may load from besides the prerender server. Default []. */
     allowOrigins?: readonly string[];
+    /** Readiness quiet window in ms (prerender.idleMs). Default IDLE_MS. */
+    idleMs?: number;
     /** @internal For tests: overrides PAGE_CLOSE_MS. */
     pageCloseMs?: number;
   } = {},
@@ -66,6 +69,8 @@ export async function createChromeRenderer(
   }
 
   const allowed = createOriginPolicy(opts.allowOrigins);
+  const idleMs = opts.idleMs ?? IDLE_MS;
+  const check = readyCheck(idleMs);
 
   return {
     name: channel,
@@ -122,10 +127,14 @@ export async function createChromeRenderer(
             timeoutText,
           );
           await deadline.race(
-            waitForReady(async () => {
-              const r = (await page.evaluate(READY_CHECK)) as ReadyState;
-              return { ready: r.ready, errors: withoutBlockedLoads([...pageErrors, ...r.errors], blocked) };
-            }, timeoutMs),
+            waitForReady(
+              async () => {
+                const r = (await page.evaluate(check)) as ReadyState;
+                return { ready: r.ready, errors: withoutBlockedLoads([...pageErrors, ...r.errors], blocked) };
+              },
+              timeoutMs,
+              Math.min(POLL_MS, idleMs),
+            ),
             timeoutText,
           );
           html = (await deadline.race(page.evaluate(SERIALIZE_EXPR), timeoutText)) as string;

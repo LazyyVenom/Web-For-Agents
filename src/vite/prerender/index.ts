@@ -43,6 +43,7 @@ export async function prerenderSite(input: {
   const pool = createRendererPool({
     ...(pr.executablePath !== undefined ? { executablePath: pr.executablePath } : {}),
     allowOrigins: pr.allowOrigins,
+    ...(pr.idleMs !== undefined ? { idleMs: pr.idleMs } : {}),
   });
   try {
     const server = await startStaticServer({

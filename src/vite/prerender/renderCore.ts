@@ -91,12 +91,16 @@ export function readyTimeoutMessage(timeoutMs: number): string {
   return `did not become ready within ${timeoutMs}ms`;
 }
 
-const POLL_MS = 50;
+/** How often readiness is polled by default (Chrome). */
+export const POLL_MS = 50;
+/** happy-dom's poll interval when its page has settled (see SETTLED_IDLE_MS). */
+export const SETTLED_POLL_MS = 20;
 
-/** Polls `check` every 50 ms until ready; rejects with the first reported error or on timeout. */
+/** Polls `check` every `pollMs` until ready; rejects with the first reported error or on timeout. */
 export async function waitForReady(
   check: () => Promise<{ ready: boolean; errors: string[] }>,
   timeoutMs: number,
+  pollMs: number = POLL_MS,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -104,7 +108,7 @@ export async function waitForReady(
     if (errors.length) throw new Error(errors[0]);
     if (ready) return;
     if (Date.now() >= deadline) throw new Error(readyTimeoutMessage(timeoutMs));
-    await new Promise((r) => setTimeout(r, POLL_MS));
+    await new Promise((r) => setTimeout(r, pollMs));
   }
 }
 

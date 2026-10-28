@@ -8,6 +8,7 @@ import {
   READY_CHECK,
   REL_SRC_ATTR,
   prepareShell,
+  readyCheck,
   type ReadyState,
 } from "../../../src/vite/prerender/probe";
 
@@ -81,6 +82,14 @@ describe("probe readiness", () => {
     await sleep(IDLE_MS + 50);
     expect(check().ready).toBe(true);
     expect(check().path).toBe("/some/path");
+  });
+
+  it("readyCheck takes the quiet window", async () => {
+    const { window } = setup();
+    await sleep(80);
+    expect((window.eval(readyCheck(50)) as ReadyState).ready).toBe(true);
+    expect((window.eval(readyCheck(IDLE_MS)) as ReadyState).ready).toBe(false);
+    expect(READY_CHECK).toBe(readyCheck(IDLE_MS));
   });
 
   it("respects __WFA_READY__ = false", async () => {

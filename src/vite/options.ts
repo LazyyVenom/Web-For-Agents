@@ -71,6 +71,11 @@ export interface PrerenderOptions {
    * that does not go to the build's own files is blocked and fails like a network error. Default [].
    */
   allowOrigins?: string[];
+  /**
+   * How long, in ms, a page must be quiet (no DOM changes, no requests in flight) to count as rendered.
+   * Default: 50 for happy-dom once it reports every timer and request settled, else 200 (always 200 for Chrome).
+   */
+  idleMs?: number;
 }
 
 export interface MarkdownOptions {
@@ -85,8 +90,9 @@ export interface LlmsOptions {
   description?: string;
 }
 
-export type ResolvedPrerender = Required<Omit<PrerenderOptions, "executablePath">> & {
+export type ResolvedPrerender = Required<Omit<PrerenderOptions, "executablePath" | "idleMs">> & {
   executablePath?: string;
+  idleMs?: number;
 };
 
 export interface ResolvedOptions {
@@ -194,6 +200,12 @@ function resolvePrerender(input: PrerenderOptions): ResolvedPrerender {
     allowOrigins,
   };
   if (input.executablePath !== undefined) out.executablePath = input.executablePath;
+  if (input.idleMs !== undefined) {
+    if (typeof input.idleMs !== "number" || !Number.isInteger(input.idleMs) || input.idleMs < 0) {
+      bad("idleMs", "a non-negative integer");
+    }
+    out.idleMs = input.idleMs;
+  }
   return out;
 }
 

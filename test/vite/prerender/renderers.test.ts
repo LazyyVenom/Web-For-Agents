@@ -293,6 +293,29 @@ describe("happy-dom renderer", { timeout: SUITE_TIMEOUT_MS }, () => {
   suite("happy-dom", async (opts) => createHappyDomRenderer(opts));
 });
 
+describe("happy-dom readiness window", { timeout: SUITE_TIMEOUT_MS }, () => {
+  const timed = async (r: Renderer, path: string) => {
+    try {
+      const t = Date.now();
+      await r.render(server.origin + path, RENDER_MS);
+      return Date.now() - t;
+    } finally {
+      await r.close();
+    }
+  };
+
+  it("honours prerender.idleMs", async () => {
+    expect(await timed(createHappyDomRenderer({ idleMs: 700 }), "/fetch")).toBeGreaterThanOrEqual(700);
+  });
+
+  it("waits the short window once the page settled", async () => {
+    const settled = await timed(createHappyDomRenderer(), "/fetch");
+    expect(settled).toBeLessThan(200);
+    // a running interval keeps happy-dom busy until its 2s cap
+    expect(await timed(createHappyDomRenderer(), "/interval")).toBeGreaterThanOrEqual(1900);
+  });
+});
+
 describe("isolated happy-dom renderer (child process)", { timeout: SUITE_TIMEOUT_MS }, () => {
   suite("happy-dom", async (opts) => createIsolatedHappyDomRenderer(opts));
 });

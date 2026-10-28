@@ -123,6 +123,16 @@ describe("normalizeRoute", () => {
 describe("prerender and output options", () => {
   const base = { siteUrl: "https://a.com", robots } as const;
 
+  it("validates prerender.idleMs", () => {
+    expect(resolveOptions({ ...base, prerender: { idleMs: 0 } }).prerender).toMatchObject({ idleMs: 0 });
+    expect(resolveOptions({ ...base, prerender: {} }).prerender).not.toHaveProperty("idleMs");
+    for (const idleMs of [-1, 1.5, "50"]) {
+      expect(() => resolveOptions({ ...base, prerender: { idleMs: idleMs as number } })).toThrow(
+        "prerender.idleMs must be a non-negative integer",
+      );
+    }
+  });
+
   it("validates and normalizes prerender.allowOrigins", () => {
     const r = resolveOptions({
       ...base,

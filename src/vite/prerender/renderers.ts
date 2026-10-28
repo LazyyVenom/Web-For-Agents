@@ -22,7 +22,11 @@ export interface RendererPool {
 }
 
 /** Lazily creates one renderer per name. */
-export function createRendererPool(opts: { executablePath?: string; allowOrigins?: readonly string[] }): RendererPool {
+export function createRendererPool(opts: {
+  executablePath?: string;
+  allowOrigins?: readonly string[];
+  idleMs?: number;
+}): RendererPool {
   const made = new Map<RendererName, Promise<Renderer>>();
   return {
     get(name) {
@@ -30,10 +34,16 @@ export function createRendererPool(opts: { executablePath?: string; allowOrigins
       if (!r) {
         r =
           name === "happy-dom"
-            ? Promise.resolve(createIsolatedHappyDomRenderer({ allowOrigins: opts.allowOrigins ?? [] }))
+            ? Promise.resolve(
+                createIsolatedHappyDomRenderer({
+                  allowOrigins: opts.allowOrigins ?? [],
+                  ...(opts.idleMs !== undefined ? { idleMs: opts.idleMs } : {}),
+                }),
+              )
             : createChromeRenderer(name, {
                 ...(opts.executablePath !== undefined ? { executablePath: opts.executablePath } : {}),
                 allowOrigins: opts.allowOrigins ?? [],
+                ...(opts.idleMs !== undefined ? { idleMs: opts.idleMs } : {}),
               });
         made.set(name, r);
       }
