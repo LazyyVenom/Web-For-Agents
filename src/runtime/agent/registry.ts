@@ -137,6 +137,7 @@ const UNIT = /\\u[\da-f]{4}|\\[^]|[^]/giu;
 const neutralize = (s: string): string =>
   s.replace(UNSAFE, (c) => "\\u" + c.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0"));
 
+/** Cuts escaped text without splitting an escape sequence or a surrogate pair. */
 function clip(s: string, max: number): string {
   if (s.length <= max) return s;
   let out = "";
@@ -152,31 +153,27 @@ const plural = (n: number): string => `${n} field${n === 1 ? "" : "s"}`;
 /** [path, JSON value, path made only of schema properties] */
 type Leaf = [string, string, boolean];
 
-/** Leaves as dotted paths: schema properties in schema order, then other keys sorted, then array items. */
+/** Leaves as dotted paths: schema properties in schema order, then other keys sorted; array items in order. */
 function flatten(s: JsonSchema | undefined, v: unknown, path: string, declared: boolean, out: Leaf[]): void {
   const props = s?.properties ?? {};
   const o = v as Record<string, unknown>;
-  const keys: Array<string | number> = Array.isArray(v)
-    ? v.map((_, i) => i)
-    : typeof v === "object" && v
-      ? [
-          ...Object.keys(props).filter((k) => hasOwn(o, k)),
-          ...Object.keys(o)
-            .filter((k) => !hasOwn(props, k))
-            .sort(compareStrings),
-        ]
-      : [];
+  const arr = Array.isArray(v);
+  const keys =
+    !v || typeof v !== "object"
+      ? []
+      : arr
+        ? Object.keys(v)
+        : Object.keys(props)
+            .filter((k) => hasOwn(o, k))
+            .concat(Object.keys(o).filter((k) => !hasOwn(props, k)).sort(compareStrings));
   if (!keys.length) {
-    if (path) out.push([path, v === undefined ? "undefined" : JSON.stringify(v), declared]);
+    if (path) out.push([path, String(JSON.stringify(v)), declared]);
     return;
   }
   for (const k of keys) {
-    if (typeof k === "number") flatten(s?.items, o[k], `${path}[${k}]`, false, out);
-    else {
-      const own = hasOwn(props, k);
-      const seg = /^[A-Za-z_$][\w$]*$/.test(k) ? (path ? "." : "") + k : `[${JSON.stringify(k)}]`;
-      flatten(own ? props[k] : undefined, o[k], path + seg, declared && own, out);
-    }
+    const own = !arr && hasOwn(props, k);
+    const seg = arr ? `[${k}]` : /^[A-Za-z_$][\w$]*$/.test(k) ? (path && ".") + k : `[${JSON.stringify(k)}]`;
+    flatten(arr ? s?.items : own ? props[k] : undefined, o[k], path + seg, declared && own, out);
   }
 }
 
@@ -192,13 +189,11 @@ function describeInput(schema: JsonSchema, value: Record<string, unknown>): stri
   const budget = Math.max(24, Math.floor(CONFIRM_BUDGET / n));
   const lines: string[] = [];
   let extra = 0;
-  let omitted = 0;
   for (const [path, v, declared] of leaves) {
     const line = `${clip(neutralize(path), budget)}: ${clip(neutralize(v), budget)}`;
-    if (!declared && (extra += line.length + 1) > CONFIRM_BUDGET) omitted++;
-    else lines.push(line);
+    if (declared || (extra += line.length + 1) <= CONFIRM_BUDGET) lines.push(line);
   }
-  if (omitted) lines.push(`\u2026(${plural(omitted)} omitted)`);
+  if (lines.length < n) lines.push(`\u2026(${plural(n - lines.length)} omitted)`);
   return `Agent-provided input (${plural(n)})${n ? ":\n" + lines.join("\n") : "."}`;
 }
 

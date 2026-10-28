@@ -161,8 +161,6 @@ const MAX_REGEX_INPUT = 10_000;
 
 export type Errors = Array<{ field: string; message: string }>;
 
-const NOT_ALLOWED = "is not an allowed field";
-
 function checkValue(s: JsonSchema, v: unknown, field: string, errors: Errors): void {
   const bad = (message: string): void => {
     errors.push({ field, message });
@@ -239,7 +237,7 @@ function checkObject(schema: JsonSchema, obj: Record<string, unknown>, prefix: s
   for (const [key, value] of Object.entries(obj)) {
     const prop = props[key];
     if (!hasOwn(props, key) || !prop) {
-      if (schema.additionalProperties !== true) errors.push({ field: prefix + key, message: NOT_ALLOWED });
+      if (schema.additionalProperties !== true) errors.push({ field: prefix + key, message: "is not an allowed field" });
       continue;
     }
     if (value === undefined) continue;
@@ -266,10 +264,6 @@ export function validateFormInput(
   schema: JsonSchema,
   input: unknown,
 ): { ok: true; value: Record<string, unknown> } | { ok: false; errors: Errors } {
-  const r = validateInput(schema, input);
-  if (r.ok) return r;
-  const props = schema.properties ?? {};
-  const deferred = (e: Errors[number]): boolean =>
-    e.message === NOT_ALLOWED && !hasOwn(props, e.field) && hasOwn(input as object, e.field);
-  return r.errors.every(deferred) ? { ok: true, value: input as Record<string, unknown> } : r;
+  const r = validateInput({ ...schema, additionalProperties: true }, input);
+  return r.ok ? r : validateInput(schema, input);
 }

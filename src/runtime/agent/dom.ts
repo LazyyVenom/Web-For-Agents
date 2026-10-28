@@ -6,9 +6,7 @@ const CONCEALED = `${HIDDEN_SELECTOR}, ${NOT_HIDDEN_ATTR}`;
 /** Disabled by a `fieldset[disabled]` ancestor, except inside that fieldset's first `<legend>`. */
 export function inDisabledFieldset(el: Element): boolean {
   for (let child = el, p = el.parentElement; p; child = p, p = p.parentElement) {
-    if (p.tagName === "FIELDSET" && p.hasAttribute("disabled")) {
-      if (child !== Array.from(p.children).find((c) => c.tagName === "LEGEND")) return true;
-    }
+    if (p.matches("fieldset[disabled]") && child !== p.querySelector(":scope > legend")) return true;
   }
   return false;
 }
