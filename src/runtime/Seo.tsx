@@ -2,6 +2,7 @@ import { createContext, createElement, useContext, useEffect, useLayoutEffect, u
 import type { ReactNode } from "react";
 import { buildEntryTags, buildHeadTags, defaultCanonicalTags } from "./buildHeadTags";
 import { HEAD_OWNED_ATTR } from "../shared/conventions";
+import { DESCRIPTION_MAX_CHARS, DESCRIPTION_MIN_CHARS, TITLE_MAX_CHARS } from "../shared/metaLength";
 import { applyHeadTags, removeHeadTag } from "./headManager";
 import type { HeadTag, SeoDefaults, SeoProps } from "./types";
 
@@ -122,6 +123,26 @@ function release(): void {
 
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
+const warnedLengths = new Set<string>();
+
+/** Development-only: warns once per distinct value. The guard is the form bundlers replace, so production drops it. */
+function warnLengths(props: SeoProps): void {
+  if (process.env.NODE_ENV !== "production") {
+    const { title, description } = props;
+    const once = (value: string, message: string) => {
+      if (warnedLengths.has(message + value)) return;
+      warnedLengths.add(message + value);
+      console.warn(`[web-for-agents] ${message}: "${value}"`);
+    };
+    if (title && title.length > TITLE_MAX_CHARS) {
+      once(title, `<Seo> title is ${title.length} characters (over ${TITLE_MAX_CHARS})`);
+    }
+    if (description && (description.length < DESCRIPTION_MIN_CHARS || description.length > DESCRIPTION_MAX_CHARS)) {
+      once(description, `<Seo> description is ${description.length} characters (aim for ${DESCRIPTION_MIN_CHARS}-${DESCRIPTION_MAX_CHARS})`);
+    }
+  }
+}
+
 const DefaultsContext = createContext<SeoDefaults>({});
 
 export interface SeoProviderProps {
@@ -154,6 +175,11 @@ export function useSeo(props: SeoProps): void {
   const [order] = useState(() => ++seq);
   const entryRef = useRef<Entry | null>(null);
   const key = JSON.stringify([props, defaults]);
+
+  useEffect(() => {
+    warnLengths(props);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.title, props.description]);
 
   useIsoLayoutEffect(() => {
     const store = getStore(document);
