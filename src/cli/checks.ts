@@ -213,7 +213,7 @@ function checkJsonLd({ html }: AuditInputs): Outcome {
   if (!parsed.some((p) => jsonLdTypes(p).length > 0)) {
     return warn("JSON-LD parses but has no @type", "Add an @type (for example Organization) to your JSON-LD.");
   }
-  return pass(`${parsed.length} JSON-LD block${parsed.length === 1 ? "" : "s"} parse with an @type`);
+  return pass(`${parsed.length} JSON-LD block${parsed.length === 1 ? " parses" : "s parse"} with an @type`);
 }
 
 function checkRobots({ page, robots }: AuditInputs): Outcome {
