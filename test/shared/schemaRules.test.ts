@@ -39,7 +39,7 @@ describe("schemaRules", () => {
     expect([r.total, r.scored]).toEqual([6, 2]);
   });
 
-  it("BreadcrumbList: position, name and item, except item on the last element", () => {
+  it("BreadcrumbList: position, name (or the item's name) and item, except item on the last element", () => {
     expect(missing({ "@type": "BreadcrumbList" })).toEqual(["BreadcrumbList itemListElement"]);
     const list = {
       "@type": "BreadcrumbList",
@@ -47,14 +47,27 @@ describe("schemaRules", () => {
         { "@type": "ListItem", position: 1, name: "Home", item: "https://e.com/" },
         { "@type": "ListItem", name: "Projects" },
         { "@type": "ListItem", position: 3, item: { "@id": "https://e.com/p/x" } },
-        { "@type": "ListItem", position: 4 },
+        { "@type": "ListItem", position: 4, item: { "@id": "https://e.com/p/y", name: "Y" } },
+        { "@type": "ListItem", position: 5 },
       ],
     };
     expect(missing(list)).toEqual([
       "BreadcrumbList itemListElement[1].position",
       "BreadcrumbList itemListElement[1].item",
-      "BreadcrumbList itemListElement[3].name",
+      "BreadcrumbList itemListElement[2].name (or item.name)",
+      "BreadcrumbList itemListElement[4].name (or item.name)",
     ]);
+  });
+
+  it("lists scored issues before retired ones, each in document order", () => {
+    const faq = { "@type": "FAQPage", mainEntity: [{}, {}] };
+    const r = checkSchemaNodes(jsonLdNodes([faq, { "@type": "Recipe" }]), 3);
+    expect(r.issues.map((i) => `${i.type} ${i.path}`)).toEqual([
+      "Recipe name",
+      "Recipe image",
+      "FAQPage mainEntity[0].name",
+    ]);
+    expect([r.total, r.scored]).toEqual([6, 2]);
   });
 
   it("Product: name, one of offers/aggregateRating/review, offer price", () => {

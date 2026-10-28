@@ -12,8 +12,6 @@ export interface Requirement {
   anyOf: readonly string[];
   /** Not required on the last element of the enclosing array (BreadcrumbList `item`). */
   exceptLast?: boolean;
-  /** Not required when this sibling property holds an object (BreadcrumbList `name` when `item` is a Thing). */
-  unlessObject?: string;
 }
 
 /** Requirements for the value of `prop` (each element when it is an array). Non-object values are skipped. */
@@ -67,7 +65,7 @@ export const SCHEMA_RULES: Readonly<Record<string, SchemaRule>> = {
     nested: [
       {
         prop: "itemListElement",
-        required: [req("position"), { anyOf: ["name"], unlessObject: "item" }, { anyOf: ["item"], exceptLast: true }],
+        required: [req("position"), req("name", "item.name"), { anyOf: ["item"], exceptLast: true }],
       },
     ],
   },
@@ -140,7 +138,10 @@ export interface SchemaIssue {
 }
 
 export interface SchemaCheck {
-  /** The first `limit` issues, in document order. */
+  /**
+   * At most `limit` issues: those of scored types first, then those of `retired` types, each group
+   * in document order, so a short list always names what lowers a score.
+   */
   issues: SchemaIssue[];
   /** Every issue found, including those beyond `limit`. */
   total: number;
@@ -190,15 +191,18 @@ const label = (prefix: string, anyOf: readonly string[]): string =>
 export function checkSchemaNodes(nodes: readonly JsonLdObject[], limit = Infinity): SchemaCheck {
   const byId = new Map<string, JsonLdObject>();
   for (const n of nodes) if (typeof n["@id"] === "string" && !byId.has(n["@id"])) byId.set(n["@id"], n);
-  const issues: SchemaIssue[] = [];
+  const scoredIssues: SchemaIssue[] = [];
+  const retiredIssues: SchemaIssue[] = [];
   let total = 0;
   let scored = 0;
   let budget = MAX_JSON_LD_NODES;
 
   const report = (type: string, path: string): void => {
     total++;
-    if (SCHEMA_RULES[type]!.retired !== true) scored++;
-    if (issues.length < limit) issues.push({ type, path });
+    const retired = SCHEMA_RULES[type]!.retired === true;
+    if (!retired) scored++;
+    const list = retired ? retiredIssues : scoredIssues;
+    if (list.length < limit) list.push({ type, path });
   };
 
   const apply = (
@@ -211,7 +215,6 @@ export function checkSchemaNodes(nodes: readonly JsonLdObject[], limit = Infinit
   ): void => {
     for (const r of required) {
       if (r.exceptLast && isLast) continue;
-      if (r.unlessObject !== undefined && isObject(node[r.unlessObject])) continue;
       if (!r.anyOf.some((p) => hasPath(node, p))) report(type, label(prefix, r.anyOf));
     }
     for (const n of nested ?? []) {
@@ -245,5 +248,5 @@ export function checkSchemaNodes(nodes: readonly JsonLdObject[], limit = Infinit
       apply(type, node, "", rule.required, rule.nested, true);
     }
   }
-  return { issues, total, scored };
+  return { issues: [...scoredIssues, ...retiredIssues].slice(0, limit), total, scored };
 }

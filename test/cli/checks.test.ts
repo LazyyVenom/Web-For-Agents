@@ -283,11 +283,11 @@ describe("checks", () => {
     const many = run(ld({ "@graph": [faq, crumbs, { "@type": "WebSite" }] }) + ld({ "@type": "Recipe" }));
     expect(many.status).toBe("warn");
     expect(many.message).toBe(
-      "Missing required structured data fields: FAQPage mainEntity[0].acceptedAnswer.text; BreadcrumbList itemListElement[0].item; WebSite name; +3 more",
+      "Missing required structured data fields: BreadcrumbList itemListElement[0].item; WebSite name; WebSite url; +2 more. " +
+        "+1 more not scored (Google no longer shows FAQ rich results; answer engines may still use it)",
     );
     expect(many.fix).toBe(
-      "Add the missing properties; Google requires them for rich results (https://developers.google.com/search/docs/appearance/structured-data/faqpage, https://developers.google.com/search/docs/appearance/structured-data/breadcrumb, https://developers.google.com/search/docs/appearance/site-names). " +
-        "Google no longer shows FAQ rich results; answer engines may still use it.",
+      "Add the missing properties; Google requires them for rich results (https://developers.google.com/search/docs/appearance/structured-data/breadcrumb, https://developers.google.com/search/docs/appearance/site-names).",
     );
     // Complete markup and unknown types still pass.
     const [home, project] = crumbs.itemListElement;
@@ -316,7 +316,26 @@ describe("checks", () => {
     const mixed = run(ld({ "@type": "FAQPage", mainEntity: [q({})] }) + ld({ "@type": "WebSite", name: "S" }));
     expect(mixed.status).toBe("warn");
     expect(mixed.points).toBe(CHECK_WEIGHTS["json-ld"] / 2);
-    expect(mixed.message).toBe("Missing required structured data fields: FAQPage mainEntity[0].acceptedAnswer.text; WebSite url");
+    expect(mixed.message).toBe(
+      "Missing required structured data fields: WebSite url. " +
+        "FAQPage: mainEntity[0].acceptedAnswer.text missing (Google no longer shows FAQ rich results; answer engines may still use it)",
+    );
+  });
+
+  it("json-ld warning names the scored gap first and links its docs, even after many FAQ gaps", () => {
+    const ld = (v: unknown) => `<script type="application/ld+json">${JSON.stringify(v)}</script>`;
+    const q = { "@type": "Question", name: "Q", acceptedAnswer: { "@type": "Answer" } };
+    const faq = { "@type": "FAQPage", mainEntity: [q, q, q, q] };
+    const c = byId(inputs({ src: pageHtml({ head: ld(faq) + ld({ "@type": "Product", name: "P" }) }) }), "json-ld");
+    expect(c.status).toBe("warn");
+    expect(c.message).toBe(
+      "Missing required structured data fields: Product offers (or aggregateRating, review). " +
+        "FAQPage: mainEntity[0].acceptedAnswer.text, mainEntity[1].acceptedAnswer.text, +2 more missing " +
+        "(Google no longer shows FAQ rich results; answer engines may still use it)",
+    );
+    expect(c.fix).toBe(
+      "Add the missing properties; Google requires them for rich results (https://developers.google.com/search/docs/appearance/structured-data/product-snippet).",
+    );
   });
 
   it("deeply nested JSON-LD does not abort the audit", () => {

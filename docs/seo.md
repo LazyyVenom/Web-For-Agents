@@ -68,7 +68,7 @@ Search engines truncate long titles and descriptions, and very short description
 - `schema.organization`
 - `schema.webSite`
 - `schema.person`: `name`, `url`, `image`, `jobTitle`, `description`, `email`, `sameAs`, `worksFor` (a name or `{ name, url }`)
-- `schema.softwareApplication`: `name`, `description`, `applicationCategory`, `operatingSystem`, `url`, `image`, `offers`, `aggregateRating`, `author`. Google requires `offers` or `aggregateRating` for rich results.
+- `schema.softwareApplication`: `name`, `description`, `applicationCategory`, `operatingSystem`, `url`, `image`, `offers`, `aggregateRating`, `author`. For rich results Google requires `name`, `offers.price` (`0` for a free app) and one of `aggregateRating` or `review`; the [audit](cli.md) warns when one is missing.
 - `schema.profilePage`: `mainEntity` (a person or organization node), `url`, `name`, `dateCreated`, `dateModified`
 - `schema.creativeWork`: `name`, `description`, `url`, `image`, `author`, `dateCreated`, `keywords` (a string or array)
 - `schema.webPage`: `name`, `url`, `description`, `breadcrumb` (a `schema.breadcrumbList` node)
