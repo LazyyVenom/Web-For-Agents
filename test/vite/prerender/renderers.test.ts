@@ -404,6 +404,25 @@ describe("happy-dom render process isolation", { timeout: SUITE_TIMEOUT_MS }, ()
     }
   });
 
+  it("explains a classic synchronous script the permission model cannot load", async () => {
+    const r = createIsolatedHappyDomRenderer();
+    try {
+      const res = await r.render(server.origin + "/syncscript", RENDER_MS).catch((e: unknown) => e);
+      if (process.allowedNodeEnvironmentFlags.has("--permission")) {
+        expect(res).toBeInstanceOf(RenderError);
+        const msg = (res as Error).message;
+        expect(msg).toContain(`${server.origin}/classic.js must load synchronously`);
+        expect(msg).toContain('add type="module" or defer');
+        expect(msg).toContain("Chrome");
+      } else {
+        // without the permission model the child may spawn, so the load works
+        expect((res as { html: string }).html).toContain("<h1>Classic</h1>");
+      }
+    } finally {
+      await r.close();
+    }
+  });
+
   it("the in-process renderer is what the escape would reach without isolation", async () => {
     // documents the threat: in-process, the escape reaches the build's own process
     const target = join(tmp, "c.txt");

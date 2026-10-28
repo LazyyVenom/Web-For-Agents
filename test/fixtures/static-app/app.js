@@ -177,6 +177,13 @@ function start() {
       show(`<p>codegen ${page + host}</p>`);
       break;
     }
+    case "/syncscript": {
+      // a classic script without async/defer: happy-dom loads it synchronously
+      const script = document.createElement("script");
+      script.src = "/classic.js";
+      document.head.appendChild(script);
+      break;
+    }
     case "/xsocket": {
       const from = new URLSearchParams(location.search).get("from");
       let result = "opened";

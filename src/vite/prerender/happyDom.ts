@@ -124,6 +124,19 @@ export interface HappyDomRendererOptions {
 /** Scheme a blocked request is rewritten to, so happy-dom rejects it like a network error before connecting. */
 const BLOCKED_SCHEME = "wfa-blocked:";
 
+/** False under Node's permission model without --allow-child-process. */
+const canSpawn = (process as { permission?: { has(scope: string): boolean } }).permission?.has("child") ?? true;
+
+/** Text appended to a failed render's message when synchronous requests were refused. */
+export function syncHint(urls: readonly string[]): string {
+  if (urls.length === 0) return "";
+  return (
+    `; ${[...new Set(urls)].slice(0, 3).join(", ")} must load synchronously (a classic <script src> without ` +
+    `async, defer or type="module", or a synchronous XMLHttpRequest), which the isolated happy-dom renderer ` +
+    `cannot do: add type="module" or defer to the script, or render this route with Chrome (prerender.routeRenderers)`
+  );
+}
+
 export function createHappyDomRenderer(opts: HappyDomRendererOptions = {}): Renderer {
   const allowed = createOriginPolicy(opts.allowOrigins);
   /** Origins of the URLs rendered so far: the prerender server. */
@@ -132,6 +145,8 @@ export function createHappyDomRenderer(opts: HappyDomRendererOptions = {}): Rend
     page: BrowserPage;
     origin: string;
     blocked: string[];
+    /** Synchronous requests refused because this process may not spawn (see beforeSyncRequest). */
+    syncRefused: string[];
   }
   const active = new Set<Active>();
   const ownerOf = (window: unknown): Active | undefined => {
@@ -172,7 +187,13 @@ export function createHappyDomRenderer(opts: HappyDomRendererOptions = {}): Rend
             if (blocks(request.url, window)) poison(request);
           },
           beforeSyncRequest({ request, window }) {
-            if (blocks(request.url, window)) poison(request);
+            if (blocks(request.url, window)) return poison(request);
+            // happy-dom makes synchronous requests by spawning a process, which the render process's
+            // permission model forbids: fail them cleanly and explain why.
+            if (!canSpawn) {
+              ownerOf(window)?.syncRefused.push(request.url);
+              poison(request);
+            }
           },
         },
       },
@@ -202,7 +223,7 @@ export function createHappyDomRenderer(opts: HappyDomRendererOptions = {}): Rend
       const origin = new URL(url).origin;
       local.add(origin);
       const page = browser.newPage();
-      const state: Active = { page, origin, blocked: [] };
+      const state: Active = { page, origin, blocked: [], syncRefused: [] };
       active.add(state);
       // happy-dom's VirtualConsole throws "Method not implemented." for these; React dev builds
       // call console.timeStamp, so make them no-ops (the page console is per page, kept across goto).
@@ -235,7 +256,7 @@ export function createHappyDomRenderer(opts: HappyDomRendererOptions = {}): Rend
             ),
           );
         } catch (e) {
-          throw new RenderError("happy-dom", errorMessage(e) + blockedHint(state.blocked));
+          throw new RenderError("happy-dom", errorMessage(e) + blockedHint(state.blocked) + syncHint(state.syncRefused));
         }
         const html = page.evaluate(SERIALIZE_EXPR) as string;
         const finalPath = new URL(page.url).pathname;
