@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSitemap, sitemapLastmods } from "../../src/vite/sitemap";
+import { buildSitemap, sitemapLastmods, zonedDate } from "../../src/vite/sitemap";
 
 describe("buildSitemap", () => {
   it("emits xml header, urlset and one url per route", () => {
@@ -32,6 +32,22 @@ describe("sitemap lastmod", () => {
     expect(await sitemapLastmods("none", ["/"], () => new Date())).toEqual(new Map());
     const m = await sitemapLastmods("file", ["/", "/x"], (r) => (r === "/" ? new Date("2026-03-04T23:30:00-02:00") : undefined));
     expect(m).toEqual(new Map([["/", "2026-03-05"]]));
+  });
+
+  it("formats file and Date values in sitemap.timeZone", async () => {
+    // 23:40 in India on 28 Oct is 18:10 UTC: a late-night build must get the local date.
+    const lateNight = new Date("2026-10-28T23:40:00+05:30");
+    expect(await sitemapLastmods("file", ["/"], () => lateNight)).toEqual(new Map([["/", "2026-10-28"]]));
+    expect(await sitemapLastmods("file", ["/"], () => lateNight, "Asia/Kolkata")).toEqual(new Map([["/", "2026-10-28"]]));
+    // 00:30 in India on 29 Oct is still 28 Oct in UTC.
+    const afterMidnight = new Date("2026-10-29T00:30:00+05:30");
+    expect(await sitemapLastmods("file", ["/"], () => afterMidnight)).toEqual(new Map([["/", "2026-10-28"]]));
+    expect(await sitemapLastmods("file", ["/"], () => afterMidnight, "Asia/Kolkata")).toEqual(new Map([["/", "2026-10-29"]]));
+    expect(await sitemapLastmods(() => afterMidnight, ["/"], () => undefined, "Asia/Kolkata")).toEqual(new Map([["/", "2026-10-29"]]));
+    expect(await sitemapLastmods(() => afterMidnight, ["/"], () => undefined, "America/Los_Angeles")).toEqual(new Map([["/", "2026-10-28"]]));
+    // Strings are written as returned.
+    expect(await sitemapLastmods(() => "2026-01-01T00:30:00+05:30", ["/"], () => undefined, "UTC")).toEqual(new Map([["/", "2026-01-01T00:30:00+05:30"]]));
+    expect(zonedDate(new Date("0999-12-31T20:00:00Z"), "Asia/Kolkata")).toBe("1000-01-01");
   });
 
   it("a function may return a date, a W3C datetime, a Date or undefined, sync or async", async () => {

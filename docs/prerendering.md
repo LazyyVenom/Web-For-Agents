@@ -135,6 +135,16 @@ import { ContentRegion, ExcludeFromContent } from "@anubhav-choubey/web-for-agen
 
 Both accept `as` (default `div`) and pass other props to the element. If a page has neither a `ContentRegion` nor a match for `contentSelector`, the content is taken from `<body>` minus `header`, `nav`, `footer` and `aside`, and the build logs a warning naming those routes.
 
+Layouts often place inline elements side by side with no whitespace between them, such as `<span>Slot 01</span><span>Featured</span>` in a flex row. The page shows two words, so the markdown gets a space between them: `Slot 01 Featured`, not `Slot 01Featured`. The space goes between two adjacent sibling inline elements that both have text, with nothing but comments, icons, form fields or empty elements between them. Glue that looks intended is kept:
+
+- an element next to plain text (`<b>Java</b>Script`, `H<sub>2</sub>O`);
+- two text-formatting elements (`<b>`, `<i>`, `<em>`, `<strong>`, `<code>`, `<sub>`, `<sup>`, `<mark>` and similar), as in `<b>Java</b><i>Script</i>`;
+- a side whose text is a single character (letter-by-letter animations, drop caps);
+- text ending in an opening character (`(`, `[`, `{`, `$`, `#`, `@`, `/`, an opening quote) or followed by closing punctuation (`.`, `,`, `;`, `:`, `!`, `?`, `%`, `)`, `]`, `}`, a closing quote, `…`);
+- anything inside `<pre>` or `<code>`.
+
+To join two words on purpose in any other case, put them in one element.
+
 ## Markdown URLs
 
 Every prerendered page gets a markdown twin: `/about` is served as `/about.md` and `/` as `/index.md`. The HTML advertises it with `<link rel="alternate" type="text/markdown" href="https://example.com/about.md">`. Links in the markdown are absolute.
@@ -195,10 +205,19 @@ A link `url` must be http(s) or `mailto:`; a relative URL such as `/resume.pdf` 
 - `"file"`: with `generate`, the modification time of each page's HTML file, so the date your own prerender last wrote it (adding the markdown link keeps the file's time). With the plugin, every page is rendered by the build, so it is the build date.
 - A function `(route) => string | Date | undefined`, sync or async, for dates you track yourself (a CMS field, `git log`). Return `"YYYY-MM-DD"`, a W3C datetime with a time zone (`"2026-01-31T09:00:00Z"`), a `Date`, or `undefined` for no `<lastmod>` on that route. Anything else, or an error thrown by the function, fails the build with the route named.
 
-Dates from `"file"` and `Date` values are written as `YYYY-MM-DD` in UTC. A function can only be set from code or a `.js` / `.mjs` config file; `"file"` also works in JSON.
+Dates from `"file"` and `Date` values are written as `YYYY-MM-DD` in `sitemap.timeZone`, an IANA time zone that defaults to `"UTC"`. Set it to where you build, or a build at 00:30 in India gets the previous day's date. An unknown time zone fails the build. Strings returned by a function are written as returned. A function can only be set from code or a `.js` / `.mjs` config file; `"file"` and `timeZone` also work in JSON.
 
 ```ts
-sitemap: { lastmod: "file" },
+sitemap: { lastmod: "file", timeZone: "Asia/Kolkata" },
+```
+
+## robots.txt Sitemap line
+
+robots.txt ends with `Sitemap: <siteUrl>/sitemap.xml` while `sitemap` is on. `robots.sitemapUrl` sets that line yourself: an absolute http(s) URL, or a path resolved against `siteUrl` like an llms link (`"/sitemap-index.xml"`). It is written even with `sitemap: false`, so a sitemap you publish yourself stays linked. `robots: { sitemapUrl: false, ... }` leaves the line out.
+
+```ts
+sitemap: false,
+robots: { ai: { training: "block", search: "allow" }, sitemapUrl: "/sitemap-index.xml" },
 ```
 
 ## Blocked AI crawlers

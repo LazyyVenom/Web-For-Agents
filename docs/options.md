@@ -35,8 +35,10 @@ export default defineConfig({
 | `robots.ai.search` | `"allow" \| "block"` | Required. Policy for AI search and user-agent fetchers. |
 | `robots.ai.overrides` | `Record<string, "allow" \| "block">` | Per-bot override, matched case-insensitively. |
 | `robots.disallow` | `string[]` | Extra `Disallow` paths for all user agents. |
-| `sitemap` | `boolean \| { lastmod?: "file" \| "none" \| function }` | Generate `sitemap.xml` and the `Sitemap:` line. An object turns it on. Default `true`. |
+| `robots.sitemapUrl` | `string \| false` | The robots.txt `Sitemap:` URL: absolute http(s), or a path resolved against `siteUrl` (`"/sitemap-index.xml"`). Written even when `sitemap` is `false`, for a sitemap you publish yourself. `false` leaves the line out. Default: `siteUrl` + `/sitemap.xml` when `sitemap` is on, else no line. |
+| `sitemap` | `boolean \| { lastmod?: "file" \| "none" \| function; timeZone?: string }` | Generate `sitemap.xml` and the `Sitemap:` line. An object turns it on. Default `true`. |
 | `sitemap.lastmod` | `"file" \| "none" \| (route) => string \| Date \| undefined` | `<lastmod>` for each URL. See [Sitemap lastmod](prerendering.md#sitemap-lastmod). Default `"none"`. |
+| `sitemap.timeZone` | `string` | IANA time zone (`"Asia/Kolkata"`) for `<lastmod>` dates from `"file"` and from `Date` values. Default `"UTC"`. |
 | `prerender` | `object \| false` | Prerender routes after the build. `false` disables prerender, markdown, llms and the agent map. |
 | `prerender.crawl` | `boolean` | Follow same-origin links from `/` and `routes`. Default `true`. |
 | `prerender.renderer` | `"happy-dom" \| "chrome" \| "msedge"` | Default renderer. Default `"happy-dom"`. |

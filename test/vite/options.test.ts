@@ -349,8 +349,35 @@ describe("sitemap and llms options", () => {
     expect(resolveOptions({ ...base, sitemap: { lastmod: fn } }).sitemapLastmod).toBe(fn);
   });
 
+  it("sitemap.timeZone defaults to UTC and must be an IANA time zone", () => {
+    expect(resolveOptions(base).sitemapTimeZone).toBe("UTC");
+    expect(resolveOptions({ ...base, sitemap: { lastmod: "file", timeZone: "Asia/Kolkata" } }).sitemapTimeZone).toBe("Asia/Kolkata");
+    for (const timeZone of ["Mars/Olympus", "", 5, "IST+5:30"]) {
+      expect(() => resolveOptions({ ...base, sitemap: { timeZone: timeZone as never } }), String(timeZone)).toThrow(
+        `[web-for-agents] sitemap.timeZone must be an IANA time zone such as "Asia/Kolkata" (got ${JSON.stringify(timeZone)})`,
+      );
+    }
+  });
+
+  it("robots.sitemapUrl: default follows sitemap, a string is resolved against siteUrl, false omits", () => {
+    const url = (sitemapUrl: unknown, sitemap?: boolean) =>
+      resolveOptions({ ...base, robots: { ...robots, sitemapUrl: sitemapUrl as never }, ...(sitemap === undefined ? {} : { sitemap }) })
+        .robotsSitemapUrl;
+    expect(url(undefined)).toBe("https://a.com/sub/sitemap.xml");
+    expect(url(undefined, false)).toBe(null);
+    expect(url(false)).toBe(null);
+    expect(url("sitemap-index.xml", false)).toBe("https://a.com/sub/sitemap-index.xml");
+    expect(url("/sitemap.xml", false)).toBe("https://a.com/sitemap.xml");
+    expect(url(" https://cdn.example/maps/sitemap.xml ")).toBe("https://cdn.example/maps/sitemap.xml");
+    for (const bad of ["", " ", "ftp://a.com/s.xml", "mailto:a@b.co", "/a b.xml", "/a.xml\nDisallow: /", true, 1]) {
+      expect(() => url(bad), JSON.stringify(bad)).toThrow(
+        `[web-for-agents] robots.sitemapUrl must be false, an http(s) URL or a path on the site (got ${JSON.stringify(bad)})`,
+      );
+    }
+  });
+
   it("rejects a bad sitemap option", () => {
-    expect(() => resolveOptions({ ...base, sitemap: "yes" as never })).toThrow("[web-for-agents] sitemap must be a boolean or { lastmod }");
+    expect(() => resolveOptions({ ...base, sitemap: "yes" as never })).toThrow("[web-for-agents] sitemap must be a boolean or { lastmod, timeZone }");
     expect(() => resolveOptions({ ...base, sitemap: { lastmod: "git" as never } })).toThrow(
       '[web-for-agents] sitemap.lastmod must be "file", "none" or a function',
     );

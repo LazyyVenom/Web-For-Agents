@@ -69,6 +69,14 @@ describe("buildRobots", () => {
     expect(blocked).toEqual(["PerplexityBot"]);
   });
 
+  it("robots.sitemapUrl writes an explicit Sitemap line, even with the sitemap off; false omits it", () => {
+    const withUrl = (sitemapUrl: string | false, sitemap: boolean) =>
+      buildRobots(resolveOptions({ siteUrl: "https://a.com", robots: { ai: { training: "block", search: "allow" }, sitemapUrl }, sitemap }));
+    expect(withUrl("/sitemap-index.xml", false).endsWith("\n\nSitemap: https://a.com/sitemap-index.xml\n")).toBe(true);
+    expect(withUrl("https://cdn.example/sitemap.xml", true).endsWith("\n\nSitemap: https://cdn.example/sitemap.xml\n")).toBe(true);
+    expect(withUrl(false, true)).not.toContain("Sitemap:");
+  });
+
   it("sitemap line", () => {
     expect(build({ training: "block", search: "allow" }).endsWith("Sitemap: https://a.com/sitemap.xml\n")).toBe(true);
     expect(build({ training: "block", search: "allow" }, { sitemap: false })).not.toContain("Sitemap:");

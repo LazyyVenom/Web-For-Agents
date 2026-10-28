@@ -253,7 +253,7 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
   const listed = pages.filter((p) => p.listed);
   if (resolved.sitemap) {
     const routes = listed.map((p) => p.route);
-    const lastmod = await sitemapLastmods(resolved.sitemapLastmod, routes, (r) => mtimeByRoute.get(r));
+    const lastmod = await sitemapLastmods(resolved.sitemapLastmod, routes, (r) => mtimeByRoute.get(r), resolved.sitemapTimeZone);
     guarded.stage(fileOf(SITEMAP_PATH), buildSitemap(siteUrl, routes, lastmod));
   }
   guarded.stage(fileOf(ROBOTS_PATH), buildRobots(resolved));

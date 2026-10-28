@@ -117,7 +117,7 @@ export function createBuildPlugin(resolved: ResolvedOptions, extensions: Prerend
     if (resolved.sitemap) {
       // "file" in the plugin is the build date: every page is rendered fresh by this build.
       const buildDate = new Date();
-      const lastmod = await sitemapLastmods(resolved.sitemapLastmod, sitemapRoutes, () => buildDate);
+      const lastmod = await sitemapLastmods(resolved.sitemapLastmod, sitemapRoutes, () => buildDate, resolved.sitemapTimeZone);
       stager.stage(fileOf(SITEMAP_PATH), buildSitemap(siteUrl, sitemapRoutes, lastmod));
     }
     stager.stage(fileOf(ROBOTS_PATH), buildRobots(resolved));

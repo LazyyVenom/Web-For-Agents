@@ -1,5 +1,5 @@
 import { DEFAULT_CONTENT_SELECTOR } from "../shared/content";
-import { AGENT_MAP_PATH, normalizeRoute } from "../shared/conventions";
+import { AGENT_MAP_PATH, normalizeRoute, SITEMAP_PATH } from "../shared/conventions";
 import { LOG_PREFIX, withPrefix } from "../shared/errors";
 import { DEFAULT_SHORTCUT, parseShortcut } from "../shared/shortcut";
 import { tryResolveUrl } from "../shared/url";
@@ -21,6 +21,12 @@ export interface WebForAgentsOptions {
     ai: { training: Rule; search: Rule; overrides?: Record<string, Rule> };
     /** Extra `Disallow` paths for all user agents. */
     disallow?: string[];
+    /**
+     * The robots.txt `Sitemap:` URL: absolute, or relative to siteUrl. Written even when `sitemap`
+     * is false (a sitemap you publish yourself); `false` leaves the line out. Default: siteUrl +
+     * "/sitemap.xml" when `sitemap` is on, else no line.
+     */
+    sitemapUrl?: string | false;
   };
   /** Generate sitemap.xml and the `Sitemap:` line in robots.txt. Default true. */
   sitemap?: boolean | SitemapOptions;
@@ -167,6 +173,11 @@ export interface SitemapOptions {
    * build date with the plugin. A function returns the date per route. Default "none".
    */
   lastmod?: "file" | "none" | SitemapLastmod;
+  /**
+   * IANA time zone ("Asia/Kolkata") for the dates written from "file" and from `Date` values, so a
+   * late-night build gets the local date. Default "UTC".
+   */
+  timeZone?: string;
 }
 
 export type ResolvedPrerender = Required<
@@ -187,6 +198,10 @@ export interface ResolvedOptions {
   sitemap: boolean;
   /** `<lastmod>` source; "none" when the sitemap is off. */
   sitemapLastmod: "file" | "none" | SitemapLastmod;
+  /** IANA time zone for `<lastmod>` dates. Default "UTC". */
+  sitemapTimeZone: string;
+  /** The absolute robots.txt `Sitemap:` URL, or null for no line. */
+  robotsSitemapUrl: string | null;
   exclude: Array<string | RegExp>;
   prerender: ResolvedPrerender | false;
   markdown: ResolvedMarkdown | false;
@@ -342,16 +357,47 @@ export function resolveMarkdown(input: MarkdownOptions | undefined): ResolvedMar
   return out;
 }
 
-function resolveSitemap(input: WebForAgentsOptions["sitemap"]): Pick<ResolvedOptions, "sitemap" | "sitemapLastmod"> {
-  if (input === undefined || typeof input === "boolean") return { sitemap: input ?? true, sitemapLastmod: "none" };
+type ResolvedSitemap = Pick<ResolvedOptions, "sitemap" | "sitemapLastmod" | "sitemapTimeZone">;
+
+function resolveSitemap(input: WebForAgentsOptions["sitemap"]): ResolvedSitemap {
+  if (input === undefined || typeof input === "boolean") {
+    return { sitemap: input ?? true, sitemapLastmod: "none", sitemapTimeZone: "UTC" };
+  }
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
-    throw new Error(withPrefix("sitemap must be a boolean or { lastmod }"));
+    throw new Error(withPrefix("sitemap must be a boolean or { lastmod, timeZone }"));
   }
   const lastmod = input.lastmod ?? "none";
   if (lastmod !== "file" && lastmod !== "none" && typeof lastmod !== "function") {
     throw new Error(withPrefix('sitemap.lastmod must be "file", "none" or a function'));
   }
-  return { sitemap: true, sitemapLastmod: lastmod };
+  const timeZone = input.timeZone ?? "UTC";
+  if (!isTimeZone(timeZone)) {
+    throw new Error(withPrefix(`sitemap.timeZone must be an IANA time zone such as "Asia/Kolkata" (got ${JSON.stringify(timeZone)})`));
+  }
+  return { sitemap: true, sitemapLastmod: lastmod, sitemapTimeZone: timeZone };
+}
+
+/** True for a time zone Intl accepts ("UTC", "Asia/Kolkata"). */
+function isTimeZone(tz: unknown): tz is string {
+  if (typeof tz !== "string" || tz === "") return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The absolute robots.txt `Sitemap:` URL (see `robots.sitemapUrl`), or null for none. */
+function resolveRobotsSitemapUrl(input: unknown, siteUrl: string, sitemap: boolean): string | null {
+  if (input === undefined) return sitemap ? siteUrl + SITEMAP_PATH : null;
+  if (input === false) return null;
+  const bad = () =>
+    new Error(withPrefix(`robots.sitemapUrl must be false, an http(s) URL or a path on the site (got ${JSON.stringify(input)})`));
+  if (typeof input !== "string" || input.trim() === "" || /[\s\u0000-\u001f\u007f]/.test(input.trim())) throw bad();
+  const url = tryResolveUrl(input.trim(), siteUrl + "/");
+  if (url === null || !/^https?:$/.test(new URL(url).protocol)) throw bad();
+  return url;
 }
 
 /** Validates llms options; section link URLs are resolved against siteUrl. */
@@ -521,11 +567,13 @@ export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
     agentMap = requestedAgentMap;
   }
 
+  const sitemap = resolveSitemap(input.sitemap);
   const resolved: ResolvedOptions = {
     siteUrl,
     routes,
     robots: input.robots,
-    ...resolveSitemap(input.sitemap),
+    ...sitemap,
+    robotsSitemapUrl: resolveRobotsSitemapUrl(input.robots.sitemapUrl, siteUrl, sitemap.sitemap),
     exclude,
     prerender,
     markdown,
