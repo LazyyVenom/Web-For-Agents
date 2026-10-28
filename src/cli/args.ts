@@ -46,7 +46,8 @@ export const USAGE = `Usage: web-for-agents audit <url> [options]
 Audit how readable a page is for AI agents and crawlers.
 
 Options:
-  --json               print the report as JSON
+  --json               print the report as JSON (page data is not sanitized; control
+                       and bidi characters are written as \\u escapes)
   --min-score <0-100>  exit with code 1 if the score is lower
   --timeout <ms>       per-request timeout (default ${DEFAULT_TIMEOUT_MS})
   --agent-map <path>   agent map file name (probed like agents.json), or a /path or URL

@@ -1,18 +1,24 @@
 import type { AuditReport } from "./audit";
+import { safeText } from "./terminal";
 
-/** Human-readable report, as printed by the CLI. */
+/**
+ * Human-readable report, as printed by the CLI. Every value that can come from the audited site
+ * (URLs, messages, errors) goes through safeText, so a hostile page cannot drive the terminal.
+ */
 export function formatText(report: AuditReport): string {
   const lines = [
-    `web-for-agents audit: ${report.finalUrl}${report.redirected ? ` (redirected from ${report.url})` : ""}`,
+    `web-for-agents audit: ${safeText(report.finalUrl)}${report.redirected ? ` (redirected from ${safeText(report.url)})` : ""}`,
   ];
   if (report.error !== undefined) {
-    lines.push(`Error: ${report.error}`);
+    lines.push(`Error: ${safeText(report.error)}`);
     return lines.join("\n") + "\n";
   }
   lines.push(`Score: ${report.score}/${report.maxScore}`, "");
   for (const c of report.checks) {
-    lines.push(`${c.status.toUpperCase().padEnd(4)}  ${c.title.padEnd(28)}  ${c.points}/${c.weight}  ${c.message}`);
-    if (c.status !== "pass" && c.fix) lines.push(`      Fix: ${c.fix}`);
+    lines.push(
+      `${c.status.toUpperCase().padEnd(4)}  ${safeText(c.title).padEnd(28)}  ${c.points}/${c.weight}  ${safeText(c.message)}`,
+    );
+    if (c.status !== "pass" && c.fix) lines.push(`      Fix: ${safeText(c.fix)}`);
   }
   return lines.join("\n") + "\n";
 }
