@@ -252,6 +252,39 @@ describe("waitForReady", () => {
   });
 });
 
+describe("chrome page lifecycle", () => {
+  const never = () => new Promise<never>(() => {});
+  const fakeChrome = (browser: Record<string, unknown>) => () =>
+    Promise.resolve({
+      chromium: { launch: () => Promise.resolve({ close: async () => {}, ...browser }) },
+    } as unknown as typeof import("playwright-core"));
+
+  it("bounds a page that never opens by the render deadline", async () => {
+    const r = await createChromeRenderer("chrome", {}, fakeChrome({ newPage: never }));
+    const t = Date.now();
+    const err = await r.render("http://127.0.0.1/", 300).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RenderError);
+    expect((err as Error).message).toContain("did not become ready within 300ms");
+    expect(Date.now() - t).toBeLessThan(1500);
+  });
+
+  it("does not wait forever for a page that never closes", async () => {
+    const page = {
+      on: () => {},
+      goto: async () => null,
+      evaluate: async (expr: string) =>
+        expr === SERIALIZE_EXPR ? "<!DOCTYPE html>\n<html></html>" : { ready: true, errors: [], path: "/" },
+      url: () => "http://127.0.0.1/",
+      close: never,
+    };
+    const r = await createChromeRenderer("chrome", { pageCloseMs: 50 }, fakeChrome({ newPage: async () => page }));
+    const t = Date.now();
+    const res = await r.render("http://127.0.0.1/", 1000);
+    expect(res.html).toBe("<!DOCTYPE html>\n<html></html>");
+    expect(Date.now() - t).toBeLessThan(1000);
+  });
+});
+
 describe("chrome loading errors", () => {
   it("explains a missing playwright-core", async () => {
     const err = await createChromeRenderer("chrome", {}, () =>

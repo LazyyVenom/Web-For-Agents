@@ -12,9 +12,21 @@ import {
 
 type PlaywrightCore = typeof import("playwright-core");
 
+/** How long a render waits for its page to close before moving on. */
+const PAGE_CLOSE_MS = 5000;
+
+/** Resolves when `work` settles or after `ms`, whichever is first. Never rejects. */
+function settleWithin(work: Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const elapsed = new Promise<void>((res) => {
+    timer = setTimeout(res, ms);
+  });
+  return Promise.race([work.then(() => {}, () => {}), elapsed]).finally(() => clearTimeout(timer));
+}
+
 export async function createChromeRenderer(
   channel: "chrome" | "msedge",
-  opts: { executablePath?: string } = {},
+  opts: { executablePath?: string; pageCloseMs?: number } = {},
   load: () => Promise<PlaywrightCore> = () => import("playwright-core"),
 ): Promise<Renderer> {
   const label = channel === "msedge" ? "Edge" : "Chrome";
@@ -46,7 +58,16 @@ export async function createChromeRenderer(
     async render(url, timeoutMs, inPage) {
       const deadline = createDeadline(timeoutMs);
       const timeoutText = readyTimeoutMessage(timeoutMs);
-      const page = await browser.newPage();
+      // A stalled browser must not hold the render past its deadline, so opening the page counts
+      // against it. A page that opens after the deadline is closed as soon as it arrives.
+      const opening = browser.newPage();
+      let page: Awaited<typeof opening>;
+      try {
+        page = await deadline.race(opening, timeoutText);
+      } catch (e) {
+        opening.then((p) => p.close()).catch(() => {});
+        throw new RenderError(channel, errorMessage(e));
+      }
       try {
         const pageErrors: string[] = [];
         page.on("pageerror", (e) => pageErrors.push(e.message));
@@ -79,7 +100,7 @@ export async function createChromeRenderer(
         );
         return { html, finalPath, inPage: results };
       } finally {
-        await page.close().catch(() => {});
+        await settleWithin(page.close(), opts.pageCloseMs ?? PAGE_CLOSE_MS);
       }
     },
     async close() {
