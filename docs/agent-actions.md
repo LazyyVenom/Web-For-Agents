@@ -78,6 +78,41 @@ If the user declines, the agent gets `{ status: "cancelled", reason: "user-decli
 
 WebMCP is feature-detected: when `document.modelContext` (or the older `navigator.modelContext`) exists, each exposed action is registered with `registerTool`; otherwise nothing is registered and nothing breaks. Nothing branches on the user agent. Tools are unregistered when their component unmounts, so the tool list follows what is on screen. The advertised `inputSchema` is captured when the tool is registered: a tool is registered again when its name, title, description, flags, `inputSchema` or handler presence changes, but not when a form's fields change. Execution never relies on that snapshot; it always validates against the current schema (for a form, its current fields). A failed registration is logged as a warning, does not affect the page, and is retried the next time the action list is updated. If `modelContext` appears after the page loads (for example, injected by an extension), actions are registered on the next mount, unmount or `refreshAgentActions()` call.
 
+## Link actions (no JavaScript)
+
+Some actions are just links: open a resume, email the author, call a number. Mark a plain `<a href>` with `agentLinkProps` and it is listed in `agents.json` as a link action, with no handler, no registration and no JavaScript needed at runtime:
+
+```tsx
+import { agentLinkProps } from "@anubhav-choubey/web-for-agents";
+
+<a href="/resume.pdf" {...agentLinkProps({ name: "open-resume", description: "Open the resume (PDF)" })}>Resume</a>
+<a href="mailto:me@example.com" {...agentLinkProps({ name: "contact", description: "Email me" })}>Email</a>
+```
+
+`agentLinkProps({ name, description, destructive? })` only returns the `data-agent-action`, `data-agent-description`, `aria-description` (and, when `destructive`, `data-agent-destructive="true"`) attributes, so it is safe in server rendering and works in hand-written HTML too: any `<a href data-agent-action="...">` is a link action. It throws on an invalid name, like `useAgentAction`.
+
+In `agents.json` a link action looks like this:
+
+```json
+{
+  "name": "open-resume",
+  "description": "Open the resume (PDF)",
+  "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+  "destructive": false,
+  "readOnly": true,
+  "kind": "link",
+  "href": "https://example.com/resume.pdf",
+  "method": "GET"
+}
+```
+
+- `href` is resolved against the page's public URL (`siteUrl` + path), so relative links become absolute. `method: "GET"` is set for http(s) links only; `mailto:` and `tel:` links have no `method`.
+- Only `http:`, `https:`, `mailto:` and `tel:` links are listed. Any other href (`javascript:`, `data:`, `blob:`, `file:` and so on) or one that cannot be parsed is left out, with a warning that names the action and the page. Links are never opened or followed at build time.
+- `readOnly` is `true` unless the link is marked `destructive`.
+- The plugin's prerender and `web-for-agents generate` apply the same rules. On a page that also registers an action of the same name (with `useAgentAction`, `AgentForm` or, for `generate`, a form or button in the markup), that action wins and the link is skipped. Among links, the first one with a name wins. A link with an invalid name is skipped with a warning that names the page and the action. The dev overlay shows the same winner for each name, and marks a skipped link "Not listed in agents.json" with the reason.
+- Link actions are not registered as WebMCP tools, even when the runtime is loaded: they only appear in `agents.json`. Use `useAgentAction` on the link if you also want a WebMCP tool; that registered action then wins in `agents.json` too.
+- The dev overlay lists link actions with their resolved href, as text, and says why a rejected link is left out.
+
 ## agents.json
 
 After prerendering, the plugin writes `agents.json` with every listed page and the actions found on it, and links it from `llms.txt` in an `## Agents` section. Pages are sorted by path and actions by name; pages without actions are listed with `"actions": []`. Titles and descriptions are the same as in `llms.txt`:
@@ -119,6 +154,6 @@ After prerendering, the plugin writes `agents.json` with every listed page and t
 }
 ```
 
-`kind` is `"handler"`, `"form"` or `"click"`. `llms` is omitted when `llms: false`, and `markdown` when `markdown: false`.
+`kind` is `"handler"`, `"form"`, `"click"` or `"link"` (see [Link actions](#link-actions-no-javascript)). `llms` is omitted when `llms: false`, and `markdown` when `markdown: false`.
 
 Use `agentMap: { fileName: "ai.json" }` to change the file name (a plain `.json` name, no directories), or `agentMap: false` to turn the file and the `llms.txt` section off; WebMCP registration at runtime is unaffected. The CLI audit looks for the default `agents.json` unless you pass `--agent-map`. A `public/agents.json` of your own is never overwritten. The agent map needs prerender.

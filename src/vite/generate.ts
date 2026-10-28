@@ -7,6 +7,7 @@ import { agentMapExtension, type AgentPageData } from "./agentMap";
 import { dropFileCollisions, fileOf, pageLengthWarnings, pageMarkdown, prefixed, SPA_FALLBACK_FILE, stageSiteFiles, type SitePage } from "./siteFiles";
 import { createFileStager, type FileStager, type StageSource } from "./fileStager";
 import { staticActions } from "./generateActions";
+import { markupLinks } from "../shared/markupActions";
 import {
   isExcluded,
   resolveOptions,
@@ -20,7 +21,7 @@ import { parseHtml } from "./prerender/dom";
 import { byRoute, isSafeRoute, publicMdUrl, publicUrl, routeMdFile, routeOfHtmlFile, shortRoute } from "./prerender/paths";
 import { decodeHtml, setMarkdownLink } from "./generateHtml";
 import { buildRobots } from "./robots";
-import { buildSitemap } from "./sitemap";
+import { buildSitemap, sitemapLastmods } from "./sitemap";
 
 export interface GenerateOptions {
   /** Build output directory holding the prerendered HTML, e.g. "dist". */
@@ -32,7 +33,7 @@ export interface GenerateOptions {
   /** Routes to leave out. A string is an exact path, or a prefix when it ends in "/*". */
   exclude?: Array<string | RegExp>;
   /** Write sitemap.xml and the `Sitemap:` line in robots.txt. Default true. */
-  sitemap?: boolean;
+  sitemap?: WebForAgentsOptions["sitemap"];
   /** Write a `.md` version of each page. `false` also turns off llms-full.txt. */
   markdown?: MarkdownOptions | false;
   /** Write llms.txt and llms-full.txt. Default on. */
@@ -192,6 +193,11 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
   const pages: SitePage[] = [];
   const result: GeneratedPage[] = [];
   const mdByRoute = new Map<string, string>();
+  /**
+   * Each page's HTML file mtime, read before generate edits the file: the sitemap.lastmod "file"
+   * date, and what a page gets back if writing fails partway (the rollback rewrites it).
+   */
+  const mtimeByRoute = new Map<string, Date>();
   const bodyFallback: string[] = [];
   const utf16: string[] = [];
   /** Routes whose page has its own markdown link, left untouched. */
@@ -204,6 +210,7 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
     (m) => logger.warn(m),
   );
   for (const { route, file } of routes) {
+    mtimeByRoute.set(route, fs.statSync(path.join(outDir, file)).mtime);
     const bytes = fs.readFileSync(path.join(outDir, file));
     const { charset, text: html } = decodeHtml(bytes);
     const url = publicUrl(siteUrl, route);
@@ -211,12 +218,13 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
     let page: SitePage;
     try {
       const actions = resolved.agentMap ? staticActions(document) : [];
+      const links = resolved.agentMap ? markupLinks(document) : [];
       const info = analyzeDocument(document, {
         pageUrl: url,
         contentSelector: markdown ? markdown.contentSelector : "main",
         route,
       });
-      const inPage: Record<string, unknown> = { "agent-map": { actions } satisfies AgentPageData };
+      const inPage: Record<string, unknown> = { "agent-map": { actions, links } satisfies AgentPageData };
       page = { route, info, listed: !info.noindex, inPage };
     } catch (e) {
       throw prefixed(e, `reading ${file} failed`);
@@ -243,7 +251,11 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
   }
 
   const listed = pages.filter((p) => p.listed);
-  if (resolved.sitemap) guarded.stage(fileOf(SITEMAP_PATH), buildSitemap(siteUrl, listed.map((p) => p.route)));
+  if (resolved.sitemap) {
+    const routes = listed.map((p) => p.route);
+    const lastmod = await sitemapLastmods(resolved.sitemapLastmod, routes, (r) => mtimeByRoute.get(r));
+    guarded.stage(fileOf(SITEMAP_PATH), buildSitemap(siteUrl, routes, lastmod));
+  }
   guarded.stage(fileOf(ROBOTS_PATH), buildRobots(resolved));
   const extensions = resolved.agentMap
     ? [agentMapExtension({ siteUrl, fileName: resolved.agentMap.fileName })]
@@ -253,7 +265,28 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
     listed,
     mdByRoute,
   });
-  stager.flush();
+  let flushed = false;
+  try {
+    stager.flush();
+    flushed = true;
+  } finally {
+    // A failed write rolls every page back to its old content: give it its old mtime too, so a
+    // failed run changes nothing. On success, adding the markdown link is not a content change
+    // either when sitemap.lastmod is "file": the page keeps its mtime, so lastmod stays the date
+    // the page was built and a second run writes the same sitemap.
+    if (!flushed || resolved.sitemapLastmod === "file") {
+      for (const [route, mtime] of mtimeByRoute) {
+        const file = fileByRoute.get(route)!;
+        if (!written.has(file)) continue;
+        try {
+          fs.utimesSync(path.join(outDir, file), mtime, mtime);
+        } catch (e) {
+          // Never hide the write error; on success, report the restore failure.
+          if (flushed) throw e;
+        }
+      }
+    }
+  }
 
   if (markdown && bodyFallback.length > 0) {
     logger.warn(

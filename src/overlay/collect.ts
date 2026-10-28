@@ -6,8 +6,8 @@ import { routeOf, trimTrailingSlash } from "../shared/url";
 
 export { routeOf };
 import { AGENT_GLOBAL } from "../shared/conventions";
-import { markupActions } from "../shared/markupActions";
-import type { ActionKind, AgentGlobal } from "../shared/agent";
+import { actionGroups, firstPerName, INVALID_NAME_REASON, markupActions, resolveLinkHref } from "../shared/markupActions";
+import { isValidActionName, type ActionKind, type AgentGlobal } from "../shared/agent";
 import { errorMessage } from "../shared/errors";
 import { compareStrings } from "../shared/sort";
 
@@ -17,6 +17,10 @@ export interface OverlayAction {
   kind: ActionKind;
   destructive: boolean;
   source: "registry" | "markup" | "webmcp-declarative";
+  /** Link actions only: the absolute URL agents.json lists. Shown as text, never followed. */
+  href?: string;
+  /** Markup actions only: why it is left out of agents.json (an invalid name, or a javascript: link). */
+  warning?: string;
 }
 
 export interface PageReport {
@@ -91,18 +95,17 @@ function registryActions(doc: Document): OverlayAction[] {
   }
 }
 
-function collectActions(doc: Document): OverlayAction[] {
-  const markup = markupActions(doc).map(
-    ({ name, description, kind, destructive, source }): OverlayAction => ({ name, description, kind, destructive, source }),
-  );
-  const seen = new Set<string>();
-  const out: OverlayAction[] = [];
-  for (const a of [...registryActions(doc), ...markup]) {
-    if (seen.has(a.name)) continue;
-    seen.add(a.name);
-    out.push(a);
-  }
-  return out.sort((a, b) => compareStrings(a.name, b.name));
+function collectActions(doc: Document, pageUrl: string | undefined): OverlayAction[] {
+  const markup = markupActions(doc).map(({ name, description, kind, destructive, source, href }): OverlayAction => {
+    const a: OverlayAction = { name, description, kind, destructive, source };
+    if (!isValidActionName(name)) return { ...a, warning: `Not listed in agents.json: ${INVALID_NAME_REASON}` };
+    if (kind !== "link") return a;
+    // The same check as agents.json, resolved against the same page URL as the markdown links.
+    const r = resolveLinkHref(href ?? "", pageUrl);
+    return r.ok ? { ...a, href: r.href } : { ...a, warning: `Not listed in agents.json: ${r.reason}` };
+  });
+  // The same winner per name as agents.json: registry, then form/click markup, then links.
+  return firstPerName(registryActions(doc), ...actionGroups(markup)).sort((a, b) => compareStrings(a.name, b.name));
 }
 
 /** Reads the live document into a report for the dev overlay. Never throws; never mutates `doc`. */
@@ -146,7 +149,7 @@ export function collectPageReport(
     /* leave empty */
   }
   try {
-    actions = collectActions(doc);
+    actions = collectActions(doc, pageUrl);
   } catch {
     /* leave empty */
   }

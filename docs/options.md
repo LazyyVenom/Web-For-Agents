@@ -35,7 +35,8 @@ export default defineConfig({
 | `robots.ai.search` | `"allow" \| "block"` | Required. Policy for AI search and user-agent fetchers. |
 | `robots.ai.overrides` | `Record<string, "allow" \| "block">` | Per-bot override, matched case-insensitively. |
 | `robots.disallow` | `string[]` | Extra `Disallow` paths for all user agents. |
-| `sitemap` | `boolean` | Generate `sitemap.xml` and the `Sitemap:` line. Default `true`. |
+| `sitemap` | `boolean \| { lastmod?: "file" \| "none" \| function }` | Generate `sitemap.xml` and the `Sitemap:` line. An object turns it on. Default `true`. |
+| `sitemap.lastmod` | `"file" \| "none" \| (route) => string \| Date \| undefined` | `<lastmod>` for each URL. See [Sitemap lastmod](prerendering.md#sitemap-lastmod). Default `"none"`. |
 | `prerender` | `object \| false` | Prerender routes after the build. `false` disables prerender, markdown, llms and the agent map. |
 | `prerender.crawl` | `boolean` | Follow same-origin links from `/` and `routes`. Default `true`. |
 | `prerender.renderer` | `"happy-dom" \| "chrome" \| "msedge"` | Default renderer. Default `"happy-dom"`. |
@@ -53,7 +54,9 @@ export default defineConfig({
 | `prerender.onTimeout` | `"fail" \| "snapshot"` | What happens when a route is not ready by `timeoutMs`: `"fail"` fails the build, `"snapshot"` saves the page as it is and logs a warning. Default `"fail"`. |
 | `markdown` | `{ contentSelector?: string; transform?: function } \| false` | Write `.md` files. `false` disables them and `llms-full.txt`. Default `{ contentSelector: "main" }`. |
 | `markdown.transform` | `(page) => string \| undefined \| Promise<...>` | Rewrites each page's markdown. See [Markdown transform](#markdown-transform). |
-| `llms` | `{ title?: string; description?: string } \| false` | Write `llms.txt` and `llms-full.txt`. Default on. |
+| `llms` | `{ title?; description?; intro?; sections? } \| false` | Write `llms.txt` and `llms-full.txt`. Default on. |
+| `llms.intro` | `string` | Plain text after the summary in both files. Blank lines separate paragraphs. |
+| `llms.sections` | `Array<{ title: string; text?: string; links?: Array<{ title; url; description? }> }>` | Your own sections (about, key links, featured projects), written before `## Pages`. A link `url` is http(s), `mailto:`, or relative. A relative URL resolves against `siteUrl` plus `/`, using standard URL rules. With `siteUrl: "https://x.com/sub"`, `"resume.pdf"` becomes `https://x.com/sub/resume.pdf` and `"/resume.pdf"` becomes `https://x.com/resume.pdf` (the origin root). See [Custom sections](prerendering.md#custom-sections). |
 | `agentMap` | `boolean \| { fileName?: string }` | Write `agents.json` and link it from `llms.txt`. Needs prerender. Default `{ fileName: "agents.json" }`. |
 | `overlay` | `boolean \| { shortcut?: string; contentSelector?: string }` | Dev overlay, injected by `vite` (serve) only, under any `base` (e.g. `"/sub/"`), and skipped when Vitest runs. `false` disables it. Default on, shortcut `"alt+shift+a"`, `contentSelector` from `markdown.contentSelector` (else `"main"`). |
 

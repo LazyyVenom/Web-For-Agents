@@ -67,3 +67,11 @@ Search engines truncate long titles and descriptions, and very short description
 - `schema.breadcrumbList`
 - `schema.organization`
 - `schema.webSite`
+- `schema.person`: `name`, `url`, `image`, `jobTitle`, `description`, `email`, `sameAs`, `worksFor` (a name or `{ name, url }`)
+- `schema.softwareApplication`: `name`, `description`, `applicationCategory`, `operatingSystem`, `url`, `image`, `offers`, `aggregateRating`, `author`. For rich results Google requires `name`, `offers.price` (`0` for a free app) and one of `aggregateRating` or `review`; the [audit](cli.md) warns when one is missing.
+- `schema.profilePage`: `mainEntity` (a person or organization node), `url`, `name`, `dateCreated`, `dateModified`
+- `schema.creativeWork`: `name`, `description`, `url`, `image`, `author`, `dateCreated`, `keywords` (a string or array)
+- `schema.webPage`: `name`, `url`, `description`, `breadcrumb` (a `schema.breadcrumbList` node)
+- `schema.graph(nodes)`: combines nodes into one `@graph` document with a single `@context`; nested nodes lose their own `@context`.
+
+Fields left `undefined` are omitted from every builder.

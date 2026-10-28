@@ -2,8 +2,9 @@ import { AGENT_MAP_VERSION, type AgentMap } from "../shared/agent";
 import { AI_BOTS } from "../shared/bots";
 import { AGENT_MAP_PATH, LLMS_TXT_PATH, MARKDOWN_MIME, ROBOTS_PATH, SITEMAP_PATH } from "../shared/conventions";
 import { errorMessage } from "../shared/errors";
-import { jsonLdTypes } from "../shared/jsonLd";
+import { jsonLdNodes, jsonLdTypes } from "../shared/jsonLd";
 import { DESCRIPTION_MAX_CHARS, DESCRIPTION_MIN_CHARS, TITLE_MAX_CHARS } from "../shared/metaLength";
+import { checkSchemaNodes, SCHEMA_RULES, type SchemaIssue, type SchemaRule } from "../shared/schemaRules";
 import { stripBom } from "../shared/text";
 import { hasScheme, trimTrailingSlash, tryResolveUrl } from "../shared/url";
 import { isOk, looksLikeHtml, MAX_BODY_BYTES, type FetchResult } from "./fetch";
@@ -66,6 +67,8 @@ export const CHECK_WEIGHTS: Record<CheckId, number> = {
 
 const CONTENT_MIN_CHARS = 200;
 const CONTENT_WARN_CHARS = 50;
+/** Missing structured data fields listed in the JSON-LD message; the rest are counted. */
+const SCHEMA_ISSUES_SHOWN = 3;
 const MAX_BODY_LABEL = `${MAX_BODY_BYTES / (1024 * 1024)} MiB`;
 
 type Outcome = Omit<CheckResult, "id" | "title" | "weight" | "points">;
@@ -211,7 +214,41 @@ function checkJsonLd({ html }: AuditInputs): Outcome {
   if (!parsed.some((p) => jsonLdTypes(p).length > 0)) {
     return warn("JSON-LD parses but has no @type", "Add an @type (for example Organization) to your JSON-LD.");
   }
-  return pass(`${parsed.length} JSON-LD block${parsed.length === 1 ? " parses" : "s parse"} with an @type`);
+  const { issues, total, scored } = checkSchemaNodes(parsed.flatMap(jsonLdNodes), SCHEMA_ISSUES_SHOWN);
+  const base = `${parsed.length} JSON-LD block${parsed.length === 1 ? " parses" : "s parse"} with an @type`;
+  if (total === 0) return pass(base);
+  // Issues come scored first. Gaps in retired rich results (FAQPage) never lower the score: they
+  // follow as a note, after the gaps that do.
+  const isRetired = (i: SchemaIssue) => SCHEMA_RULES[i.type]!.retired === true;
+  const shownScored = issues.filter((i) => !isRetired(i));
+  const shownRetired = issues.filter(isRetired);
+  const retiredNote = notScored(shownRetired, total - scored - shownRetired.length);
+  if (scored === 0) return pass(`${base}; ${retiredNote}`);
+  const moreScored = scored - shownScored.length;
+  const rules = [...new Set(shownScored.map((i) => SCHEMA_RULES[i.type]!))];
+  return warn(
+    `Missing required structured data fields: ${shownScored.map((i) => `${i.type} ${i.path}`).join("; ")}` +
+      (moreScored > 0 ? `; +${moreScored} more` : "") +
+      (total > scored ? `. ${retiredNote}` : ""),
+    `Add the missing properties; Google requires them for rich results (${rules.map((r) => r.docs).join(", ")}).`,
+  );
+}
+
+const RETIRED_RULES = [...new Set(Object.values(SCHEMA_RULES))].filter((r) => r.retired === true);
+const retiredNotes = (rules: readonly SchemaRule[]): string =>
+  rules.flatMap((r) => (r.note !== undefined ? [r.note] : [])).join("; ");
+
+/** "FAQPage: a, b, +N more missing (note)" for gaps that do not lower the score. */
+function notScored(shown: readonly SchemaIssue[], more: number): string {
+  if (shown.length === 0) {
+    // Every listed slot went to scored gaps; just count these.
+    return `+${more} more not scored (${retiredNotes(RETIRED_RULES)})`;
+  }
+  const byType = new Map<string, string[]>();
+  for (const i of shown) byType.set(i.type, [...(byType.get(i.type) ?? []), i.path]);
+  const listed = [...byType].map(([type, paths]) => `${type}: ${paths.join(", ")}`).join("; ");
+  const notes = retiredNotes([...new Set(shown.map((i) => SCHEMA_RULES[i.type]!))]);
+  return `${listed}${more > 0 ? `, +${more} more` : ""} missing${notes ? ` (${notes})` : ""}`;
 }
 
 function checkRobots({ page, robots }: AuditInputs): Outcome {

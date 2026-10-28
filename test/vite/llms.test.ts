@@ -67,3 +67,36 @@ describe("markdown injection through metadata", () => {
     expect(out).not.toMatch(/(^|[^\\])<img/);
   });
 });
+
+describe("llms intro and sections", () => {
+  const sections = [
+    {
+      title: "Links",
+      links: [
+        { title: "Resume", url: "https://a.com/resume.pdf", description: "PDF, one page" },
+        { title: "Email", url: "mailto:me@a.com" },
+      ],
+    },
+    { title: "Featured [projects]", text: "Things I built.", links: [{ title: "Tool (beta)", url: "https://a.com/p(1)" }] },
+  ];
+  const head =
+    "# Acme\n\n> Tools for people\n\nI build tools.\n\nSecond paragraph.\n\n" +
+    "## Links\n\n- [Resume](https://a.com/resume.pdf): PDF, one page\n- [Email](mailto:me@a.com)\n\n" +
+    "## Featured \\[projects\\]\n\nThings I built.\n\n- [Tool (beta)](https://a.com/p%281%29)";
+
+  it("writes the intro and sections before ## Pages in llms.txt", () => {
+    const out = buildLlmsTxt({ ...site, intro: "I build\ntools.\n\n  \nSecond paragraph.", sections }, pages);
+    expect(out).toBe(head + "\n\n" + base.slice(base.indexOf("## Pages")));
+  });
+  it("writes the same header in llms-full.txt", () => {
+    const out = buildLlmsFullTxt({ ...site, intro: "I build tools.\n\nSecond paragraph.", sections }, pages);
+    expect(out.startsWith(head + "\n\nSource: https://a.com/\n")).toBe(true);
+  });
+  it("keeps author text a paragraph: no headings, lists, quotes, links or HTML", () => {
+    const out = buildLlmsTxt(
+      { title: "A", intro: "## Owned\n\n- item\n\n1. one\n\n> quote\n\n[x](http://evil) <b>" },
+      [],
+    );
+    expect(out).toBe("# A\n\n\\## Owned\n\n\\- item\n\n1\\. one\n\n\\> quote\n\n\\[x\\](http://evil) \\<b>\n\n## Pages\n");
+  });
+});

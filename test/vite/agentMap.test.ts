@@ -2,7 +2,13 @@ import { describe, it, expect } from "vitest";
 import { Window } from "happy-dom";
 import { AGENT_GLOBAL } from "../../src/shared/conventions";
 import { inPageExpression } from "../../src/vite/prerender/extensions";
-import { buildAgentMap, agentMapExtension, agentMapLlmsSection, collectAgentPageInPage } from "../../src/vite/agentMap";
+import {
+  AGENT_PAGE_IN_PAGE_ARG,
+  buildAgentMap,
+  agentMapExtension,
+  agentMapLlmsSection,
+  collectAgentPageInPage,
+} from "../../src/vite/agentMap";
 import type { ExtensionContext } from "../../src/vite/prerender/extensions";
 import type { AgentActionDescriptor } from "../../src/shared/agent";
 
@@ -19,23 +25,40 @@ const desc: AgentActionDescriptor = {
 function run(setup: (w: Window) => void) {
   const w = new Window();
   setup(w);
-  return JSON.parse(w.eval(inPageExpression(collectAgentPageInPage, AGENT_GLOBAL)) as string);
+  return JSON.parse(w.eval(inPageExpression(collectAgentPageInPage, AGENT_PAGE_IN_PAGE_ARG)) as string);
 }
 
 describe("collectAgentPageInPage", () => {
-  it("has no hardcoded global key", () => {
-    expect(collectAgentPageInPage.toString()).not.toContain(AGENT_GLOBAL);
+  it("has no hardcoded global key or attribute names", () => {
+    const src = collectAgentPageInPage.toString();
+    expect(src).not.toContain(AGENT_GLOBAL);
+    expect(src).not.toContain("data-agent");
   });
 
   it("is self-contained and reads actions from the global named by its argument", () => {
     const data = run((w) => {
       (w as any)[AGENT_GLOBAL] = { version: 1, actions: () => [desc] };
     });
-    expect(data).toEqual({ actions: [desc] });
+    expect(data).toEqual({ actions: [desc], links: [] });
   });
 
   it("defaults to no actions", () => {
-    expect(run(() => {})).toEqual({ actions: [] });
+    expect(run(() => {})).toEqual({ actions: [], links: [] });
+  });
+
+  it("collects raw link action markup without resolving or following it", () => {
+    const data = run((w) => {
+      w.document.body.innerHTML = `
+        <a href="/resume.pdf" data-agent-action=" open-resume " data-agent-description="Open the resume">CV</a>
+        <a href="javascript:alert(1)" data-agent-action="bad" data-agent-destructive="true">x</a>
+        <a data-agent-action="no-href">x</a>
+        <button data-agent-action="click-me">x</button>
+        <a href="mailto:a@b.co" data-agent-action="  ">x</a>`;
+    });
+    expect(data.links).toEqual([
+      { name: "open-resume", description: "Open the resume", destructive: false, href: "/resume.pdf" },
+      { name: "bad", description: null, destructive: true, href: "javascript:alert(1)" },
+    ]);
   });
 });
 
@@ -98,7 +121,7 @@ describe("agentMapExtension", () => {
     const ext = agentMapExtension({ siteUrl: "https://a.com", fileName: "ai.json" });
     expect(ext.name).toBe("agent-map");
     expect(ext.inPage).toBe(collectAgentPageInPage);
-    expect(ext.inPageArg).toBe(AGENT_GLOBAL);
+    expect(ext.inPageArg).toBe(AGENT_PAGE_IN_PAGE_ARG);
     expect(ext.llmsSections!()).toEqual([agentMapLlmsSection("https://a.com", "ai.json")]);
     await ext.onRoute!("/contact", { actions: [desc] });
     await ext.onRoute!("/", { actions: [] });
@@ -129,5 +152,49 @@ describe("agentMapExtension", () => {
         ],
       }),
     );
+  });
+});
+
+describe("agentMapExtension link actions", () => {
+  const ctxFor = (warnings: string[], emitted: string[]): ExtensionContext => ({
+    site: { url: "https://a.com", title: "Site" },
+    pages: [{ route: "/about", title: "About", url: "https://a.com/about" }],
+    emitFile: (_f, s) => void emitted.push(s),
+    warn: (m) => void warnings.push(m),
+  });
+
+  it("resolves links against the public page URL, lets registry actions win and warns about rejected hrefs", async () => {
+    const ext = agentMapExtension({ siteUrl: "https://a.com", fileName: "agents.json" });
+    await ext.onRoute!("/about", {
+      actions: [{ ...desc, name: "contact", kind: "click" }],
+      links: [
+        { name: "open-resume", description: "Open the resume", destructive: false, href: "/resume.pdf" },
+        { name: "contact", description: "Mail me", destructive: false, href: "mailto:me@a.com" },
+        { name: "xss", description: null, destructive: false, href: "javascript:alert(1)" },
+        { name: "blob", description: null, destructive: false, href: "data:text/html,hi" },
+      ],
+    });
+    const warnings: string[] = [];
+    const emitted: string[] = [];
+    await ext.finalize!(ctxFor(warnings, emitted));
+    const actions = JSON.parse(emitted[0]!).pages[0].actions;
+    expect(actions.map((a: any) => [a.name, a.kind])).toEqual([
+      ["contact", "click"],
+      ["open-resume", "link"],
+    ]);
+    expect(actions[1]).toEqual({
+      name: "open-resume",
+      description: "Open the resume",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      destructive: false,
+      readOnly: true,
+      kind: "link",
+      href: "https://a.com/resume.pdf",
+      method: "GET",
+    });
+    expect(warnings).toEqual([
+      'link action "xss" on /about skipped: javascript: links are not allowed (only http(s), mailto: and tel:)',
+      'link action "blob" on /about skipped: data: links are not allowed (only http(s), mailto: and tel:)',
+    ]);
   });
 });

@@ -128,6 +128,15 @@ describe("import boundaries", () => {
     }
   });
 
+  it("agentLinkProps (runtime/agent/link) imports only shared modules and types", () => {
+    const file = join(SRC, "runtime", "agent", "link.ts");
+    for (const line of readFileSync(file, "utf8").split("\n")) {
+      const spec = specifiers(line)[0];
+      if (!spec || line.startsWith("import type")) continue;
+      expect(inDir(resolved(file, spec), join(SRC, "shared")), `link.ts -> ${spec}`).toBe(true);
+    }
+  });
+
   it("src/runtime/agent is covered by the runtime rules", () => {
     const agentDir = join(SRC, "runtime", "agent");
     const agentFiles = walk(agentDir);

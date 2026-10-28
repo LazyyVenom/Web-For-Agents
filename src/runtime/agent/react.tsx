@@ -5,7 +5,8 @@ import {
   ACTION_DESTRUCTIVE_ATTR,
   ACTION_PARAM_ATTR,
 } from "../../shared/conventions";
-import { assertValidActionName, refreshAgentActions, registerAgentAction } from "./registry";
+import { assertValidActionName } from "../../shared/actionName";
+import { refreshAgentActions, registerAgentAction } from "./registry";
 import type { AgentActionSpec } from "./types";
 
 export type AgentHintProps = {

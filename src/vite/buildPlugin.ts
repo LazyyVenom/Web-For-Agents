@@ -10,7 +10,7 @@ import { mayUseHappyDom, prerenderSite, type CrawlResult } from "./prerender/ind
 import type { PrerenderExtension } from "./prerender/extensions";
 import { MAX_ROUTE_BYTES, MAX_SEGMENT_BYTES, publicUrl, routeHtmlFile, routeMdFile, shortRoute } from "./prerender/paths";
 import { buildRobots } from "./robots";
-import { buildSitemap } from "./sitemap";
+import { buildSitemap, sitemapLastmods } from "./sitemap";
 import { dropFileCollisions, fileOf, pageLengthWarnings, pageMarkdown, prefixed, SPA_FALLBACK_FILE, stageSiteFiles } from "./siteFiles";
 
 export { SPA_FALLBACK_FILE };
@@ -114,7 +114,12 @@ export function createBuildPlugin(resolved: ResolvedOptions, extensions: Prerend
           ]),
         ].sort()
       : resolved.routes;
-    if (resolved.sitemap) stager.stage(fileOf(SITEMAP_PATH), buildSitemap(siteUrl, sitemapRoutes));
+    if (resolved.sitemap) {
+      // "file" in the plugin is the build date: every page is rendered fresh by this build.
+      const buildDate = new Date();
+      const lastmod = await sitemapLastmods(resolved.sitemapLastmod, sitemapRoutes, () => buildDate);
+      stager.stage(fileOf(SITEMAP_PATH), buildSitemap(siteUrl, sitemapRoutes, lastmod));
+    }
     stager.stage(fileOf(ROBOTS_PATH), buildRobots(resolved));
 
     if (rendered) {

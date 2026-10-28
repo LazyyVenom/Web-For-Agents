@@ -5,7 +5,9 @@ import { generateAgentFiles, type GenerateOptions, type GenerateResult, type Gen
 import {
   resolveOptions,
   type AgentMapOptions,
+  type LlmsLinkOptions,
   type LlmsOptions,
+  type LlmsSectionOptions,
   type FileLayout,
   type MarkdownOptions,
   type MarkdownTransform,
@@ -14,6 +16,8 @@ import {
   type PrerenderOptions,
   type RendererName,
   type Rule,
+  type SitemapLastmod,
+  type SitemapOptions,
   type WebForAgentsOptions,
 } from "./options";
 import { overlayPlugin } from "./overlay";
@@ -46,6 +50,10 @@ export type {
   PrerenderOptions,
   MarkdownOptions,
   LlmsOptions,
+  LlmsSectionOptions,
+  LlmsLinkOptions,
+  SitemapOptions,
+  SitemapLastmod,
   AgentMapOptions,
   OverlayPluginOptions,
   RendererName,

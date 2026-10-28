@@ -77,6 +77,9 @@ export function renderPanel(root: ShadowRoot, report: PageReport): void {
     const line = [a.name, a.kind, a.source, a.destructive ? "destructive" : ""].filter(Boolean).join(" · ");
     actions.append(el(doc, "div", "action", el(doc, "strong", undefined, a.name), line.slice(a.name.length)));
     if (a.description) actions.append(el(doc, "div", "note", a.description));
+    // Text only: the href is never made a link, so the panel cannot open it.
+    if (a.href) actions.append(el(doc, "div", "note", a.href));
+    if (a.warning) actions.append(el(doc, "p", "warn", a.warning));
   }
 
   const refresh = el(doc, "button", "btn", "Refresh");

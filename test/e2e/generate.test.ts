@@ -1,6 +1,6 @@
 // The portfolio scenario: a site with its own prerender script writes flat about.html files after
 // `vite build`; `web-for-agents generate` adds the agent files without replacing that page builder.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -94,11 +94,21 @@ describe("generate e2e (bring your own prerender)", () => {
       mkdirSync(path.dirname(path.join(dist, f)), { recursive: true });
       writeFileSync(path.join(dist, f), c);
     }
+    // sitemap.lastmod "file": the date the user's prerender last wrote each page.
+    utimesSync(path.join(dist, "about.html"), new Date("2025-06-15T12:00:00Z"), new Date("2025-06-15T12:00:00Z"));
     const config = path.join(tmp, "wfa.config.mjs");
     writeFileSync(
       config,
       `export default {
-  llms: { title: "Dev" },
+  llms: {
+    title: "Dev",
+    intro: "I build web apps and write about them.",
+    sections: [
+      { title: "Key links", links: [{ title: "Resume", url: "/resume.pdf" }, { title: "Email", url: "mailto:dev@example.com" }] },
+      { title: "Featured projects", text: "Things I am proud of.", links: [{ title: "Tool", url: "https://github.com/dev/tool", description: "A CLI" }] },
+    ],
+  },
+  sitemap: { lastmod: "file" },
   markdown: { transform: (p) => p.markdown + "\\n\\nContact: dev@example.com (" + p.route + ")\\n" },
 };
 `,
@@ -109,6 +119,8 @@ describe("generate e2e (bring your own prerender)", () => {
     expect(first.err).toContain("robots.txt already exists with different content");
     expect(first.code).toBe(0);
     expect(first.out).toContain("Layout: flat");
+    // Read before generate's own edit (the markdown link) moves the file's mtime.
+    expect(readFileSync(path.join(dist, "sitemap.xml"), "utf8")).toContain(`<loc>${origin}/about</loc><lastmod>2025-06-15</lastmod>`);
     const second = await cli([...argv, "--json"]);
     expect(second.code).toBe(0);
     const result = JSON.parse(second.out);
@@ -126,12 +138,21 @@ describe("generate e2e (bring your own prerender)", () => {
     expect(read("about.html")).toBe(
       files["about.html"]!.replace("</head>", `<link rel="alternate" type="text/markdown" href="${origin}/about.md" data-wfa="markdown"></head>`),
     );
+    expect(statSync(path.join(dist, "about.html")).mtime.toISOString()).toBe("2025-06-15T12:00:00.000Z");
     expect(read("robots.txt")).toBe(files["robots.txt"]);
     expect(read("404.html")).toBe(files["404.html"]);
     expect(existsSync(path.join(dist, "404.md"))).toBe(false);
     expect(read("about.md")).toContain("Contact: dev@example.com (/about)");
     expect(read("llms-full.txt")).toContain("Contact: dev@example.com (/experience)");
-    expect(read("llms.txt")).toMatch(/^# Dev\n/);
+    expect(read("llms.txt")).toMatch(
+      new RegExp(
+        "^# Dev\\n\\n> .*\\n\\nI build web apps and write about them\\.\\n\\n## Key links\\n\\n" +
+          `- \\[Resume\\]\\(${origin}/resume\\.pdf\\)\\n- \\[Email\\]\\(mailto:dev@example\\.com\\)\\n\\n` +
+          "## Featured projects\\n\\nThings I am proud of\\.\\n\\n- \\[Tool\\]\\(https://github\\.com/dev/tool\\): A CLI\\n\\n## Pages\\n",
+      ),
+    );
+    expect(read("llms-full.txt")).toContain("## Key links\n\n- [Resume]");
+    expect(read("sitemap.xml")).toMatch(/<lastmod>\d{4}-\d{2}-\d{2}<\/lastmod><\/url>\n<\/urlset>/);
     expect(read("sitemap.xml")).toContain(`<loc>${origin}/about</loc>`);
 
     for (const route of ["/", "/about"]) {

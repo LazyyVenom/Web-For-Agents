@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -241,5 +241,33 @@ describe("generateAgentFiles", () => {
     await expect(t.run({ linkMarkdown: "no" as never })).rejects.toThrow("linkMarkdown must be a boolean");
     const empty = setup({ "assets/a.html": "<p>x</p>" });
     await expect(empty.run()).rejects.toThrow("no .html pages found");
+  });
+
+  it("sitemap.lastmod: a function gets each listed route; nothing is written when it throws", async () => {
+    const t = setup();
+    const seen: string[] = [];
+    await t.run({ sitemap: { lastmod: (r) => (seen.push(r), r === "/about" ? "2026-05-01" : undefined) } });
+    expect(seen).toEqual(["/", "/about", "/blog/post", "/experience"]);
+    expect(t.read("sitemap.xml")).toContain("<loc>https://me.dev/about</loc><lastmod>2026-05-01</lastmod></url>");
+    expect(t.read("sitemap.xml").match(/<lastmod>/g)).toHaveLength(1);
+    const u = setup();
+    await expect(u.run({ sitemap: { lastmod: () => "soon" } })).rejects.toThrow('sitemap.lastmod must return "YYYY-MM-DD"');
+    expect(u.has("llms.txt")).toBe(false);
+  });
+
+  it("a write that fails partway leaves every page's content and mtime as it was", async () => {
+    for (const lastmod of ["none", "file"] as const) {
+      const t = setup();
+      const old = new Date("2025-06-15T12:00:00Z");
+      for (const f of ["index.html", "about.html", "experience.html"]) utimesSync(path.join(t.dir, f), old, old);
+      const before = t.read("about.html");
+      // robots.txt is a directory, so writing it fails after the pages were written.
+      mkdirSync(path.join(t.dir, "robots.txt"));
+      await expect(t.run({ overwrite: true, sitemap: { lastmod } })).rejects.toThrow(/rolled back/);
+      expect(t.read("about.html")).toBe(before);
+      for (const f of ["index.html", "about.html", "experience.html"]) {
+        expect(statSync(path.join(t.dir, f)).mtime.toISOString(), `${lastmod} ${f}`).toBe(old.toISOString());
+      }
+    }
   });
 });

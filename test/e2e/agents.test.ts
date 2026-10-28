@@ -52,7 +52,7 @@ describe("agent map build", () => {
     expect(map.pages.map((p) => [p.path, p.actions.map((a) => a.name)])).toEqual([
       ["/", ["search", "subscribe"]],
       ["/account", ["delete_account"]],
-      ["/contact", ["contact"]],
+      ["/contact", ["contact", "open-resume"]],
     ]);
     expect(page("/contact")).toMatchObject({
       url: "https://example.com/contact",
@@ -80,6 +80,23 @@ describe("agent map build", () => {
     expect(Object.keys(contact!.inputSchema.properties!).sort()).toEqual(["email", "topic"]);
     const raw = read(dist, "agents.json");
     for (const secret of ["token", "t0k3n", "secret", "attachment"]) expect(raw).not.toContain(secret);
+  });
+
+  it("lists plain link actions from the markup, resolved against the public URL; the registry wins on a name clash", () => {
+    const actions = page("/contact").actions;
+    expect(actions.find((a) => a.name === "contact")!.kind).toBe("form");
+    expect(actions.find((a) => a.name === "open-resume")).toEqual({
+      name: "open-resume",
+      description: "Open the resume (PDF)",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      destructive: false,
+      readOnly: true,
+      kind: "link",
+      href: "https://example.com/resume.pdf",
+      method: "GET",
+    });
+    expect(read(dist, "agents.json")).not.toContain("data:text/html");
+    expect(warnings.filter((w) => w.includes('link action "bad-link" on /contact skipped: data: links are not allowed'))).toHaveLength(1);
   });
 
   it("marks the destructive handler action", () => {
