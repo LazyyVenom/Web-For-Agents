@@ -128,7 +128,6 @@ export const POLL_MS = 50;
 /** happy-dom's poll interval when its page has settled (see SETTLED_IDLE_MS). */
 export const SETTLED_POLL_MS = 20;
 
-/** Polls `check` every `pollMs` until ready; rejects with the first reported error or on timeout. */
 /**
  * Before a snapshot is saved: one last read of the page's errors, since errors raised after the
  * last readiness poll would otherwise be lost. Throws the first error, as waitForReady does.
@@ -138,6 +137,7 @@ export async function assertNoPageErrors(readErrors: () => string[] | Promise<st
   if (errors.length) throw new Error(errors[0]);
 }
 
+/** Polls `check` every `pollMs` until ready; rejects with the first reported error or on timeout. */
 export async function waitForReady(
   check: () => Promise<{ ready: boolean; errors: string[] }>,
   timeoutMs: number,

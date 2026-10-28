@@ -46,6 +46,12 @@ describe("setMarkdownLink", () => {
       `<html><script>"<head>"</script>${LINK}<body class="a">x</body>`,
     );
     expect(run("<p>just text</p>").html).toBe(`${LINK}<p>just text</p>`);
+    // Never before the doctype: after it, and after an <html> start tag when there is one.
+    expect(run("<!DOCTYPE html>\n<p>x</p>").html).toBe(`<!DOCTYPE html>${LINK}\n<p>x</p>`);
+    expect(run('<!doctype html><html lang="en"><p>x</p></html>').html).toBe(
+      `<!doctype html><html lang="en">${LINK}<p>x</p></html>`,
+    );
+    expect(run("<html><p>x</p></html>").html).toBe(`<html>${LINK}<p>x</p></html>`);
   });
 
   it("leaves the page's own markdown link untouched and inserts nothing", () => {

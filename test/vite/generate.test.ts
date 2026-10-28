@@ -214,6 +214,8 @@ describe("generateAgentFiles", () => {
       ]),
     );
     expect(t.read("about.md")).toContain("I build things.");
+    expect(r.written).not.toContain("index.md");
+    expect(r.written).toContain("about.md");
   });
 
   it("skips /index, whose index.md is the markdown of /", async () => {

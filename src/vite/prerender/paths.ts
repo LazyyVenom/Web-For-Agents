@@ -31,10 +31,6 @@ function decodeSegments(route: string): string[] {
 }
 
 /**
- * The HTML file for a route. "directory": "/about" -> "about/index.html". "flat": "/about" ->
- * "about.html". "/" is "index.html" in both.
- */
-/**
  * One decoded path segment, percent-encoded the way browsers write URL paths: "c++" stays "c++",
  * "a b" becomes "a%20b", "é" becomes "%C3%A9". "%" is encoded too, so the route decodes back to
  * the file name.
@@ -53,6 +49,10 @@ export function routeOfHtmlFile(file: string): string {
   return "/" + segs.map(encodePathSegment).join("/");
 }
 
+/**
+ * The HTML file for a route. "directory": "/about" -> "about/index.html". "flat": "/about" ->
+ * "about.html". "/" is "index.html" in both.
+ */
 export function routeHtmlFile(route: string, layout: "directory" | "flat" = "directory"): string {
   const segs = decodeSegments(route);
   if (segs.length === 0) return "index.html";

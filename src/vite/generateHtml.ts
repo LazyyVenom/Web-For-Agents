@@ -68,7 +68,7 @@ const ourLink = (attr: string): string =>
  * attribute value is never mistaken for the real one. A markdown alternate link without the marker
  * is the page's own: nothing is changed ("kept"). A marked one (from an earlier run) gets its href set
  * in place. Otherwise a link is inserted just before the real `</head>`; without one, just after the
- * `<head>` start tag; without that, before the first `<body`; else at the top of the file. Non-ASCII
+ * `<head>` start tag; without that, before the first `<body`; else after the doctype and `<html>` start tag, if any. Non-ASCII
  * characters in `href` are written as character references, which mean the same in every encoding.
  * Returns null for UTF-16 files (not ASCII-compatible).
  */
@@ -81,8 +81,14 @@ export function setMarkdownLink(bytes: Uint8Array, charset: string, href: string
   let headOpenEnd = -1;
   let headClose = -1;
   let bodyOpen = -1;
+  /** End of the doctype, and of the `<html ...>` start tag: the top-of-file fallback goes after both. */
+  let preamble = 0;
   let marked: { start: number; end: number; attrs: ScannedAttr[] } | undefined;
   for (const t of scanHtml(view, HEAD_RAW_TEXT)) {
+    if (t.type === "comment") {
+      if (headOpenEnd === -1 && /^<!doctype/i.test(view.slice(t.start, t.start + 9))) preamble = t.end;
+      continue;
+    }
     if (t.type !== "tag") continue;
     if (t.closing) {
       if (t.name === "head") {
@@ -91,6 +97,7 @@ export function setMarkdownLink(bytes: Uint8Array, charset: string, href: string
       }
       continue;
     }
+    if (t.name === "html" && headOpenEnd === -1) preamble = Math.max(preamble, t.end);
     if (t.name === "head" && headOpenEnd === -1) headOpenEnd = t.end;
     else if (t.name === "body") {
       bodyOpen = t.start;
@@ -114,6 +121,6 @@ export function setMarkdownLink(bytes: Uint8Array, charset: string, href: string
     // A marked link with a bare or missing href: replace it whole.
     return splice(marked.start, marked.end, ourLink(attr), "updated");
   }
-  const at = headClose !== -1 ? headClose : headOpenEnd !== -1 ? headOpenEnd : bodyOpen !== -1 ? bodyOpen : 0;
+  const at = headClose !== -1 ? headClose : headOpenEnd !== -1 ? headOpenEnd : bodyOpen !== -1 ? bodyOpen : preamble;
   return splice(at, at, ourLink(attr), "inserted");
 }

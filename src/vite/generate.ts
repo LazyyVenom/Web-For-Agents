@@ -184,7 +184,7 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
         return { file, status: "skipped" };
       }
       const r = stager.stage(fileName, source);
-      written.add(r.file);
+      if (r.status !== "skipped") written.add(r.file);
       return r;
     },
   };
