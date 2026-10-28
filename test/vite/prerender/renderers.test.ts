@@ -401,7 +401,8 @@ describe("happy-dom render process isolation", { timeout: SUITE_TIMEOUT_MS }, ()
       const err = (await off.render(server.origin + "/codegen", RENDER_MS).catch((e: unknown) => e)) as RenderError;
       expect(err).toBeInstanceOf(RenderError);
       expect(err.message).toContain("Code generation from strings disallowed");
-      expect(err.message).toContain("eval or new Function");
+      expect(err.message).toContain("build a function from a string with Node's own Function");
+      expect(err.message).toContain("The page's own eval and new Function are not affected");
       expect(err.message).toContain("prerender: { isolation: { codeGeneration: true } }");
       expect(err.message).toContain("weakens the sandbox");
       expect(err.message).toContain("Chrome");

@@ -151,9 +151,10 @@ const STDERR_TAIL = 4000;
 export function codeGenerationHint(message: string, iso: IsolationOptions): string {
   if (iso.codeGeneration || !/Code generation from strings disallowed|EvalError/i.test(message)) return "";
   return (
-    "; the page tried to run code from a string (eval or new Function), which the isolated happy-dom " +
-    "renderer forbids. Render this route with Chrome (prerender.routeRenderers or prerender.fallback), or set " +
-    "prerender: { isolation: { codeGeneration: true } }, which weakens the sandbox: page code can then " +
+    "; something on the page (happy-dom on its behalf, or a library) tried to build a function from a " +
+    "string with Node's own Function, which the isolated happy-dom renderer forbids. The page's own eval and " +
+    "new Function are not affected. Render this route with Chrome (prerender.routeRenderers or prerender.fallback), " +
+    "or set prerender: { isolation: { codeGeneration: true } }, which weakens the sandbox: page code can then " +
     "escape happy-dom to the render process"
   );
 }
