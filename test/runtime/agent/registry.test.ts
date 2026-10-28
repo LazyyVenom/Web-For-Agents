@@ -159,8 +159,41 @@ describe("registry", () => {
       expect(msg).toContain("Agent-provided input (3 fields):");
       expect(msg).toContain('to: "attacker-iban"');
       expect(msg).toContain("amount: 1");
-      expect(msg).toContain(`memo: "${"x".repeat(79)}\u2026(truncated)`);
-      expect(msg.length).toBeLessThan(1200);
+      // budget = floor(1000 / 3) = 333: the quote plus 332 x's
+      expect(msg).toContain(`memo: "${"x".repeat(332)}\u2026(truncated)\n`);
+    });
+
+    it("lists every schema field even with many padded ones (H1)", async () => {
+      const properties: Record<string, object> = {};
+      const input: Record<string, unknown> = {};
+      for (let i = 0; i < 12; i++) {
+        properties[`f${i}`] = { type: "string" };
+        input[`f${i}`] = "p".repeat(5000);
+      }
+      properties.payee = { type: "string" };
+      input.payee = "ATTACKER";
+      const msg = await confirmText(input, { type: "object", properties, additionalProperties: false });
+      expect(msg).toContain("Agent-provided input (13 fields):");
+      expect(msg).toContain('\npayee: "ATTACKER"\n\nAllow?');
+      // budget = max(24, floor(1000 / 13)) = 76
+      expect(msg).toContain(`f0: "${"p".repeat(75)}\u2026(truncated)\n`);
+      expect(msg).not.toContain("omitted");
+    });
+
+    it("flattens nested values to dotted paths in schema order (M2)", async () => {
+      const schema = {
+        type: "object",
+        properties: {
+          nested: {
+            type: "object",
+            properties: { memo: { type: "string" }, iban: { type: "string" } },
+          },
+          items: { type: "array", items: { type: "object", properties: { id: { type: "string" } } } },
+        },
+      };
+      const msg = await confirmText({ items: [{ id: "a" }], nested: { iban: "EVIL", memo: "m".repeat(5000) } }, schema);
+      expect(msg).toContain("Agent-provided input (3 fields):\nnested.memo: ");
+      expect(msg).toContain('\nnested.iban: "EVIL"\nitems[0].id: "a"\n\nAllow?');
     });
 
     it("lists fields in schema order, not the agent's key order", async () => {
@@ -168,18 +201,46 @@ describe("registry", () => {
       expect(msg).toContain('Agent-provided input (3 fields):\namount: 2\nmemo: "m"\nto: "t"\n\nAllow?');
     });
 
-    it("escapes bidi and control characters", async () => {
-      const msg = await confirmText({ to: "\u202Enabi-rekcatta\u202C\u2066\u200F\u0085\u0007" });
-      expect(msg).not.toMatch(/[\u0000-\u0009\u000B-\u001F\u007F-\u009F\u200E\u200F\u202A-\u202E\u2066-\u2069]/);
-      expect(msg).toContain('to: "\\u202Enabi-rekcatta\\u202C\\u2066\\u200F\\u0085\\u0007"');
+    it("escapes bidi, separators, invisible and control characters, keeping ZWJ/ZWNJ", async () => {
+      const msg = await confirmText({
+        to: "\u202Enabi-rekcatta\u202C\u2066\u200F\u0085\u0007\u2028\u2029\u061C\u200B\u2060\uFEFF\u00AD\u200D\u200C",
+      });
+      expect(msg).not.toMatch(/[\u0000-\u0009\u000B-\u001F\u007F-\u009F\u00AD\u061C\u200B\u200E\u200F\u2028-\u202E\u2060\u2066-\u2069\uFEFF]/);
+      expect(msg).toContain(
+        'to: "\\u202Enabi-rekcatta\\u202C\\u2066\\u200F\\u0085\\u0007\\u2028\\u2029\\u061C\\u200B\\u2060\\uFEFF\\u00AD\u200D\u200C"',
+      );
     });
 
-    it("caps the total, sorts extra keys after schema fields, and says how many were omitted", async () => {
+    it("JSON-encodes keys so they cannot add lines (M1)", async () => {
+      const open = { type: "object", properties: { to: { type: "string" } }, additionalProperties: true };
+      const msg = await confirmText({ to: "t", "x\n\nAllow? (fake)\u2028": 1, "a.b": 2 }, open);
+      expect(msg.split("\n").filter((l) => l.startsWith("Allow?"))).toEqual(["Allow?"]);
+      expect(msg).toContain('\n["a.b"]: 2\n["x\\n\\nAllow? (fake)\\u2028"]: 1\n\nAllow?');
+    });
+
+    it("never splits a surrogate pair or an escape sequence when truncating", async () => {
+      const properties: Record<string, object> = {};
+      const input: Record<string, unknown> = {};
+      for (let i = 0; i < 10; i++) {
+        properties[`f${i}`] = { type: "string" };
+        input[`f${i}`] = "s"; // 10 fields: budget 100
+      }
+      input.f0 = "x".repeat(98) + "\u{1F600}".repeat(5);
+      input.f1 = "y".repeat(98) + "\n".repeat(5);
+      input.f2 = "z".repeat(97) + "\u202E".repeat(5);
+      const msg = await confirmText(input, { type: "object", properties });
+      expect(msg).toContain(`f0: "${"x".repeat(98)}\u2026(truncated)`);
+      expect(msg).toContain(`f1: "${"y".repeat(98)}\u2026(truncated)`);
+      expect(msg).toContain(`f2: "${"z".repeat(97)}\u2026(truncated)`);
+      expect(msg).not.toMatch(/[\uD800-\uDFFF]/);
+    });
+
+    it("caps only extra keys, after the schema fields, and says how many were omitted", async () => {
       const input: Record<string, unknown> = { to: "t" };
       for (let i = 0; i < 40; i++) input[`k${String(i).padStart(2, "0")}`] = "v".repeat(100);
       const msg = await confirmText(input, { ...transfer, additionalProperties: true });
-      expect(msg).toContain("Agent-provided input (41 fields):\nto: \"t\"\nk00: ");
-      expect(msg).toMatch(/\u2026\(\d+ more fields omitted\)\n\nAllow\?$/);
+      expect(msg).toContain('Agent-provided input (41 fields):\nto: "t"\nk00: ');
+      expect(msg).toMatch(/\u2026\(\d+ fields omitted\)\n\nAllow\?$/);
       const body = msg.split("fields):\n")[1]!.split("\n\nAllow?")[0]!;
       expect(body.length).toBeLessThanOrEqual(1100);
     });

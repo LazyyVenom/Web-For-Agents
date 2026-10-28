@@ -31,9 +31,7 @@ let nextId = 1;
 let syncScheduled = false;
 let forceScheduled = false;
 
-const MAX_CONFIRM_VALUE = 80;
-const MAX_CONFIRM_INPUT = 1000;
-const TRUNCATED = "\u2026(truncated)";
+const CONFIRM_BUDGET = 1000;
 
 export function assertValidActionName(name: string): void {
   if (!isValidActionName(name)) {
@@ -131,41 +129,77 @@ export function listAgentActions(): AgentActionDescriptor[] {
     .sort((a, b) => compareStrings(a.name, b.name));
 }
 
-/** Bidi controls, LRM/RLM, and C0/C1 controls except \n, made visible as \u escapes. */
-const UNSAFE_CHARS = /[\u0000-\u0009\u000B-\u001F\u007F-\u009F\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+/** Controls (C0 but \n, C1), bidi and line/paragraph separators, and invisible format chars; ZWJ/ZWNJ kept. */
+const UNSAFE = /[\0-\t\v-\x1F\x7F-\x9F\xAD\u061C\u200B\u200E\u200F\u2028-\u202E\u2060\u2066-\u2069\uFEFF]/g;
+/** clip() units: an escape sequence, then any whole code point. */
+const UNIT = /\\u[\da-f]{4}|\\[^]|[^]/giu;
 
-function neutralize(s: string): string {
-  return s.replace(UNSAFE_CHARS, (c) => `\\u${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`);
+const neutralize = (s: string): string =>
+  s.replace(UNSAFE, (c) => "\\u" + c.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0"));
+
+function clip(s: string, max: number): string {
+  if (s.length <= max) return s;
+  let out = "";
+  for (const u of s.match(UNIT)!) {
+    if (out.length + u.length > max) break;
+    out += u;
+  }
+  return out + "\u2026(truncated)";
 }
 
-function clip(s: string): string {
-  return s.length > MAX_CONFIRM_VALUE ? s.slice(0, MAX_CONFIRM_VALUE) + TRUNCATED : s;
+const plural = (n: number): string => `${n} field${n === 1 ? "" : "s"}`;
+
+/** [path, JSON value, path made only of schema properties] */
+type Leaf = [string, string, boolean];
+
+/** Leaves as dotted paths: schema properties in schema order, then other keys sorted, then array items. */
+function flatten(s: JsonSchema | undefined, v: unknown, path: string, declared: boolean, out: Leaf[]): void {
+  const props = s?.properties ?? {};
+  const o = v as Record<string, unknown>;
+  const keys: Array<string | number> = Array.isArray(v)
+    ? v.map((_, i) => i)
+    : typeof v === "object" && v
+      ? [
+          ...Object.keys(props).filter((k) => hasOwn(o, k)),
+          ...Object.keys(o)
+            .filter((k) => !hasOwn(props, k))
+            .sort(compareStrings),
+        ]
+      : [];
+  if (!keys.length) {
+    if (path) out.push([path, v === undefined ? "undefined" : JSON.stringify(v), declared]);
+    return;
+  }
+  for (const k of keys) {
+    if (typeof k === "number") flatten(s?.items, o[k], `${path}[${k}]`, false, out);
+    else {
+      const own = hasOwn(props, k);
+      const seg = /^[A-Za-z_$][\w$]*$/.test(k) ? (path ? "." : "") + k : `[${JSON.stringify(k)}]`;
+      flatten(own ? props[k] : undefined, o[k], path + seg, declared && own, out);
+    }
+  }
 }
 
 /**
- * Every provided field as `name: value`: schema fields in schema order, then any extra keys
- * sorted, so the agent's key order and padding cannot push a field out of view.
+ * Every schema field as `path: value`, in schema order, whatever the agent's key order or padding;
+ * names and values cut to max(24, 1000 / fields). Fields outside the schema follow, capped at about
+ * 1000 characters in total, with a count of any left out.
  */
 function describeInput(schema: JsonSchema, value: Record<string, unknown>): string {
-  const declared = Object.keys(schema.properties ?? {}).filter((k) => hasOwn(value, k));
-  const known = new Set(declared);
-  const extra = Object.keys(value)
-    .filter((k) => !known.has(k))
-    .sort(compareStrings);
-  const keys = [...declared, ...extra];
-  const n = keys.length;
+  const leaves: Leaf[] = [];
+  flatten(schema, value, "", true, leaves);
+  const n = leaves.length;
+  const budget = Math.max(24, Math.floor(CONFIRM_BUDGET / n));
   const lines: string[] = [];
-  let total = 0;
-  for (const key of keys) {
-    const v = value[key];
-    const line = `${clip(neutralize(key))}: ${clip(neutralize(v === undefined ? "undefined" : JSON.stringify(v)))}`;
-    if (total + line.length > MAX_CONFIRM_INPUT) break;
-    lines.push(line);
-    total += line.length + 1;
+  let extra = 0;
+  let omitted = 0;
+  for (const [path, v, declared] of leaves) {
+    const line = `${clip(neutralize(path), budget)}: ${clip(neutralize(v), budget)}`;
+    if (!declared && (extra += line.length + 1) > CONFIRM_BUDGET) omitted++;
+    else lines.push(line);
   }
-  if (lines.length < n) lines.push(`\u2026(${n - lines.length} more field${n - lines.length === 1 ? "" : "s"} omitted)`);
-  const head = `Agent-provided input (${n} field${n === 1 ? "" : "s"})`;
-  return n === 0 ? `${head}.` : `${head}:\n${lines.join("\n")}`;
+  if (omitted) lines.push(`\u2026(${plural(omitted)} omitted)`);
+  return `Agent-provided input (${plural(n)})${n ? ":\n" + lines.join("\n") : "."}`;
 }
 
 function confirmMessage(name: string, spec: AgentActionSpec, schema: JsonSchema, value: Record<string, unknown>): string {
