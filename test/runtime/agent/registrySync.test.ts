@@ -74,4 +74,61 @@ describe("registry sync cost", () => {
     await flush();
     expect(registerTool).toHaveBeenCalledTimes(2);
   });
+
+  describe("forced refresh", () => {
+    it("re-registers a form action whose fields were revealed, and only that one", async () => {
+      const { calls, registerTool } = installFakeModelContext();
+      document.body.innerHTML = `<form id="a"><input name="q"><dialog id="d"><input name="iban"></dialog></form><form id="b"><input name="x"></form>`;
+      registerAgentAction(() => ({ name: "pay", description: "p" }), () => document.getElementById("a"));
+      registerAgentAction(() => ({ name: "other", description: "o" }), () => document.getElementById("b"));
+      await flush();
+      expect(Object.keys(calls[0]!.tool.inputSchema.properties!)).toEqual(["q"]);
+
+      document.getElementById("d")!.setAttribute("open", "");
+      refreshAgentActions();
+      await flush();
+      expect(registerTool).toHaveBeenCalledTimes(2);
+
+      refreshAgentActions({ force: true });
+      await flush();
+      expect(registerTool).toHaveBeenCalledTimes(3);
+      expect(calls[0]!.signal.aborted).toBe(true);
+      expect(calls[1]!.signal.aborted).toBe(false);
+      expect(calls[2]!.tool.name).toBe("pay");
+      expect(Object.keys(calls[2]!.tool.inputSchema.properties!)).toEqual(["q", "iban"]);
+
+      refreshAgentActions({ force: true });
+      await flush();
+      expect(registerTool).toHaveBeenCalledTimes(3);
+    });
+
+    it("revokes an exposed form action whose schema starts throwing", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { calls } = installFakeModelContext();
+      mountForms(1);
+      await flush();
+      expect(calls).toHaveLength(1);
+      const real = schemaFromForm.getMockImplementation()!;
+      schemaFromForm.mockImplementation(() => {
+        throw new Error("broken");
+      });
+      refreshAgentActions({ force: true });
+      await flush();
+      expect(calls[0]!.signal.aborted).toBe(true);
+      expect(calls).toHaveLength(1);
+      expect(warn).toHaveBeenCalledTimes(1);
+      schemaFromForm.mockImplementation(real);
+      warn.mockRestore();
+    });
+
+    it("a plain refresh does not rebuild exposed schemas", async () => {
+      installFakeModelContext();
+      mountForms(5);
+      await flush();
+      schemaFromForm.mockClear();
+      refreshAgentActions();
+      await flush();
+      expect(schemaFromForm).not.toHaveBeenCalled();
+    });
+  });
 });

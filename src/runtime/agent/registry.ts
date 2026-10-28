@@ -18,6 +18,7 @@ interface Entry {
 interface Exposed {
   id: number;
   controller: AbortController;
+  tool: WebMcpTool;
 }
 
 /** Insertion order = mount order. */
@@ -28,6 +29,7 @@ const warnedDuplicates = new Set<string>();
 const warnedIgnoredSchema = new Set<string>();
 let nextId = 1;
 let syncScheduled = false;
+let forceScheduled = false;
 
 const MAX_CONFIRM_VALUE = 80;
 const MAX_CONFIRM_INPUT = 1000;
@@ -229,8 +231,14 @@ export async function executeAgentAction(
   }
 }
 
-/** Re-evaluate actions (e.g. after a target element/ref attaches) at the next microtask. */
-export function refreshAgentActions(): void {
+/**
+ * Re-evaluate actions at the next microtask: exposes new or newly attached actions (and picks up a
+ * WebMCP that appeared since the last sync). Already exposed tools are not re-described, which keeps
+ * mounts cheap; pass `force: true` after revealing form fields (a modal, tab or wizard step) to
+ * re-describe them and re-register any whose name, description, schema or hints changed.
+ */
+export function refreshAgentActions(opts?: { force?: boolean }): void {
+  if (opts?.force) forceScheduled = true;
   scheduleSync();
 }
 
@@ -277,15 +285,30 @@ function stillDescribable(name: string, entry: Entry): boolean {
   }
 }
 
-/** Unregister exposed tools whose entry is gone, superseded, or no longer describable. */
-function revokeStale(active: Active): void {
+const fingerprint = (t: WebMcpTool): string => JSON.stringify([t.title, t.description, t.inputSchema, t.annotations]);
+
+/**
+ * Unregister exposed tools whose entry is gone, superseded, or no longer describable. When forced,
+ * also re-describe each one and unregister it if its tool changed; returns the fresh tools to expose.
+ */
+function revokeStale(active: Active, force: boolean): Map<string, WebMcpTool | null> {
+  const fresh = new Map<string, WebMcpTool | null>();
   for (const [name, current] of exposed) {
     const next = active.get(name);
-    if (!next || next[0] !== current.id || !stillDescribable(name, next[1])) {
+    let keep = next !== undefined && next[0] === current.id;
+    if (keep && force) {
+      const tool = buildTool(name, next![1]);
+      keep = tool !== null && fingerprint(tool) === fingerprint(current.tool);
+      if (!keep) fresh.set(name, tool);
+    } else if (keep) {
+      keep = stillDescribable(name, next![1]);
+    }
+    if (!keep) {
       current.controller.abort();
       exposed.delete(name);
     }
   }
+  return fresh;
 }
 
 function warnDuplicates(): void {
@@ -307,13 +330,13 @@ function warnDuplicates(): void {
  * Register tools not yet exposed; only these are described, so a sync costs one schema per new
  * action. A "failed" registration is unmarked so the next sync retries.
  */
-function exposeNew(active: Active): void {
+function exposeNew(active: Active, fresh: Map<string, WebMcpTool | null>): void {
   for (const [name, [id, entry]] of active) {
     if (exposed.has(name)) continue;
-    const tool = buildTool(name, entry);
+    const tool = fresh.has(name) ? fresh.get(name)! : buildTool(name, entry);
     if (!tool) continue;
     const controller = new AbortController();
-    exposed.set(name, { id, controller });
+    exposed.set(name, { id, controller, tool });
     const unmark = (): void => {
       if (exposed.get(name)?.controller === controller) exposed.delete(name);
     };
@@ -330,13 +353,13 @@ function exposeNew(active: Active): void {
 }
 
 function sync(): void {
-  syncScheduled = false;
+  const force = forceScheduled;
+  syncScheduled = forceScheduled = false;
   warnDuplicates();
   // Without WebMCP nothing is exposed: skip describing (and building form schemas for) every action.
   if (exposed.size === 0 && !hasModelContext()) return;
   const active = activeEntries();
-  revokeStale(active);
-  exposeNew(active);
+  exposeNew(active, revokeStale(active, force));
 }
 
 /** Test-only: drop all registrations and module state. */
@@ -346,6 +369,6 @@ export function __resetForTests(): void {
   entries.clear();
   warnedDuplicates.clear();
   warnedIgnoredSchema.clear();
-  syncScheduled = false;
+  syncScheduled = forceScheduled = false;
   nextId = 1;
 }
