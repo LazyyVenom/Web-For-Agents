@@ -1,5 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { collapseWhitespace, stripBom } from "../../src/shared/text";
+import { collapseWhitespace, plural, stripBom } from "../../src/shared/text";
+
+describe("plural", () => {
+  it("adds an s except for exactly one, or uses the given plural", () => {
+    expect(plural(0, "page")).toBe("0 pages");
+    expect(plural(1, "page")).toBe("1 page");
+    expect(plural(2, "field")).toBe("2 fields");
+    expect(plural(1, "entry", "entries")).toBe("1 entry");
+    expect(plural(3, "entry", "entries")).toBe("3 entries");
+  });
+});
 
 describe("collapseWhitespace", () => {
   it("collapses runs and trims", () => {

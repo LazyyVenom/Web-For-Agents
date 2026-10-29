@@ -1,6 +1,7 @@
 import { errorMessage, withPrefix } from "../../shared/errors";
 import { hasOwn } from "../../shared/object";
 import { compareStrings } from "../../shared/sort";
+import { plural } from "../../shared/text";
 import {
   __resetCoreForTests,
   activeEntries,
@@ -81,7 +82,7 @@ function clip(s: string, max: number): string {
   return out + "\u2026(truncated)";
 }
 
-const plural = (n: number): string => `${n} field${n === 1 ? "" : "s"}`;
+const fields = (n: number): string => plural(n, "field");
 
 /** [path, JSON value, path made only of schema properties] */
 type Leaf = [string, string, boolean];
@@ -131,8 +132,8 @@ function describeInput(schema: JsonSchema, value: Record<string, unknown>, flat:
     const line = `${clip(neutralize(path), budget)}: ${clip(neutralize(v), budget)}`;
     if (declared || (extra += line.length + 1) <= CONFIRM_BUDGET) lines.push(line);
   }
-  if (lines.length < n) lines.push(`\u2026(${plural(n - lines.length)} omitted)`);
-  return `Agent-provided input (${plural(n)})${n ? ":\n" + lines.join("\n") : "."}`;
+  if (lines.length < n) lines.push(`\u2026(${fields(n - lines.length)} omitted)`);
+  return `Agent-provided input (${fields(n)})${n ? ":\n" + lines.join("\n") : "."}`;
 }
 
 function confirmMessage(name: string, r: Resolved, schema: JsonSchema, value: Record<string, unknown>): string {
