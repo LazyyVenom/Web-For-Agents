@@ -389,6 +389,6 @@ describe("checks", () => {
     expect(desc("静かな湖畔の宿で季節ごとに変わる景色と地元の料理をゆっくり楽しめます。富士山の麓").status).toBe("pass");
     expect(desc("d".repeat(40)).status).toBe("warn");
     const title = byId(inputs({ src: pageHtml({ head: `<title>${"山".repeat(31)}</title>` }) }), "title");
-    expect(title.message).toBe("Title is 62 characters (over 60)");
+    expect(title.message).toBe("Title is 62 wide (over 60; 31 characters; Chinese, Japanese and Korean count as 2)");
   });
 });

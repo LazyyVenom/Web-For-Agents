@@ -1,3 +1,4 @@
+import { metaLength } from "../shared/metaLength";
 import { plural } from "../shared/text";
 import type { AuditReport } from "./audit";
 import { MAX_BODY_LABEL } from "./fetch";
@@ -106,8 +107,9 @@ export function formatSiteText(report: SiteAuditReport): string {
             .join(", ") || "-";
     return { path: safeText(path, PATH_MAX_CHARS), score: String(p.score), failing };
   });
-  const width = Math.max(4, ...rows.map((r) => Array.from(r.path).length));
-  const pad = (s: string): string => s + " ".repeat(width - Array.from(s).length);
+  // Padded by display width: wide characters take two columns.
+  const width = Math.max(4, ...rows.map((r) => metaLength(r.path)));
+  const pad = (s: string): string => s + " ".repeat(width - metaLength(s));
   lines.push("", `${pad("PATH")}  SCORE  FAILING`);
   for (const r of rows) lines.push(`${pad(r.path)}  ${r.score.padEnd(5)}  ${r.failing}`);
   let tail = `Pages: ${summary.audited} audited, min ${summary.min}, average ${summary.average}`;

@@ -47,6 +47,12 @@ describe("formatSiteText", () => {
     expect(text).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f‪-‮]/);
   });
 
+  it("pads the path column by display width, wide characters counting as 2", () => {
+    const text = formatSiteText(report({ pages: [pageAt("/%E5%AF%8C%E5%A3%AB"), pageAt("/abcd")] }));
+    // "/富士" is 3 characters but 5 columns wide, like "/abcd".
+    expect(text).toContain("PATH   SCORE  FAILING\n/富士  90     -\n/abcd  90     -\n");
+  });
+
   it("names the limit that cut the run", () => {
     const pages = [pageAt("/a"), pageAt("/b")];
     const byPages = formatSiteText(report({ pages, summary: { listed: 3000, maxPages: 2, limited: true, limitedBy: ["max-pages"] } }));

@@ -589,7 +589,7 @@ describe("Seo length warnings", () => {
     expect(warn).not.toHaveBeenCalled();
     render(<Seo title={"山".repeat(31)} description={"d".repeat(40)} />);
     const calls = warn.mock.calls.map((c: unknown[]) => String(c[0]));
-    expect(calls[0]).toContain("<Seo> title is 62 characters (over 60)");
+    expect(calls[0]).toContain("<Seo> title is 62 wide (over 60; 31 characters; Chinese, Japanese and Korean count as 2)");
     expect(calls[1]).toContain("<Seo> description is 40 characters (aim for 50-160)");
   });
 

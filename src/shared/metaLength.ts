@@ -18,6 +18,19 @@ export function metaLength(text: string): number {
   return n;
 }
 
+/**
+ * metaLength for messages: "66 characters (over 60)", or, when wide characters make it differ from the
+ * character count, "80 wide (over 60; 40 characters; Chinese, Japanese and Korean count as 2)".
+ */
+export function lengthText(text: string, note?: string): string {
+  const width = metaLength(text);
+  const chars = Array.from(text).length;
+  if (width !== chars) {
+    return `${width} wide (${note === undefined ? "" : `${note}; `}${chars} characters; Chinese, Japanese and Korean count as 2)`;
+  }
+  return note === undefined ? `${width} characters` : `${width} characters (${note})`;
+}
+
 export interface MetaLengthPage {
   route: string;
   title?: string;
@@ -30,12 +43,11 @@ export function metaLengthWarnings(pages: MetaLengthPage[]): string[] {
   const shortDesc: string[] = [];
   const longDesc: string[] = [];
   for (const { route, title, description } of pages) {
-    const t = title ? metaLength(title) : 0;
-    if (t > TITLE_MAX_CHARS) longTitle.push(`${route} (${t})`);
+    if (title && metaLength(title) > TITLE_MAX_CHARS) longTitle.push(`${route}: ${lengthText(title)}`);
     if (!description) continue;
     const d = metaLength(description);
-    if (d < DESCRIPTION_MIN_CHARS) shortDesc.push(`${route} (${d})`);
-    else if (d > DESCRIPTION_MAX_CHARS) longDesc.push(`${route} (${d})`);
+    if (d < DESCRIPTION_MIN_CHARS) shortDesc.push(`${route}: ${lengthText(description)}`);
+    else if (d > DESCRIPTION_MAX_CHARS) longDesc.push(`${route}: ${lengthText(description)}`);
   }
   const out: string[] = [];
   if (longTitle.length > 0) {

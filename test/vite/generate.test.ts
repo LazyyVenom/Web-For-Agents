@@ -232,7 +232,7 @@ describe("generateAgentFiles", () => {
     const t = setup({ "index.html": SITE["index.html"]!, "about.html": page("A".repeat(61), "<p>x</p>") });
     const r = await t.run();
     expect(r.fileLayout).toBe("flat");
-    expect(r.warnings).toContain("[web-for-agents] Title longer than 60 characters on /about (61)");
+    expect(r.warnings).toContain("[web-for-agents] Title longer than 60 characters on /about: 61 characters");
   });
 
   it("keeps the bytes of a windows-1252 page and inserts the link as ASCII", async () => {

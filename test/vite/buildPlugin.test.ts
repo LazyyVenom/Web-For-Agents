@@ -215,7 +215,7 @@ describe("createBuildPlugin", () => {
     writeFileSync(path.join(t.outDir, "assets/extra.js"), EXTRA.replace('document.title = "T " + p;', 'document.title = "T".repeat(61) + p;'));
     await t.run();
     const long = t.warnings().filter((w) => w.includes("Title longer than 60"));
-    expect(long).toEqual(["[web-for-agents] Title longer than 60 characters on / (62), /fetch (67)"]);
+    expect(long).toEqual(["[web-for-agents] Title longer than 60 characters on /: 62 characters, /fetch: 67 characters"]);
   }, 30_000);
 
   it("skips when writeBundle never ran", async () => {

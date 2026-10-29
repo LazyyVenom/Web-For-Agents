@@ -3,7 +3,7 @@ import { AI_BOTS } from "../shared/bots";
 import { AGENT_MAP_PATH, LLMS_TXT_PATH, MARKDOWN_MIME, ROBOTS_PATH, SITEMAP_PATH } from "../shared/conventions";
 import { errorMessage } from "../shared/errors";
 import { jsonLdNodes, jsonLdTypes } from "../shared/jsonLd";
-import { DESCRIPTION_MAX_CHARS, DESCRIPTION_MIN_CHARS, metaLength, TITLE_MAX_CHARS } from "../shared/metaLength";
+import { DESCRIPTION_MAX_CHARS, DESCRIPTION_MIN_CHARS, lengthText, metaLength, TITLE_MAX_CHARS } from "../shared/metaLength";
 import { checkSchemaNodes, SCHEMA_RULES, type SchemaIssue, type SchemaRule } from "../shared/schemaRules";
 import { plural, stripBom } from "../shared/text";
 import { hasScheme, trimTrailingSlash, tryResolveUrl } from "../shared/url";
@@ -164,9 +164,8 @@ function checkTitle({ html }: AuditInputs): Outcome {
   const fix = `Set a page title with <Seo title="..." /> (at most ${TITLE_MAX_CHARS} characters).`;
   const t = html.title;
   if (!t) return fail("No <title> found", fix);
-  const n = metaLength(t);
-  if (n > TITLE_MAX_CHARS) return warn(`Title is ${n} characters (over ${TITLE_MAX_CHARS})`, fix);
-  return pass(`Title is ${n} characters`);
+  if (metaLength(t) > TITLE_MAX_CHARS) return warn(`Title is ${lengthText(t, `over ${TITLE_MAX_CHARS}`)}`, fix);
+  return pass(`Title is ${lengthText(t)}`);
 }
 
 function checkDescription({ html }: AuditInputs): Outcome {
@@ -176,9 +175,9 @@ function checkDescription({ html }: AuditInputs): Outcome {
   if (!d) return fail("No meta description found", fix);
   const n = metaLength(d);
   if (n < DESCRIPTION_MIN_CHARS || n > DESCRIPTION_MAX_CHARS) {
-    return warn(`Meta description is ${n} characters (aim for ${range})`, fix);
+    return warn(`Meta description is ${lengthText(d, `aim for ${range}`)}`, fix);
   }
-  return pass(`Meta description is ${n} characters`);
+  return pass(`Meta description is ${lengthText(d)}`);
 }
 
 function checkOpenGraph({ html }: AuditInputs): Outcome {
