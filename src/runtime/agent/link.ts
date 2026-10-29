@@ -1,6 +1,12 @@
 import { assertValidActionName } from "../../shared/actionName";
 import type { ActionKind } from "../../shared/agent";
-import { ACTION_ATTR, ACTION_DESCRIPTION_ATTR, ACTION_DESTRUCTIVE_ATTR, ACTION_KIND_ATTR } from "../../shared/conventions";
+import {
+  ACTION_ATTR,
+  ACTION_DESCRIPTION_ATTR,
+  ACTION_DESTRUCTIVE_ATTR,
+  ACTION_KIND_ATTR,
+  ACTION_READONLY_ATTR,
+} from "../../shared/conventions";
 
 /** Attributes that describe an action in the markup, so static HTML (agents.json, the overlay) sees it. */
 export type AgentHintProps = {
@@ -10,10 +16,18 @@ export type AgentHintProps = {
   /** How the action runs: "handler" | "form" | "click" | "link". */
   [ACTION_KIND_ATTR]: ActionKind;
   [ACTION_DESTRUCTIVE_ATTR]?: "true";
+  /** Present for `readOnly` actions only. */
+  [ACTION_READONLY_ATTR]?: "true";
 };
 
 /** The hint attributes for an action; shared by `agentLinkProps` and `useAgentAction`. */
-export function hintProps(name: string, description: string, kind: ActionKind, destructive?: boolean): AgentHintProps {
+export function hintProps(
+  name: string,
+  description: string,
+  kind: ActionKind,
+  destructive?: boolean,
+  readOnly?: boolean,
+): AgentHintProps {
   const props: AgentHintProps = {
     [ACTION_ATTR]: name,
     [ACTION_DESCRIPTION_ATTR]: description,
@@ -21,6 +35,7 @@ export function hintProps(name: string, description: string, kind: ActionKind, d
     [ACTION_KIND_ATTR]: kind,
   };
   if (destructive) props[ACTION_DESTRUCTIVE_ATTR] = "true";
+  if (readOnly) props[ACTION_READONLY_ATTR] = "true";
   return props;
 }
 

@@ -168,21 +168,25 @@ describe("generate e2e (bring your own prerender)", () => {
     tmpDirs.push(tmp);
     const footer = '<footer><a href="/terms" data-agent-action="terms">Terms</a></footer>';
     for (const f of ["index.html", "a.html", "b.html"]) {
-      writeFileSync(path.join(tmp, f), `<!doctype html><html><head><title>${f}</title></head><body><main><p>x</p></main>${footer}</body></html>`);
+      // b.html has its own markdown link, which generate keeps.
+      const own = f === "b.html" ? '<link rel="alternate" type="text/markdown" href="/mine.md">' : "";
+      writeFileSync(path.join(tmp, f), `<!doctype html><html><head><title>${f}</title>${own}</head><body><main><p>x</p></main>${footer}</body></html>`);
     }
     const argv = ["generate", tmp, "--site-url", "https://a.com", "--ai-training", "block", "--ai-search", "allow"];
     const quiet = await cli(argv);
     expect(quiet.code).toBe(0);
-    expect(quiet.out).toMatch(/^\[web-for-agents\] wrote \d+ files \(3 pages, 3 actions; 1 site-wide\)\n$/);
-    expect(quiet.err).toContain("robots.ai blocks AI training crawlers"); // warnings are kept
+    expect(quiet.out).toMatch(/^\[web-for-agents\] wrote \d+ files \(3 pages, 1 action \(0 page-specific, 1 site-wide\)\)\n$/);
+    // Blocking only training is the recommended policy: no notice about it.
+    expect(quiet.err).not.toContain("robots.ai blocks");
 
     const loud = await cli([...argv, "--overwrite", "--verbose"]);
     expect(loud.code).toBe(0);
     const lines = loud.out.trimEnd().split("\n");
-    expect(lines[0]).toMatch(/^\[web-for-agents\] wrote \d+ files \(3 pages, 3 actions; 1 site-wide\)$/);
+    expect(lines[0]).toMatch(/^\[web-for-agents\] wrote \d+ files \(3 pages, 1 action \(0 page-specific, 1 site-wide\)\)$/);
     expect(lines).toContain("Layout: flat");
     expect(lines).toContain("Pages: /, /a, /b");
     expect(lines.some((l) => /^Wrote \d+ files: .*agents\.json/.test(l))).toBe(true);
+    expect(lines).toContain("Kept the page's own markdown link: /b");
   });
 
   it("--no-site-actions and agentMap.siteActions in --config keep the per-page layout", async () => {

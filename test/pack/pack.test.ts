@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
+import { createRequire } from "node:module";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -22,6 +23,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const run = promisify(execFile);
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const fixture = path.join(repo, "test/fixtures/pack-app");
+// createRequire, not import.meta.resolve: Vitest on Vite 6's module runner does not support the latter.
+const esbuildBin = createRequire(import.meta.url).resolve("esbuild/bin/esbuild");
 
 const PLUGIN_REACT: Record<string, string> = { "5": "4", "6": "4", "7": "5", "8": "6" };
 const viteMajor = process.env.PACK_VITE ?? "8";
@@ -364,22 +367,28 @@ describe("packed package without vite", () => {
       'import { agentLinkProps } from "@anubhav-choubey/web-for-agents/link";\nexport const footer = agentLinkProps({ name: "email", description: "Email me" });\n',
     );
     const outfile = path.join(bare, "footer.bundle.js");
-    await sh(fileURLToPath(import.meta.resolve("esbuild/bin/esbuild")), [entry, "--bundle", "--minify", "--format=esm", `--outfile=${outfile}`], bare);
+    await sh(esbuildBin, [entry, "--bundle", "--minify", "--format=esm", `--outfile=${outfile}`], bare);
     const code = readFileSync(outfile);
     expect(code.toString()).not.toMatch(/\bfrom\s*["']|\bimport\s*\(/);
     expect(gzipSync(code).length).toBeLessThan(1024);
   });
 
-  it("an AgentForm + useAgentAction page bundled by esbuild from /form loads the agent engine lazily", async () => {
-    const entry = path.join(bare, "form-page.mjs");
-    writeFileSync(entry, formConsumer("@anubhav-choubey/web-for-agents/form"));
-    const outdir = path.join(bare, "form-split");
-    const esbuild = path.join(repo, "node_modules/.bin/esbuild");
-    const args = [entry, "--bundle", "--minify", "--format=esm", "--splitting", `--outdir=${outdir}`, "--log-level=error"];
-    await sh(esbuild, [...args, "--external:react", "--external:react/jsx-runtime"], bare);
-    const { eager, lazy } = splitSizes(outdir, "form-page.js");
-    // Measured at 2351 bytes gzip, plus about 10%. From the root entry it was 6521 with the engine eager.
-    expect(eager).toBeLessThan(2600);
-    expect(lazy).toBeGreaterThan(4000);
+  it("an AgentForm + useAgentAction page bundled by esbuild loads the agent engine lazily, from /form and the root", async () => {
+    // Eager gzip, measured plus about 10%: /form 2351, root 2608. The root was 7165 while it imported the engine statically.
+    const budgets: Array<[string, string, number]> = [
+      ["form-page", "@anubhav-choubey/web-for-agents/form", 2600],
+      ["root-page", "@anubhav-choubey/web-for-agents", 2870],
+    ];
+    const externals = ["react", "react/jsx-runtime", "react-dom", "react-dom/client"].map((m) => `--external:${m}`);
+    for (const [name, from, budget] of budgets) {
+      const entry = path.join(bare, `${name}.mjs`);
+      writeFileSync(entry, formConsumer(from));
+      const outdir = path.join(bare, `${name}-split`);
+      const args = [entry, "--bundle", "--minify", "--format=esm", "--splitting", `--outdir=${outdir}`, "--log-level=error"];
+      await sh(esbuildBin, [...args, ...externals], bare);
+      const { eager, lazy } = splitSizes(outdir, `${name}.js`);
+      expect(eager, from).toBeLessThan(budget);
+      expect(lazy, from).toBeGreaterThan(4000);
+    }
   });
 });

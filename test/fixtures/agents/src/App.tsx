@@ -25,7 +25,7 @@ function Home() {
       <main>
         <h1>Home</h1>
         <a href="/contact">Contact</a> <a href="/account">Account</a>
-        <AgentForm agent={{ name: "search", description: "Search the site" }} action="/search">
+        <AgentForm agent={{ name: "search", description: "Search the site", readOnly: true }} action="/search">
           <input name="q" {...agentParam("Search terms")} />
         </AgentForm>
       </main>

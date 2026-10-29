@@ -89,6 +89,7 @@ export async function runGenerate(args: GenerateArgs, json: boolean, io: CliIo):
       `Wrote ${result.written.length} files: ${result.written.join(", ")}`,
     ];
     if (result.kept.length > 0) lines.push(`Kept existing: ${result.kept.join(", ")} (use --overwrite to replace)`);
+    if (result.ownMarkdownLinks.length > 0) lines.push(`Kept the page's own markdown link: ${result.ownMarkdownLinks.join(", ")}`);
     io.stdout(clean(lines.join("\n")) + "\n");
   }
   return 0;

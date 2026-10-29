@@ -29,7 +29,7 @@ export function staticActions(
           ? schemaFromForm(a.element as HTMLFormElement)
           : { ...EMPTY_OBJECT_SCHEMA, properties: {} },
       destructive: a.destructive,
-      readOnly: false,
+      readOnly: a.readOnly,
       kind: a.kind,
     });
   }

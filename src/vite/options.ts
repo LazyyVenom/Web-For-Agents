@@ -595,7 +595,9 @@ export function resolveOptions(input: WebForAgentsOptions): ResolvedOptions {
     Boolean,
   );
   const files = agentOutputs(resolved);
-  if (blocked.length > 0 && files.length > 0) {
+  // Blocking only training (the recommended policy) is not worth a notice: the agent files are for
+  // search and agents. Blocking search while publishing them is likely a mistake.
+  if (ai.search === "block" && files.length > 0) {
     warnings.push(
       `${LOG_PREFIX} robots.ai blocks AI ${blocked.join(" and ")} crawlers, but ${files.join(", ")} are still generated and publicly fetchable`,
     );

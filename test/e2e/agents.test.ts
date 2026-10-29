@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { build, createLogger } from "vite";
 import { webForAgents } from "../../src/vite/index";
+import { generateAgentFiles } from "../../src/vite/generate";
 import type { WebForAgentsOptions } from "../../src/vite/options";
 import type { AgentMap, AgentMapPage } from "../../src/shared/agent";
 import { copyFixture, distFiles, jsBundle, removeFixtureCopies } from "./helpers";
@@ -112,11 +113,31 @@ describe("agent map build", () => {
     expect(llms.indexOf("## Agents")).toBeGreaterThan(llms.indexOf("## Pages"));
   });
 
-  it("names agents.json in the blocked-AI warning", () => {
-    const blocked = warnings.filter((w) => w.includes("blocks AI training crawlers"));
-    expect(blocked).toHaveLength(1);
-    expect(blocked[0]).toContain("agents.json");
+  it("prints no notice for the recommended policy (training blocked, search allowed)", () => {
+    expect(warnings.filter((w) => w.includes("robots.ai blocks"))).toEqual([]);
   });
+
+  it("warns once per page about a name defined differently by two elements", () => {
+    const dup = warnings.filter((w) => w.includes("different actions named"));
+    expect(dup).toEqual([
+      "[web-for-agents] /: 2 different actions named subscribe; only the first is listed",
+      "[web-for-agents] /contact: 2 different actions named contact; only the first is listed",
+    ]);
+  });
+
+  it("generate on the same HTML lists the same readOnly, destructive and kind as the plugin", async () => {
+    const copy = path.join(path.dirname(dist), "dist-generate");
+    rmSync(copy, { recursive: true, force: true });
+    cpSync(dist, copy, { recursive: true });
+    for (const f of ["agents.json", "llms.txt", "llms-full.txt", "robots.txt", "sitemap.xml"]) rmSync(path.join(copy, f));
+    const logger = { warn: () => {}, info: () => {} };
+    await generateAgentFiles({ outDir: copy, siteUrl: "https://example.com", robots: { ai: { training: "block", search: "allow" } }, logger });
+    const flags = (m: AgentMap) =>
+      m.pages.map((p) => [p.path, p.actions.map((a) => [a.name, a.kind, a.readOnly, a.destructive])]);
+    const generated = JSON.parse(read(copy, "agents.json")) as AgentMap;
+    expect(flags(generated)).toEqual(flags(map));
+    expect(page("/").actions.find((a) => a.name === "search")!.readOnly).toBe(true);
+  }, 60_000);
 
   it("prerenders the data-agent-* hints", () => {
     const contact = read(dist, "contact/index.html");

@@ -270,13 +270,13 @@ describe("checks", () => {
     expect(at('{"pages":[]}').message).toBe("http://h/agents.json has version (none); expected 1 or 2");
   });
 
-  it("agent map counts site-wide actions on every page, and still accepts version 1", () => {
+  it("agent map counts site-wide actions once, and still accepts version 1", () => {
     const at = (map: unknown) =>
       byId(inputs({ agentMap: ok(JSON.stringify(map), "application/json", "http://h/agents.json") }), "agent-map");
     const a = (name: string) => ({ name, kind: "link" });
     const v2 = at({ version: 2, site: { url: "http://h", actions: [a("terms"), a("help")] }, pages: [{ actions: [a("buy")] }, { actions: [] }] });
     expect(v2.status).toBe("pass");
-    expect(v2.message).toBe("Agent map found at http://h/agents.json (2 pages, 5 actions; 2 site-wide)");
+    expect(v2.message).toBe("Agent map found at http://h/agents.json (2 pages, 3 actions (1 page-specific, 2 site-wide))");
     const v1 = at({ version: 1, site: { url: "http://h" }, pages: [{ actions: [a("terms"), a("buy")] }, { actions: [a("terms")] }] });
     expect(v1.status).toBe("pass");
     expect(v1.message).toBe("Agent map found at http://h/agents.json (2 pages, 3 actions)");
