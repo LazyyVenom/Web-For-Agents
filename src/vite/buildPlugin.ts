@@ -166,9 +166,12 @@ export function createBuildPlugin(resolved: ResolvedOptions, extensions: Prerend
       );
     }
     for (const w of pageLengthWarnings(listed)) logger.warn(w);
-    logger.info(
-      `${LOG_PREFIX} prerendered ${result.pages.length} routes (${listed.length} listed in llms.txt and the sitemap; the sitemap also keeps configured routes served from publicDir)`,
-    );
+    // Name only the files this build writes (sitemap: false or llms: false leave them out).
+    const listedIn = [resolved.llms ? "llms.txt" : "", resolved.sitemap ? "the sitemap" : ""].filter(Boolean).join(" and ");
+    const detail = listedIn
+      ? ` (${listed.length} listed in ${listedIn}${resolved.sitemap ? "; the sitemap also keeps configured routes served from publicDir" : ""})`
+      : "";
+    logger.info(`${LOG_PREFIX} prerendered ${result.pages.length} routes${detail}`);
   };
 
   return {

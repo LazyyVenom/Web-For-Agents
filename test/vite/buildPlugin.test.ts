@@ -491,6 +491,20 @@ describe("createBuildPlugin", () => {
     expect(t.info.mock.calls.some((c) => /prerendered \d+ routes/.test(String(c[0])))).toBe(true);
   }, 30_000);
 
+  it("the summary names only the files written", async () => {
+    const summary = async (opts: Parameters<typeof make>[0]) => {
+      const t = make(opts);
+      t.configure();
+      await t.run();
+      return t.info.mock.calls.map((c) => String(c[0])).find((m) => /prerendered \d+ routes/.test(m))!;
+    };
+    expect(await summary({ prerender: { crawl: false } })).toMatch(/listed in llms\.txt and the sitemap; the sitemap also keeps/);
+    const noSitemap = await summary({ sitemap: false, prerender: { crawl: false } });
+    expect(noSitemap).not.toContain("sitemap");
+    expect(noSitemap).toMatch(/prerendered \d+ routes \(\d+ listed in llms\.txt\)/);
+    expect(await summary({ sitemap: false, llms: false, prerender: { crawl: false } })).toMatch(/prerendered \d+ routes$/);
+  }, 30_000);
+
   it("skips a crawled link with a too-long name and still writes the site", async () => {
     const t = make({});
     const long = "n".repeat(300);
