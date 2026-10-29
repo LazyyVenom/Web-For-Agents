@@ -140,14 +140,13 @@ Layouts often place inline elements side by side with no whitespace between them
 - elements whose parent also holds text of its own (not just whitespace), since that parent is running prose, not a row of items: `<p><span>Java</span><span>Script</span> is fun</p>` gives `JavaScript is fun`, and `un<span>believ</span><span>able</span>` stays `unbelievable`;
 - an element next to plain text (`<b>Java</b>Script`, `H<sub>2</sub>O`);
 - two text-formatting elements (`<b>`, `<i>`, `<em>`, `<strong>`, `<code>`, `<sub>`, `<sup>`, `<mark>` and similar), as in `<b>Java</b><i>Script</i>`;
-- a side whose text is a single character (letter-by-letter animations, drop caps);
-- text ending in an opening character (`(`, `[`, `{`, `$`, `#`, `@`, `/`, an opening quote) or followed by closing punctuation or a slash (`.`, `,`, `;`, `:`, `!`, `?`, `%`, `)`, `]`, `}`, `/`, a closing quote, `…`), so `$29` + `/mo` gives `$29/mo`;
-- text made only of ASCII operators or sigils before the next element (`**` + `kwargs` in a Sphinx signature);
+- a side whose text is a single letter (letter-by-letter animations, a one-letter drop cap such as `T` + `he`); a single digit is spaced as usual, so `Step` + `1` gives `Step 1`;
+- text ending in an opening character (`(`, `[`, `{`, `#`, `@`, `/`, a currency symbol such as `$` or `¥`, an opening quote) or followed by closing punctuation or a slash (`.`, `,`, `;`, `:`, `!`, `?`, `%`, `)`, `]`, `}`, `/`, a closing quote, `…`), so `$29` + `/mo` gives `$29/mo`;
+- text made only of ASCII operators or sigils, on either side (`**` + `kwargs` and `object` + `=` + `False` in a Sphinx signature);
 - a boundary character in Chinese or Japanese script (Han, Hiragana, Katakana), CJK punctuation or a fullwidth form such as `（`, since those scripts put no spaces between words (Korean does, so Hangul is separated as usual);
-- a one- or two-letter drop cap before lowercase text (`Wh` + `en`), and digit-only texts side by side (counters such as `12` + `34`);
 - anything inside `<pre>` or `<code>`.
 
-Two elements alone in a parent look like a row of items, so a logo such as `<span>Web</span><span>ForAgents</span>` comes out as `Web ForAgents`. To join two words on purpose in this or any other case, put them in one element.
+Two elements alone in a parent look like a row of items, so a logo such as `<span>Web</span><span>ForAgents</span>` comes out as `Web ForAgents`. Short words are not told apart from drop caps (`No` + `thanks` gives `No thanks`, so a two-letter drop cap `Wh` + `en` gives `Wh en`), and numbers side by side are spaced (`2023` + `2024`, or a counter split into `12` + `34`). To join two words on purpose in this or any other case, put them in one element.
 
 ## Markdown URLs
 

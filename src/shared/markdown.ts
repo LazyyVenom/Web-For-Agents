@@ -36,17 +36,18 @@ const FORMATTING_ELEMENTS = new Set([
 ]);
 /**
  * Text that ends with an opening character or starts with a closing one attaches to its neighbour.
- * A leading "/" closes too ("$29" + "/mo", "4.5" + "/5", a URL split before its path). Fullwidth
- * brackets and CJK punctuation are covered by CJK_BOUNDARY.
+ * A leading "/" closes too ("$29" + "/mo", "4.5" + "/5", a URL split before its path), and a
+ * trailing currency symbol opens ("¥" + "1,980"). Fullwidth brackets and CJK punctuation are
+ * covered by CJK_BOUNDARY.
  */
-const OPENS = /[([{$#@/\u2018\u201c]$/;
+const OPENS = /[([{#@/\u2018\u201c\p{Sc}]$/u;
 const CLOSES = /^[.,;:!?%)\]}/\u2019\u201d\u2026]/;
-/** Text made only of ASCII operators or sigils (`**`, `&&`, `->`) attaches to the next element: `**kwargs`. */
+/** Text made only of ASCII operators or sigils (`**`, `&&`, `=`, `(`) attaches to both neighbours: `**kwargs`, `bool(object=False)`. */
 const OPERATOR_ONLY = /^[!-/:-@[-`{-~]+$/;
 /** Han, Hiragana, Katakana, CJK punctuation and fullwidth forms: written without spaces between words. Hangul is not included. */
 const CJK_BOUNDARY = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303f\uff00-\uffef]/u;
-/** A one- or two-letter drop cap ("W", "Wh") before a word that goes on in lowercase ("hen", "en"). */
-const DROP_CAP = /^\p{Lu}\p{Ll}?$/u;
+/** A single letter: one side of a letter-by-letter animation or a one-letter drop cap ("T" + "he"). */
+const SINGLE_LETTER = /^\p{L}$/u;
 
 /** Whether a node is an inline element: a listed one, or a custom element (a tag name with "-"). */
 function isInline(node: Node): boolean {
@@ -80,9 +81,9 @@ function previousContentSibling(node: Node): Node | null {
 
 /**
  * Whether an inline element needs a space before it so its text does not run into its previous
- * sibling's. Markup such as `<span>Slot 01</span><span>Featured</span>` in a flex row has no
+ * sibling's. Markup such as `<span>Plan</span><span>Pro</span>` in a flex row has no
  * whitespace between the elements, so the page shows two words while plain text would read
- * "Slot 01Featured". The rule: a space goes between two adjacent sibling elements (with only
+ * "PlanPro". The rule: a space goes between two adjacent sibling elements (with only
  * comments, icons, form fields or empty inline elements between them) when both are inline
  * elements (custom elements included) with text, the boundary has no whitespace, and none of
  * these holds, since each marks glue that is meant:
@@ -90,18 +91,18 @@ function previousContentSibling(node: Node): Node | null {
  *   (`<p><span>Java</span><span>Script</span> is fun</p>`, `un<span>believ</span><span>able</span>`),
  *   not a row of items;
  * - both are text-formatting elements (`<b>Java</b><i>Script</i>`);
- * - either side's text is a single character (letter-by-letter animations, drop caps);
- * - the left text ends with an opening character ( `( [ { $ # @ /` or an opening quote) or the
+ * - either side's text is a single letter (letter-by-letter animations, one-letter drop caps);
+ *   a single digit is not ("Step" + "1" reads "Step 1");
+ * - the left text ends with an opening character ( `( [ { # @ /`, a currency symbol or an opening quote) or the
  *   right text starts with closing punctuation (`. , ; : ! ? % ) ] } /`, a closing quote, an ellipsis);
- * - the left text is only ASCII operators or sigils (`**` before `kwargs`);
+ * - either text is only ASCII operators or sigils (`**` before `kwargs`, `=` in `object=False`);
  * - the boundary character on either side is Han, Hiragana, Katakana, CJK punctuation or a
  *   fullwidth form (those scripts put no spaces between words; Hangul does, so it is not included);
- * - a one- or two-letter drop cap before lowercase text (`Wh` + `en`), or two digit-only texts
- *   (counter widgets: `12` + `34`);
  * - they are inside `<pre>` or `<code>`.
  * An element next to a text node (`<b>Java</b>Script`, `H<sub>2</sub>O`) is never separated.
- * The limit: two elements alone in a parent, such as a logo `<span>Web</span><span>ForAgents</span>`,
- * look like a row and get a space ("Web ForAgents"); put such a word in one element.
+ * The limits: two elements alone in a parent, such as a logo `<span>Web</span><span>ForAgents</span>`,
+ * look like a row and get a space ("Web ForAgents"); put such a word in one element. A two-letter
+ * drop cap (`Wh` + `en`) and a counter split into digit groups (`12` + `34`) are spaced the same way.
  */
 function needsSeparator(node: Node): boolean {
   if (!isInline(node)) return false;
@@ -112,14 +113,12 @@ function needsSeparator(node: Node): boolean {
   const left = prev.textContent ?? "";
   const right = node.textContent ?? "";
   if (!left.trim() || !right.trim() || /\s$/.test(left) || /^\s/.test(right)) return false;
-  if (left.trim().length === 1 || right.trim().length === 1) return false;
-  if (OPENS.test(left) || CLOSES.test(right)) return false;
   const l = left.trim();
   const r = right.trim();
-  if (OPERATOR_ONLY.test(l)) return false;
+  if (SINGLE_LETTER.test(l) || SINGLE_LETTER.test(r)) return false;
+  if (OPENS.test(left) || CLOSES.test(right)) return false;
+  if (OPERATOR_ONLY.test(l) || OPERATOR_ONLY.test(r)) return false;
   if (CJK_BOUNDARY.test(l.slice(-1)) || CJK_BOUNDARY.test(r[0] ?? "")) return false;
-  if (DROP_CAP.test(l) && /^\p{Ll}/u.test(r)) return false;
-  if (/^\d+$/.test(l) && /^\d+$/.test(r)) return false;
   for (let p = node.parentNode; p; p = p.parentNode) if (p.nodeName === "PRE" || p.nodeName === "CODE") return false;
   return true;
 }
