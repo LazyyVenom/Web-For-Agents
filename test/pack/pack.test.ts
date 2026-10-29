@@ -294,7 +294,7 @@ describe("packed package without vite", () => {
       'import { agentLinkProps } from "@anubhav-choubey/web-for-agents/link";\nexport const footer = agentLinkProps({ name: "email", description: "Email me" });\n',
     );
     const outfile = path.join(bare, "footer.bundle.js");
-    await sh(path.join(repo, "node_modules/.bin/esbuild"), [entry, "--bundle", "--minify", "--format=esm", `--outfile=${outfile}`], bare);
+    await sh(fileURLToPath(import.meta.resolve("esbuild/bin/esbuild")), [entry, "--bundle", "--minify", "--format=esm", `--outfile=${outfile}`], bare);
     const code = readFileSync(outfile);
     expect(code.toString()).not.toMatch(/\bfrom\s*["']|\bimport\s*\(/);
     expect(gzipSync(code).length).toBeLessThan(1024);
