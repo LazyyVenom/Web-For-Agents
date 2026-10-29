@@ -56,6 +56,10 @@ export async function generateOptions(args: GenerateArgs): Promise<GenerateOptio
     robots: { ...robots, ai },
     ...(args.linkMarkdown ? {} : { linkMarkdown: false }),
     ...(args.overwrite ? { overwrite: true } : {}),
+    // agentMap: false in the config file stays off; other fields (fileName) are kept.
+    ...(args.siteActions || config.agentMap === false
+      ? {}
+      : { agentMap: { ...(isObject(config.agentMap) ? config.agentMap : {}), siteActions: false } }),
   } as GenerateOptions;
 }
 
@@ -75,9 +79,10 @@ export async function runGenerate(args: GenerateArgs, json: boolean, io: CliIo):
     io.stderr(withPrefix(`generate failed: ${clean(errorMessage(e).replace(/^\[web-for-agents\] /, ""))}\n`));
     return 2;
   }
+  // The summary line came through logger.info; the details only on request.
   if (json) {
     io.stdout(safeJson(result, 2) + "\n");
-  } else {
+  } else if (args.verbose) {
     const lines = [
       `Layout: ${result.fileLayout}`,
       `Pages: ${result.pages.map((p) => p.route + (p.listed ? "" : " (noindex)")).join(", ")}`,

@@ -9,6 +9,8 @@ import {
 import { firstPerName, linkActions, type LinkActionMarkup } from "../shared/markupActions";
 import {
   AGENT_MAP_VERSION,
+  actionCountText,
+  agentMapStats,
   type AgentActionDescriptor,
   type AgentGlobal,
   type AgentMap,
@@ -99,22 +101,55 @@ function toPage(siteUrl: string, p: AgentMapPageInput): AgentMapPage {
   };
 }
 
+/** JSON with object keys sorted at every depth, so equal definitions compare equal whatever their key order. */
+function canonicalJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(",")}]`;
+  if (typeof v === "object" && v !== null) {
+    const entries = Object.entries(v).filter(([, x]) => x !== undefined).sort(([a], [b]) => compareStrings(a, b));
+    return `{${entries.map(([k, x]) => `${JSON.stringify(k)}:${canonicalJson(x)}`).join(",")}}`;
+  }
+  return JSON.stringify(v);
+}
+
+/**
+ * Splits out the actions found on every page with the same definition (name, kind, href, schema,
+ * description and flags all equal), so a footer is listed once instead of on each page. Pages keep
+ * the rest in their order; a name defined differently on any page stays on every page. Needs 2 or
+ * more pages. Expects at most one action per name on a page (see toPage).
+ */
+export function hoistSiteActions(pages: AgentMapPage[]): { actions: AgentActionDescriptor[]; pages: AgentMapPage[] } {
+  if (pages.length < 2) return { actions: [], pages };
+  const keysOf = pages.map((p) => new Map(p.actions.map((a) => [a.name, canonicalJson(a)])));
+  const [first, ...rest] = keysOf;
+  const shared = new Set([...first!].filter(([name, key]) => rest.every((k) => k.get(name) === key)).map(([name]) => name));
+  if (shared.size === 0) return { actions: [], pages };
+  return {
+    actions: pages[0]!.actions.filter((a) => shared.has(a.name)),
+    pages: pages.map((p) => ({ ...p, actions: p.actions.filter((a) => !shared.has(a.name)) })),
+  };
+}
+
 export function buildAgentMap(input: {
   siteUrl: string;
   siteName?: string;
   /** Absolute llms.txt URL. */
   llmsUrl?: string;
   pages: AgentMapPageInput[];
+  /** List the actions found on every page once, in `site.actions`. Default true. */
+  siteActions?: boolean;
 }): string {
   const site: AgentMap["site"] = { url: trimTrailingSlash(input.siteUrl) };
   if (input.siteName) site.name = input.siteName;
+  const all = [...input.pages].sort(byRoute).map((p) => toPage(input.siteUrl, p));
+  const hoisted = input.siteActions === false ? { actions: [], pages: all } : hoistSiteActions(all);
+  if (hoisted.actions.length > 0) site.actions = hoisted.actions;
   const map: AgentMap = {
     version: AGENT_MAP_VERSION,
     generator: AGENT_MAP_GENERATOR,
     site,
     ...(input.llmsUrl ? { llms: input.llmsUrl } : {}),
     webmcp: { ...WEBMCP_INFO },
-    pages: [...input.pages].sort(byRoute).map((p) => toPage(input.siteUrl, p)),
+    pages: hoisted.pages,
   };
   return JSON.stringify(map, null, 2) + "\n";
 }
@@ -129,9 +164,15 @@ export function agentMapLlmsSection(siteUrl: string, fileName: string): LlmsSect
 }
 
 /** Prerender extension: collects each page's actions and link actions and writes the agent map. */
-export function agentMapExtension(opts: { siteUrl: string; fileName: string }): PrerenderExtension<AgentPageData> {
-  const { siteUrl, fileName } = opts;
+export function agentMapExtension(opts: {
+  siteUrl: string;
+  fileName: string;
+  /** See buildAgentMap. Default true. */
+  siteActions?: boolean;
+}): PrerenderExtension<AgentPageData> {
+  const { siteUrl, fileName, siteActions } = opts;
   const data = new Map<string, AgentPageData>();
+  let summary: string | undefined;
   return {
     name: "agent-map",
     inPage: collectAgentPageInPage,
@@ -157,7 +198,10 @@ export function agentMapExtension(opts: { siteUrl: string; fileName: string }): 
         if (p.mdUrl) page.markdown = p.mdUrl;
         return page;
       });
-      ctx.emitFile(fileName, buildAgentMap({ siteUrl, siteName: ctx.site.title, llmsUrl: ctx.llmsUrl, pages }));
+      const json = buildAgentMap({ siteUrl, siteName: ctx.site.title, llmsUrl: ctx.llmsUrl, pages, siteActions });
+      summary = actionCountText(agentMapStats(JSON.parse(json) as AgentMap));
+      ctx.emitFile(fileName, json);
     },
+    summary: () => summary,
   };
 }

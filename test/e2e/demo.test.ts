@@ -112,9 +112,11 @@ describe("demo build", () => {
     const raw = read("agents.json");
     expect(raw).not.toContain("127.0.0.1");
     const map: AgentMap = JSON.parse(raw);
-    const actions = map.pages.flatMap((p) => p.actions);
+    // search is in the layout, on every page, so it is listed once as a site action.
+    expect(map.site.actions?.map((a) => a.name)).toEqual(["search"]);
+    const actions = [...map.site.actions!, ...map.pages.flatMap((p) => p.actions)];
     const byName = (n: string) => actions.find((a) => a.name === n)!;
-    expect(new Set(actions.map((a) => a.name))).toEqual(new Set(["search", "contact", "clear-cart"]));
+    expect(actions.map((a) => a.name).sort()).toEqual(["clear-cart", "contact", "search"]);
     expect(byName("search")).toMatchObject({ kind: "handler", readOnly: true });
     expect(byName("clear-cart")).toMatchObject({ destructive: true });
     expect(byName("contact").destructive).toBe(false);

@@ -110,6 +110,29 @@ describe("generateAgentFiles", () => {
     expect(r.kept).toEqual([]);
   });
 
+  it("logs one summary line: files written, pages and actions", async () => {
+    const footer = '<footer><a href="/terms" data-agent-action="terms">Terms</a><a href="/help" data-agent-action="help">Help</a></footer>';
+    const t = setup({
+      "index.html": page("Home", "<h1>Home</h1>" + footer),
+      "about.html": page("About", '<h1>About</h1><a href="/cv.pdf" data-agent-action="cv">CV</a>' + footer),
+      "secret.html": page("Secret", "<h1>Secret</h1>", '<meta name="robots" content="noindex">\n'),
+    });
+    const r = await t.run();
+    const info = t.logger.info.mock.calls.map((c) => String(c[0]));
+    expect(info).toEqual([`[web-for-agents] wrote ${r.written.length} files (3 pages, 1 noindex, 5 actions; 2 site-wide)`]);
+
+    const u = setup({ "index.html": page("Home", "<h1>Home</h1>" + footer), "about.html": page("About", "<h1>About</h1>" + footer) });
+    await u.run({ agentMap: { siteActions: false } });
+    expect(u.logger.info.mock.calls.map((c) => String(c[0]))[0]).toMatch(/^\[web-for-agents\] wrote \d+ files \(2 pages, 4 actions\)$/);
+    const map = JSON.parse(u.read("agents.json"));
+    expect(map.site).not.toHaveProperty("actions");
+    expect(map.pages.map((p: any) => p.actions.length)).toEqual([2, 2]);
+
+    const v = setup({ "index.html": page("Home", "<h1>Home</h1>") });
+    await v.run({ agentMap: false });
+    expect(v.logger.info.mock.calls.map((c) => String(c[0]))[0]).toMatch(/^\[web-for-agents\] wrote \d+ files \(1 page\)$/);
+  });
+
   it("is idempotent: a second run adds no second link and changes nothing", async () => {
     const t = setup();
     await t.run();
@@ -241,8 +264,9 @@ describe("generateAgentFiles", () => {
     expect(unknown).toEqual([
       '[web-for-agents] action "teleport" has an unknown data-agent-kind "teleport" (expected handler, form, click or link); using "click"',
     ]);
-    const map = JSON.parse(t.read("agents.json")) as { pages: Array<{ actions?: Array<{ name: string; kind: string }> }> };
-    expect(map.pages.flatMap((p) => p.actions ?? []).map((a) => [a.name, a.kind])).toContainEqual(["teleport", "click"]);
+    const map = JSON.parse(t.read("agents.json")) as { site: { actions?: Array<{ name: string; kind: string }> } };
+    // On both pages, so listed once in site.actions.
+    expect(map.site.actions?.map((a) => [a.name, a.kind])).toEqual([["teleport", "click"]]);
   });
 
   it("validates options", async () => {

@@ -37,6 +37,8 @@ export interface PrerenderExtension<T = unknown> {
   llmsSections?(): LlmsSection[];
   /** Once, after llms files are written. */
   finalize?(ctx: ExtensionContext): void | Promise<void>;
+  /** After finalize: a short phrase for the one-line build summary, such as "12 actions". */
+  summary?(): string | undefined;
 }
 
 /**
@@ -46,6 +48,11 @@ export interface PrerenderExtension<T = unknown> {
 export function inPageExpression(fn: (arg: never) => unknown, arg?: unknown): string {
   const args = arg === undefined ? "" : JSON.stringify(arg);
   return `JSON.stringify((${fn.toString()})(${args}))`;
+}
+
+/** Each extension's summary phrase, in order, for the one-line build summary. */
+export function extensionSummaries(exts: PrerenderExtension[]): string[] {
+  return exts.map((e) => e.summary?.()).filter((x): x is string => !!x);
 }
 
 const NAME = /^[a-z0-9-]+$/;

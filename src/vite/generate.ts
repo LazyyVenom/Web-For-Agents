@@ -17,6 +17,7 @@ import {
   type WebForAgentsOptions,
 } from "./options";
 import { analyzeDocument } from "./prerender/analyze";
+import { extensionSummaries } from "./prerender/extensions";
 import { parseHtml } from "./prerender/dom";
 import { byRoute, isSafeRoute, publicMdUrl, publicUrl, routeMdFile, routeOfHtmlFile, shortRoute } from "./prerender/paths";
 import { decodeHtml, setMarkdownLink } from "./generateHtml";
@@ -44,7 +45,7 @@ export interface GenerateOptions {
   linkMarkdown?: boolean;
   /** Replace an existing robots.txt, sitemap.xml, llms.txt, llms-full.txt or agent map that differs. Default false. */
   overwrite?: boolean;
-  /** Where warnings and the summary go. Default console. */
+  /** Where warnings and the one-line summary go. Default console. */
   logger?: { warn(message: string): void; info(message: string): void };
 }
 
@@ -267,7 +268,7 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
   }
   guarded.stage(fileOf(ROBOTS_PATH), buildRobots(resolved));
   const extensions = resolved.agentMap
-    ? [agentMapExtension({ siteUrl, fileName: resolved.agentMap.fileName })]
+    ? [agentMapExtension({ siteUrl, ...resolved.agentMap })]
     : [];
   await stageSiteFiles({ siteUrl, markdown, llms: resolved.llms, extensions, logger }, guarded, {
     pages,
@@ -310,7 +311,13 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
     logger.warn(`${LOG_PREFIX} ${utf16.join(", ")} ${utf16.length === 1 ? "is" : "are"} UTF-16; the markdown link was not added`);
   }
   for (const w of pageLengthWarnings(listed)) logger.warn(w);
-  base.info(`${LOG_PREFIX} generated agent files for ${pages.length} pages (${listed.length} listed) in ${outDir}`);
+  const unlisted = pages.length - listed.length;
+  const counts = [
+    `${pages.length} page${pages.length === 1 ? "" : "s"}`,
+    ...(unlisted > 0 ? [`${unlisted} noindex`] : []),
+    ...extensionSummaries(extensions),
+  ];
+  base.info(`${LOG_PREFIX} wrote ${written.size} file${written.size === 1 ? "" : "s"} (${counts.join(", ")})`);
 
   return {
     outDir,

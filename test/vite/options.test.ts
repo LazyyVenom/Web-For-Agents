@@ -275,17 +275,25 @@ describe("prerender and output options", () => {
   });
 
   it("agentMap defaults to agents.json and can be disabled", () => {
-    expect(resolveOptions(base).agentMap).toEqual({ fileName: "agents.json" });
-    expect(resolveOptions({ ...base, agentMap: true }).agentMap).toEqual({ fileName: "agents.json" });
-    expect(resolveOptions({ ...base, agentMap: {} }).agentMap).toEqual({ fileName: "agents.json" });
-    expect(resolveOptions({ ...base, agentMap: { fileName: "ai.json" } }).agentMap).toEqual({ fileName: "ai.json" });
+    const def = { fileName: "agents.json", siteActions: true };
+    expect(resolveOptions(base).agentMap).toEqual(def);
+    expect(resolveOptions({ ...base, agentMap: true }).agentMap).toEqual(def);
+    expect(resolveOptions({ ...base, agentMap: {} }).agentMap).toEqual(def);
+    expect(resolveOptions({ ...base, agentMap: { fileName: "ai.json" } }).agentMap).toEqual({ ...def, fileName: "ai.json" });
     expect(resolveOptions({ ...base, agentMap: false }).agentMap).toBe(false);
+  });
+
+  it("agentMap.siteActions can be turned off and must be a boolean", () => {
+    expect(resolveOptions({ ...base, agentMap: { siteActions: false } }).agentMap).toEqual({ fileName: "agents.json", siteActions: false });
+    expect(() => resolveOptions({ ...base, agentMap: { siteActions: "no" } } as unknown as WebForAgentsOptions)).toThrow(
+      "[web-for-agents] agentMap.siteActions must be a boolean",
+    );
   });
 
   it("rejects a non-object agentMap from plain JS with a prefixed error", () => {
     for (const agentMap of [null, "agents.json", 1]) {
       expect(() => resolveOptions({ ...base, agentMap } as unknown as WebForAgentsOptions)).toThrow(
-        "[web-for-agents] agentMap must be a boolean or { fileName }",
+        "[web-for-agents] agentMap must be a boolean or { fileName, siteActions }",
       );
     }
   });

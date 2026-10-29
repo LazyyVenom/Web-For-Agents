@@ -1,4 +1,4 @@
-import { AGENT_MAP_VERSION, type AgentMap } from "../shared/agent";
+import { AGENT_MAP_VERSION, actionCountText, agentMapStats, type AgentMap } from "../shared/agent";
 import { AI_BOTS } from "../shared/bots";
 import { AGENT_MAP_PATH, LLMS_TXT_PATH, MARKDOWN_MIME, ROBOTS_PATH, SITEMAP_PATH } from "../shared/conventions";
 import { errorMessage } from "../shared/errors";
@@ -357,6 +357,9 @@ function checkMarkdown({ page, markdown, siteOrigin }: AuditInputs): Outcome {
   return pass(`Markdown copy found at ${at}`);
 }
 
+/** Version 1 is version 2 without `site.actions`, so both are current. */
+const KNOWN_AGENT_MAP_VERSIONS: readonly number[] = [1, AGENT_MAP_VERSION];
+
 function checkAgentMap({ agentMap, tried, agentMapPath }: AuditInputs): Outcome {
   const name = agentMapPath ?? AGENT_MAP_PATH;
   const at = agentMap.url;
@@ -372,13 +375,14 @@ function checkAgentMap({ agentMap, tried, agentMapPath }: AuditInputs): Outcome 
   if (json === null || typeof json !== "object" || Array.isArray(json)) return fail(`${at} is not a JSON object`, fix);
   const map = json as Partial<AgentMap>;
   if (!Array.isArray(map.pages)) return warn(`${at} has no pages array`, fix);
-  if (map.version !== AGENT_MAP_VERSION) {
+  if (!KNOWN_AGENT_MAP_VERSIONS.includes(map.version as number)) {
     return warn(
-      `${at} has version ${JSON.stringify(map.version) ?? "(none)"}; expected ${AGENT_MAP_VERSION}`,
+      `${at} has version ${JSON.stringify(map.version) ?? "(none)"}; expected ${KNOWN_AGENT_MAP_VERSIONS.join(" or ")}`,
       `Regenerate ${name} with the current webForAgents().`,
     );
   }
-  return pass(`Agent map found at ${at}`);
+  const stats = agentMapStats(map);
+  return pass(`Agent map found at ${at} (${stats.pages} page${stats.pages === 1 ? "" : "s"}, ${actionCountText(stats)})`);
 }
 
 const CHECKS: Record<CheckId, (i: AuditInputs) => Outcome> = {

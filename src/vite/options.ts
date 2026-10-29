@@ -52,6 +52,11 @@ export interface OverlayPluginOptions {
 export interface AgentMapOptions {
   /** Plain `.json` file name, written to the build output root. Default "agents.json". */
   fileName?: string;
+  /**
+   * List the actions found on every listed page (same definition) once, in `site.actions`, and
+   * leave them out of each page's list. `false` repeats them on every page. Default true.
+   */
+  siteActions?: boolean;
 }
 
 export type RendererName = "happy-dom" | "chrome" | "msedge";
@@ -206,7 +211,7 @@ export interface ResolvedOptions {
   prerender: ResolvedPrerender | false;
   markdown: ResolvedMarkdown | false;
   llms: LlmsOptions | false;
-  agentMap: { fileName: string } | false;
+  agentMap: { fileName: string; siteActions: boolean } | false;
   overlay: { enabled: boolean; shortcut: string; contentSelector: string };
   warnings: string[];
 }
@@ -462,16 +467,19 @@ function resolveLlms(input: LlmsOptions | undefined, siteUrl: string): LlmsOptio
 
 const AGENT_MAP_FILE = /^[A-Za-z0-9_.-]+\.json$/;
 
-function resolveAgentMap(input: WebForAgentsOptions["agentMap"]): { fileName: string } | false {
+function resolveAgentMap(input: WebForAgentsOptions["agentMap"]): { fileName: string; siteActions: boolean } | false {
   if (input === false) return false;
   if (input !== true && input !== undefined && (typeof input !== "object" || input === null)) {
-    throw new Error(withPrefix("agentMap must be a boolean or { fileName }"));
+    throw new Error(withPrefix("agentMap must be a boolean or { fileName, siteActions }"));
   }
-  const fileName = (input === true || input === undefined ? undefined : input.fileName) ?? AGENT_MAP_PATH.slice(1);
+  const opts = input === true || input === undefined ? {} : input;
+  const fileName = opts.fileName ?? AGENT_MAP_PATH.slice(1);
   if (typeof fileName !== "string" || !AGENT_MAP_FILE.test(fileName)) {
     throw new Error(`${LOG_PREFIX} agentMap.fileName must be a plain .json file name`);
   }
-  return { fileName };
+  const siteActions = opts.siteActions ?? true;
+  if (typeof siteActions !== "boolean") throw new Error(withPrefix("agentMap.siteActions must be a boolean"));
+  return { fileName, siteActions };
 }
 
 function resolveOverlay(

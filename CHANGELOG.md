@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Possibly breaking
+
+- `agents.json` is now version 2. Actions found on every listed page with the same definition (name, kind, `href`, input schema, description and flags), such as footer links or a site search, are listed once in a new `site.actions` and left out of each page's `actions`. The actions on a page are now `site.actions` plus the page's `actions`. Tools that read only `pages[].actions` will miss site-wide actions. `agentMap: { siteActions: false }` (or `generate --no-site-actions`) keeps the per-page layout, byte for byte apart from `version`. See [agents.json](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/agent-actions.md#agentsjson).
+- `generate` prints one summary line, such as `[web-for-agents] wrote 47 files (20 pages, 207 actions; 9 site-wide)`, instead of the layout, the page list and every file written. Warnings are unchanged. Use `--verbose` for the full lists; `--json` is unchanged.
+
 ### New
 
 - `schema.product` takes typed `aggregateRating` (written as an `AggregateRating`) and `review` (one or an array, each a `Review` with an `author` person and a `reviewRating` as a `Rating`; a string `author` is a person's name), so they no longer need `extra`.
@@ -11,6 +16,9 @@
 - The input types `OfferInput`, `AggregateOfferInput`, `AggregateRatingInput`, `ReviewInput`, `ItemAvailability`, `ItemCondition` and `PageOptions` are exported from the root and `/schema` entries.
 - Page builders share one option set (`PageOptions`): `webPage`, `profilePage` and `faqPage` (in its second argument) all take `name`, `description`, `url`, `breadcrumb`, `mainEntity`, `isPartOf`, `datePublished`, `dateModified`, `inLanguage`, `image` and `primaryImageOfPage`, and give the same fields for the same options. `breadcrumb` also takes the `{ name, url }[]` items, written as a `BreadcrumbList`, and a `primaryImageOfPage` URL is written as an `ImageObject`. Existing inputs give the same output.
 - `audit <url> --sitemap` audits every page in the site's sitemap and prints one table (path, score, top failing checks) with a summary line: pages audited, min, average and pages below `--min-score`. It exits 1 if any page is below `--min-score` or fails to load, which makes it a CI step. The sitemap comes from `robots.txt` or `/sitemap.xml`, and one level of sitemap index is followed. If the URL you pass redirects to another origin (`example.com` → `www.example.com`, `http` → `https`), that origin is audited, with a note. Only URLs on the audited origin are audited (URLs on the origin you passed and on `--site-url` are mapped to it); others are skipped, reported and never fetched, and no page redirect may leave the origin. `--max-pages` (default 50, at most 500) and `--concurrency` (default 4) bound the run. `robots.txt`, the sitemap, `llms.txt` and `agents.json` are fetched once and reused, so each page scores as it would alone. `--json` prints `{ site, pages, summary }`. Also available as `auditSite` and `formatSiteText` from `/cli`. See [Auditing a whole site](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/cli.md#auditing-a-whole-site).
+- `agentMap.siteActions` (default `true`), `generate --no-site-actions` and `--verbose`.
+- The audit's agent map check accepts version 1 and 2 and counts pages and actions, site-wide ones included.
+- The plugin's build summary counts the actions in the agent map.
 
 ## 0.4.0 (2026-10-29)
 

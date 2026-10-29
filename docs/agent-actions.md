@@ -124,13 +124,33 @@ In `agents.json` a link action looks like this:
 
 ## agents.json
 
-After prerendering, the plugin writes `agents.json` with every listed page and the actions found on it, and links it from `llms.txt` in an `## Agents` section. Pages are sorted by path and actions by name; pages without actions are listed with `"actions": []`. Titles and descriptions are the same as in `llms.txt`:
+After prerendering, the plugin writes `agents.json` with every listed page and the actions found on it, and links it from `llms.txt` in an `## Agents` section.
+
+- `site` describes the whole site: its `url`, its `name` (the same title as `llms.txt`) and `actions`, the actions available on every listed page, such as header, footer or layout links and a site search. They are listed once here instead of on each page. `site.actions` is left out when no action is on every page, and with fewer than 2 pages.
+- `pages` lists each page with only its own actions. The actions an agent can take on a page are `site.actions` plus the page's `actions`.
+
+An action is site-wide only when every listed page has it with the same definition: name, kind, `href`, input schema, description and flags. If one page lacks it (a checkout page without the cart link) or defines it differently (`contact` linking to `/en/contact` on English pages and `/de/kontakt` on German ones), it stays on each page that has it. Pages are sorted by path and actions by name; pages without actions are listed with `"actions": []`. Titles and descriptions are the same as in `llms.txt`:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "generator": "@anubhav-choubey/web-for-agents",
-  "site": { "url": "https://example.com", "name": "My Site" },
+  "site": {
+    "url": "https://example.com",
+    "name": "My Site",
+    "actions": [
+      {
+        "name": "privacy",
+        "description": "Read the privacy policy",
+        "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+        "destructive": false,
+        "readOnly": true,
+        "kind": "link",
+        "href": "https://example.com/privacy",
+        "method": "GET"
+      }
+    ]
+  },
   "llms": "https://example.com/llms.txt",
   "webmcp": { "api": "document.modelContext", "spec": "https://webmachinelearning.github.io/webmcp/" },
   "pages": [
@@ -164,5 +184,7 @@ After prerendering, the plugin writes `agents.json` with every listed page and t
 ```
 
 `kind` is `"handler"`, `"form"`, `"click"` or `"link"` (see [Link actions](#link-actions-no-javascript)). `llms` is omitted when `llms: false`, and `markdown` when `markdown: false`.
+
+`version` is `2`. Version 1 (0.4 and earlier) had no `site.actions` and repeated site-wide actions on every page; a version 2 file without `site.actions` reads the same way. Set `agentMap: { siteActions: false }` to keep that per-page layout: each page then lists all its actions, exactly as before, and only `version` changes. The CLI audit accepts both versions.
 
 Use `agentMap: { fileName: "ai.json" }` to change the file name (a plain `.json` name, no directories), or `agentMap: false` to turn the file and the `llms.txt` section off; WebMCP registration at runtime is unaffected. The CLI audit looks for the default `agents.json` unless you pass `--agent-map`. A `public/agents.json` of your own is never overwritten. The agent map needs prerender.
