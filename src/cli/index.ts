@@ -2,6 +2,7 @@ import { errorMessage, withPrefix } from "../shared/errors";
 import { audit, type AuditOptions } from "./audit";
 import { USAGE, parseCliArgs, type CliArgs } from "./args";
 import { runGenerate } from "./generate";
+import { runSkill } from "./skill";
 import { formatSiteText, formatText } from "./report";
 import { auditSite } from "./siteAudit";
 import { safeJson, safeText } from "./terminal";
@@ -23,7 +24,7 @@ const defaultIo: CliIo = {
   stderr: (s) => void process.stderr.write(s),
 };
 
-/** Runs the CLI with `argv` (without node and script). Resolves to the exit code: 0 ok, 1 below --min-score, 2 usage or fatal error. */
+/** Runs the CLI with `argv` (without node and script). Resolves to the exit code: 0 ok, 1 below --min-score (or, for skill, an existing different copy kept), 2 usage or fatal error. */
 export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<number> {
   let args;
   try {
@@ -37,6 +38,7 @@ export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<num
     return 0;
   }
   if (args.command === "generate") return runGenerate(args.generate!, args.json, io);
+  if (args.command === "skill") return runSkill(args.skill!, io);
   const opts: AuditOptions = {
     timeoutMs: args.timeoutMs,
     ...(args.agentMap === undefined ? {} : { agentMapPath: args.agentMap }),

@@ -1,6 +1,6 @@
 # CLI
 
-Audit any URL for AI-agent readiness. Nothing is installed in the target site. To add the agent files to a site you prerender yourself, see [generate](#generate).
+Audit any URL for AI-agent readiness. Nothing is installed in the target site. To add the agent files to a site you prerender yourself, see [generate](#generate). To give your coding agent this package's skill, see [skill](#skill).
 
 ```sh
 npx @anubhav-choubey/web-for-agents audit example.com
@@ -61,7 +61,7 @@ The JSON-LD check fails when there is no JSON-LD or none of it parses. It warns 
 `Article`, `NewsArticle`, `BlogPosting`, `Organization` and `Person` have no required properties, so they are never flagged. Other types are not checked. Google stopped showing FAQ rich results on 7 May 2026. It still reads `FAQPage` markup, so the check still uses Google's last documented FAQ requirements.
 If `FAQPage` gaps are the only issues, the check still passes at full weight and lists them in its message, because answer engines may still use the markup. A gap in any other type still warns. Its message names that gap first, and any `FAQPage` gaps follow as a note.
 
-The rules, with Google's recommended properties and a documentation link per type, live as plain data in `SCHEMA_RULES` in `src/shared/schemaRules.ts` (internal, not a package export).
+The rules, with Google's recommended properties and a documentation link per type, live as plain data in `SCHEMA_RULES` in [`src/shared/schemaRules.ts`](https://github.com/LazyyVenom/Web-For-Agents/blob/master/src/shared/schemaRules.ts) in the repository (internal, not a package export).
 
 A passing check earns its full weight, a warning half, a failure none. Each non-passing check prints a `Fix:` line.
 
@@ -172,6 +172,25 @@ It counts the files written, the pages found, how many are listed in `llms.txt` 
 
 The same function is available in code as `generateAgentFiles` from `@anubhav-choubey/web-for-agents/vite`.
 
+## skill
+
+Copies the package's [Agent Skill](https://agentskills.io) into your project, so your coding agent (Claude Code, Codex, Copilot or any tool that reads the open Agent Skills format) follows it while it adds SEO, JSON-LD, prerendering, `llms.txt`, agent actions and the audit to your site:
+
+```sh
+npx web-for-agents skill                       # writes .claude/skills/web-for-agents/SKILL.md
+npx web-for-agents skill --dir .agents/skills  # for tools that read .agents/skills
+```
+
+Then ask your agent to "use the web-for-agents skill". The skill is a short checklist, an entry-point table, a required build, serve and audit loop, and common mistakes. It points the agent at these docs in `node_modules/@anubhav-choubey/web-for-agents/docs/`, which ship with the package.
+
+Flags:
+
+- `--dir <path>` is the skills root, relative to the working directory or absolute. The skill is written to `<path>/web-for-agents/`. Default `.claude/skills`.
+- `--force` replaces an existing copy whose files differ (after you upgrade the package, for example). Without it, such a copy is kept and the command exits with `1`, naming the files. An identical copy is reported as up to date. Files of your own in the folder are left alone.
+- `--print` writes `SKILL.md` to stdout and no files, for tools that want it elsewhere or pasted into instructions.
+
+It writes only inside `<path>/web-for-agents/`: it refuses to write when that folder, a subfolder or a file in it is a symbolic link, or when the folder resolves outside `<path>`. Exit codes: `0` written or up to date, `1` a different copy was kept (use `--force`), `2` usage error or failure.
+
 ## Auditing a local preview
 
 You can audit a build locally with a static server:
@@ -182,6 +201,8 @@ npx @anubhav-choubey/web-for-agents audit localhost:4173/products/
 ```
 
 Use a server that answers `/dir` and `/dir/` with `dir/index.html` and `/page` with `page.html` (directly or through a redirect, which the audit follows), as `serve` does. `vite preview` also works for `/`, but it is a single-page-app server: for a sub-route without a trailing slash, such as `/products`, it can answer with `dist/index.html`, the home page. The audit then scores the home page's HTML, canonical and all, and does not say so. With `vite preview`, audit sub-routes with a trailing slash (`/products/`).
+
+A static server without a single-page-app fallback, such as `serve dist` without `-s`, answers 404 for any path the build did not write: a route that was not prerendered, or a file the audit looks for that your build does not generate. That is expected, not a server problem; the audit reports it as a missing page or file, and in production your host's fallback (`200.html`) serves unknown routes.
 
 The build writes absolute URLs from `siteUrl` into the canonical link, the sitemap, the markdown alternate link and the `Sitemap:` line in `robots.txt`. If `siteUrl` is your production origin, those URLs point away from the preview. The audit does not fetch them, so a local run never calls production. Instead it warns and names the other origin. For example:
 

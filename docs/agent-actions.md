@@ -19,6 +19,8 @@ import { AgentForm, agentParam } from "@anubhav-choubey/web-for-agents";
 </AgentForm>
 ```
 
+`AgentForm` takes every `<form>` prop (`ComponentPropsWithoutRef<"form">`), so `onSubmit` is React's form submit handler: it receives the submit event, `React.SubmitEvent<HTMLFormElement>` with `@types/react` 19.3 or later (`React.FormEvent<HTMLFormElement>` with earlier versions), for a user's submit and the form fallback alike. Call `event.preventDefault()` in it to handle the submit in JavaScript instead of navigating; read the fields with `new FormData(event.currentTarget)`.
+
 The derived schema uses each field's `name`, type (`email`, `url`, `number`, `checkbox`, ...), `required`, `min`/`max`, `minlength`/`maxlength` and `pattern`; `<select>` options and radio groups become an `enum`. Some fields are never exposed: they do not appear in the schema or in `agents.json`, and an agent cannot fill them, even through another field with the same name. These are:
 
 - disabled and `readonly` fields, and fields inside a `<fieldset disabled>` (except in its first `<legend>`);
@@ -109,7 +111,7 @@ Before the runtime has loaded, the `window.__WEB_FOR_AGENTS__` global (read by t
 Some actions are just links: download a price sheet, open a status page, email sales, call a store. Mark a plain `<a href>` with `agentLinkProps` and it is listed in `agents.json` as a link action, with no handler, no registration and no JavaScript needed at runtime:
 
 ```tsx
-import { agentLinkProps } from "@anubhav-choubey/web-for-agents";
+import { agentLinkProps } from "@anubhav-choubey/web-for-agents/link";
 
 <a href="/pricing.pdf" {...agentLinkProps({ name: "download_pricing_pdf", description: "Download the pricing sheet (PDF)" })}>Pricing (PDF)</a>
 <a href="https://status.example.com" {...agentLinkProps({ name: "open_status_page", description: "Open the service status page" })}>Status</a>
@@ -118,11 +120,7 @@ import { agentLinkProps } from "@anubhav-choubey/web-for-agents";
 
 `agentLinkProps({ name, description, destructive? })` only returns the `data-agent-action`, `data-agent-description`, `aria-description`, `data-agent-kind="link"` (and, when `destructive`, `data-agent-destructive="true"`) attributes, so it is safe in server rendering and works in hand-written HTML too: any `<a href data-agent-action="...">` is a link action. It throws on an invalid name, like `useAgentAction`.
 
-To keep React and the agent runtime out of a bundle that only marks links (a footer, a static page), import it from the `/link` entry (about 0.6 KB gzip with esbuild, with or without `register`; Vite adds its own module-preload helper of about 0.5 KB to any chunk with a dynamic import, so a Vite app's entry grows by about 1.2 KB with Vite 7 and 1.3 KB with Vite 8):
-
-```ts
-import { agentLinkProps } from "@anubhav-choubey/web-for-agents/link";
-```
+The root entry exports the same `agentLinkProps`. To keep React and the agent runtime out of a bundle that only marks links (a footer, a static page), import it from the `/link` entry, as above (about 0.6 KB gzip with esbuild, with or without `register`; Vite adds its own module-preload helper of about 0.5 KB to any chunk with a dynamic import, so a Vite app's entry grows by about 1.2 KB with Vite 7 and 1.3 KB with Vite 8):
 
 `/link` and `/schema` are each one file: they import no chunk shared with the other entries (the few constants they need are copied in), so a footer that imports `/link` adds one file to the page and no extra preloaded request. The only other file `/link` can load is the link tools chunk, with `import()`, and only when the browser has WebMCP and a link uses `register` (see [Links that are also browser tools](#links-that-are-also-browser-tools)). Vite, Rollup, webpack and esbuild with `--splitting` keep that chunk and the runtime it loads lazy, shared with `/form`; a bundle built without code splitting (esbuild without `--splitting`, a single IIFE) has to inline them, about 7.5 KB gzip. Because `register` is a runtime option, bundlers cannot tell that a site never uses it: the link tools and runtime chunks are still emitted to your build output (about 3 KB and 5 KB gzip with Vite) even when no link passes `register`. That is expected: they are emitted but not loaded, and a page only requests them when the browser has WebMCP and a mounted link uses `register`.
 

@@ -404,4 +404,15 @@ describe("checks", () => {
     const title = byId(inputs({ src: pageHtml({ head: `<title>${"山".repeat(31)}</title>` }) }), "title");
     expect(title.message).toBe("Title is 62 wide (over 60; 31 characters; Chinese, Japanese and Korean count as 2)");
   });
+  it("Open Graph Fix text names only the missing tags", () => {
+    const og = (...tags: string[]) => tags.map((t) => `<meta property="og:${t}" content="x">`).join("");
+    const html = (head: string) => `<!doctype html><html lang="en"><head><title>T</title>${head}</head><body><main>x</main></body></html>`;
+    const check = (head: string) => byId(inputs({ src: html(head) }), "open-graph");
+    expect(check(og("title", "description")).fix).toBe("Pass image to <Seo> (og:image is missing).");
+    expect(check(og("title")).fix).toBe("Pass description and image to <Seo> (og:description and og:image are missing).");
+    expect(check(og("description")).fix).toBe("Pass title and image to <Seo> (og:title and og:image are missing).");
+    expect(check("").fix).toBe("Pass title, description and image to <Seo> (og:title, og:description and og:image are missing).");
+    expect(check(og("title", "description")).message).toBe("Missing og:image");
+    expect(check(og("title", "description", "image")).fix).toBeUndefined();
+  });
 });

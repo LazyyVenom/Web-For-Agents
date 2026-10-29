@@ -9,6 +9,8 @@ After `vite build`, the plugin serves your `dist` locally, starts at `/` plus an
 
 Non-page links (other origins, `mailto:`, files with an extension, `exclude`d routes) are not followed. A path whose last segment contains a dot (`/v1.2`, `/files/report.final`) is treated as a file and not crawled; list such pages in `routes` to prerender them. Routes marked `<Seo noindex>` are written but left out of the sitemap and `llms.txt`. Nothing is written until every route has rendered: if any route fails, the build rejects with one error listing each failing route and renderer.
 
+Client routers (react-router's `BrowserRouter` and others) work: each route renders as it would in the browser, and `hydrateApp` hydrates it. Routes are found only by following links (`prerender.crawl`, on by default), so a dynamic route such as `/docs/:slug` is prerendered only for the slugs some page links to; list the others in `routes`. Give the router's not-found view `<Seo noindex />`, so it stays out of the sitemap, `llms.txt` and `agents.json`. Deploy with your host's fallback pointing at `200.html` (see [SPA fallback](#spa-fallback)).
+
 The default renderer is [happy-dom](https://github.com/capricorn86/happy-dom), which needs no browser. Pages that need a real browser can use your installed Chrome or Edge:
 
 ```sh
@@ -236,7 +238,7 @@ If `robots.ai.search` is `"block"` while `.md` files, `llms.txt`, `llms-full.txt
 
 ## Performance and memory
 
-Prerendering is fast. As approximate measurements on a laptop: the 12-page demo in `examples/demo` builds and prerenders in about 1.5 seconds, and a 500-route test site prerenders in under 10 seconds with the default settings.
+Prerendering is fast. As approximate measurements on a laptop: the 12-page [demo](https://github.com/LazyyVenom/Web-For-Agents/tree/master/examples/demo) builds and prerenders in about 1.5 seconds, and a 500-route test site prerenders in under 10 seconds with the default settings.
 
 Every page being rendered is held in memory at once. These figures are approximate. A typical page takes tens of MB, but a heavy page (a large DOM, big data payloads) can peak at around 500 MB. Peak memory is roughly `prerender.concurrency` times the heaviest page, plus about 150 MB for the build and 100 MB for the render process; the Chrome renderer adds Chrome's own processes on top. On small CI runners or containers (1 to 2 GB), lower `prerender.concurrency`, for example to `2`. If a render runs out of memory, the build fails with a message suggesting exactly that, rather than crashing.
 
