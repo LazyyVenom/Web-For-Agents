@@ -141,6 +141,36 @@ describe("fetchText", () => {
     expect(bomb.body.length).toBe(MAX_BODY_BYTES);
   });
 
+  it("decodes as fetch() does: empty bodies, raw and zlib deflate, stacked codings, truncated streams", async () => {
+    const { brotliCompressSync, deflateRawSync, deflateSync, gzipSync } = await import("node:zlib");
+    const gz = { "content-encoding": "gzip" };
+    const s = await serve({
+      "/empty": { headers: gz, body: "" },
+      "/gone": { status: 404, headers: gz, body: "" },
+      "/raw": { headers: { "content-encoding": "deflate" }, body: deflateRawSync("raw deflate") },
+      "/zlib": { headers: { "content-encoding": "deflate" }, body: deflateSync("zlib deflate") },
+      "/stacked": { headers: { "content-encoding": "gzip, br" }, body: brotliCompressSync(gzipSync("stacked")) },
+      "/identity": { headers: { "content-encoding": "identity, gzip" }, body: gzipSync("identity") },
+      "/cut": { headers: gz, body: gzipSync("cut short").subarray(0, -8) },
+    });
+    const get = (path: string) => fetchText(s.url + path, { timeoutMs: 2000 });
+    expect(await get("/empty")).toMatchObject({ status: 200, body: "" });
+    expect((await get("/empty")).error).toBeUndefined();
+    expect(await get("/gone")).toMatchObject({ status: 404, body: "" });
+    expect((await get("/gone")).error).toBeUndefined();
+    expect((await get("/raw")).body).toBe("raw deflate");
+    expect((await get("/zlib")).body).toBe("zlib deflate");
+    expect((await get("/stacked")).body).toBe("stacked");
+    expect((await get("/identity")).body).toBe("identity");
+    expect(await get("/cut")).toMatchObject({ status: 200, body: "cut short" });
+  });
+
+  it("an unknown content-encoding is an error, not garbage", async () => {
+    const s = await serve({ "/": { headers: { "content-encoding": "gzip, compress" }, body: "x" } });
+    const r = await fetchText(s.url + "/", { timeoutMs: 2000 });
+    expect(r).toMatchObject({ status: 0, body: "", error: 'network error: unsupported content-encoding "compress"' });
+  });
+
   it("refuses a URL with credentials without requesting it", async () => {
     let hit = false;
     const s = await serve({}, (_req, res) => ((hit = true), res.end("x")));

@@ -2,8 +2,8 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { isIP, type LookupFunction } from "node:net";
-import { pipeline, type Readable, type Transform } from "node:stream";
-import { createBrotliDecompress, createGunzip, createInflate } from "node:zlib";
+import { pipeline, Transform, type Readable } from "node:stream";
+import { constants, createBrotliDecompress, createGunzip, createInflate, createInflateRaw } from "node:zlib";
 import { stripBom } from "../shared/text";
 import { isPrivateHost } from "./privateAddress";
 
@@ -136,11 +136,36 @@ function guardedLookup(
   };
 }
 
+// As in undici's fetch(): flush what arrived, so a slightly truncated stream is not an error.
+const ZLIB_FLUSH = { flush: constants.Z_SYNC_FLUSH, finishFlush: constants.Z_SYNC_FLUSH };
+const BROTLI_FLUSH = { flush: constants.BROTLI_OPERATION_FLUSH, finishFlush: constants.BROTLI_OPERATION_FLUSH };
+
+/** "deflate" is meant to be zlib-wrapped, but servers also send it raw: the first byte tells them apart, as in fetch(). */
+function inflateEither(): Transform {
+  let inner: Transform | undefined;
+  return new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      if (inner === undefined) {
+        if (chunk.length === 0) return callback();
+        inner = (chunk[0]! & 0x0f) === 8 ? createInflate(ZLIB_FLUSH) : createInflateRaw(ZLIB_FLUSH);
+        inner.on("data", (d: Buffer) => this.push(d));
+        inner.on("error", (e) => this.destroy(e));
+      }
+      inner.write(chunk, callback);
+    },
+    flush(callback) {
+      if (inner === undefined) return callback();
+      inner.once("end", () => callback());
+      inner.end();
+    },
+  });
+}
+
 const DECODERS: Record<string, () => Transform> = {
-  gzip: () => createGunzip(),
-  "x-gzip": () => createGunzip(),
-  deflate: () => createInflate(),
-  br: () => createBrotliDecompress(),
+  gzip: () => createGunzip(ZLIB_FLUSH),
+  "x-gzip": () => createGunzip(ZLIB_FLUSH),
+  deflate: inflateEither,
+  br: () => createBrotliDecompress(BROTLI_FLUSH),
 };
 const ACCEPT_ENCODING = "gzip, deflate, br";
 
@@ -170,11 +195,22 @@ function send(url: URL, opts: FetchOptions, signal: AbortSignal): Promise<Incomi
   });
 }
 
-/** The response body as a stream of decoded bytes (Content-Encoding undone). */
+/**
+ * The response body as a stream of decoded bytes, with each Content-Encoding undone in reverse order.
+ * As in fetch(), a response that has no body (204, 304, or Content-Length 0) is not decoded.
+ */
 function bodyStream(res: IncomingMessage): Readable {
-  const encoding = (res.headers["content-encoding"] ?? "").trim().toLowerCase();
-  const make = Object.prototype.hasOwnProperty.call(DECODERS, encoding) ? DECODERS[encoding] : undefined;
-  return make ? pipeline(res, make(), () => {}) : res;
+  if (res.statusCode === 204 || res.statusCode === 304 || res.headers["content-length"] === "0") return res;
+  const codings = (res.headers["content-encoding"] ?? "")
+    .toLowerCase()
+    .split(",")
+    .map((c) => c.trim())
+    .filter((c) => c !== "" && c !== "identity");
+  const makers = codings.reverse().map((c) => {
+    if (!Object.prototype.hasOwnProperty.call(DECODERS, c)) throw new FetchFailure(`unsupported content-encoding "${c}"`);
+    return DECODERS[c]!;
+  });
+  return makers.reduce<Readable>((stream, make) => pipeline(stream, make(), () => {}), res);
 }
 
 /**
