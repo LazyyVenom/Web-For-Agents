@@ -25,7 +25,7 @@
 
 ### Fixed
 
-- With esbuild, the root entry no longer loads the agent runtime eagerly (about 7.2 KB gzip eager before, 2.5 KB now). `executeAgentAction` loads it on first use; `listAgentActions` lists form actions without their fields until it has loaded.
+- With esbuild, the root entry no longer loads the agent runtime eagerly (about 7.2 KB gzip eager before, 2.6 KB now). `executeAgentAction` loads it on first use; `listAgentActions` lists form actions without their fields until it has loaded.
 - An element with `id="__WFA_PROBE__"` on a live page no longer makes the runtime think a prerender is running (which loaded it eagerly).
 - `generate` no longer reports action counts when an existing `agents.json` was kept rather than written.
 - The build summary says "1 route" rather than "1 routes", and mentions configured routes the sitemap keeps from `publicDir` only when there are some, with their number.
