@@ -1,4 +1,5 @@
 // Agent action contract shared by the runtime (window global, WebMCP) and the build (agents.json).
+import { plural } from "./text";
 
 /** The JSON Schema subset used for agent action input. */
 export type JsonSchema = {
@@ -95,8 +96,10 @@ export interface AgentMap {
 
 export interface AgentMapStats {
   pages: number;
-  /** Actions available on each page, summed: a site-wide action counts once per page. */
+  /** Actions as listed: `pageActions + siteActions` (a site-wide action counts once). */
   actions: number;
+  /** The pages' own action lists, summed (an action on 3 pages counts 3 times). */
+  pageActions: number;
   siteActions: number;
 }
 
@@ -111,11 +114,11 @@ export function agentMapStats(map: { site?: unknown; pages?: unknown }): AgentMa
     (n, p) => n + (typeof p === "object" && p !== null ? arrayLength((p as { actions?: unknown }).actions) : 0),
     0,
   );
-  return { pages: pages.length, actions: own + siteActions * pages.length, siteActions };
+  return { pages: pages.length, actions: own + siteActions, pageActions: own, siteActions };
 }
 
-/** "207 actions; 9 site-wide", or "207 actions" without site actions. */
+/** "36 actions (27 page-specific, 9 site-wide)", or "27 actions" without site actions. */
 export function actionCountText(s: AgentMapStats): string {
-  const actions = `${s.actions} action${s.actions === 1 ? "" : "s"}`;
-  return s.siteActions > 0 ? `${actions}; ${s.siteActions} site-wide` : actions;
+  const actions = plural(s.actions, "action");
+  return s.siteActions > 0 ? `${actions} (${s.pageActions} page-specific, ${s.siteActions} site-wide)` : actions;
 }

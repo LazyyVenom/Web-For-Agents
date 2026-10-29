@@ -3,6 +3,7 @@ import path from "node:path";
 import type { Logger, Plugin } from "vite";
 import { CONTENT_ATTR, ROBOTS_PATH, SITEMAP_PATH } from "../shared/conventions";
 import { LOG_PREFIX } from "../shared/errors";
+import { plural } from "../shared/text";
 import { createFileStager, type FileStager } from "./fileStager";
 import type { ResolvedOptions } from "./options";
 import { NO_PERMISSION_MODEL_WARNING, hasPermissionModel } from "./prerender/happyDomProcess";
@@ -149,7 +150,7 @@ export function createBuildPlugin(resolved: ResolvedOptions, extensions: Prerend
     }
     for (const [message, routes] of byMessage) {
       const shown = routes.slice(0, 3).join(", ") + (routes.length > 3 ? ", ..." : "");
-      logger.warn(`${LOG_PREFIX} ${message} (${routes.length} route${routes.length === 1 ? "" : "s"}: ${shown})`);
+      logger.warn(`${LOG_PREFIX} ${message} (${plural(routes.length, "route")}: ${shown})`);
     }
     if (result.tooLongRoutes.length > 0) {
       logger.warn(
@@ -168,11 +169,12 @@ export function createBuildPlugin(resolved: ResolvedOptions, extensions: Prerend
     for (const w of pageLengthWarnings(listed)) logger.warn(w);
     // Name only the files this build writes (sitemap: false or llms: false leave them out).
     const listedIn = [resolved.llms ? "llms.txt" : "", resolved.sitemap ? "the sitemap" : ""].filter(Boolean).join(" and ");
-    const detail = listedIn
-      ? ` (${listed.length} listed in ${listedIn}${resolved.sitemap ? "; the sitemap also keeps configured routes served from publicDir" : ""})`
-      : "";
+    const fromPublic = resolved.sitemap ? sitemapRoutes.length - listed.length : 0;
+    const publicNote =
+      fromPublic > 0 ? `; the sitemap also keeps ${plural(fromPublic, "configured route")} served from publicDir` : "";
+    const detail = listedIn ? ` (${listed.length} listed in ${listedIn}${publicNote})` : "";
     const counts = extensionSummaries(extensions).map((c) => `, ${c}`).join("");
-    logger.info(`${LOG_PREFIX} prerendered ${result.pages.length} routes${counts}${detail}`);
+    logger.info(`${LOG_PREFIX} prerendered ${plural(result.pages.length, "route")}${detail}${counts}`);
   };
 
   return {

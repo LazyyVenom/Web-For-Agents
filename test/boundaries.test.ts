@@ -149,11 +149,14 @@ describe("import boundaries", () => {
     expect(specifiers(readFileSync(file, "utf8")).map((s) => resolved(file, s))).toEqual([join(SRC, "shared", "url")]);
   });
 
-  it("shared/agent imports only shared/conventions, as types or values", () => {
+  it("shared/agent imports only shared/conventions and shared/text, as types or values", () => {
     const file = join(SRC, "shared", "agent.ts");
+    const allowed = ["conventions", "text"].map((n) => join(SRC, "shared", n));
     for (const spec of specifiers(readFileSync(file, "utf8"))) {
-      expect(resolved(file, spec), `shared/agent.ts -> ${spec}`).toBe(join(SRC, "shared", "conventions"));
+      expect(allowed, `shared/agent.ts -> ${spec}`).toContain(resolved(file, spec));
     }
+    // shared/text is a leaf: it imports nothing.
+    expect(specifiers(readFileSync(join(SRC, "shared", "text.ts"), "utf8"))).toEqual([]);
   });
 
   it("agentLinkProps (runtime/agent/link) imports only shared modules and types", () => {
