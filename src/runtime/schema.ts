@@ -42,19 +42,20 @@ export interface JsonLdNodeOptions {
 /** `extra` fields: any keys except `@type` and `@context`, which the builder owns. */
 export type JsonLdExtra = Record<string, unknown> & { "@type"?: never; "@context"?: never };
 
-/** A node or a ref to one. */
-type Embeddable = JsonLdNode | JsonLdRef;
+/** A node or a ref to one: what a field that takes "a node or a ref" accepts. */
+export type JsonLdEmbeddable = JsonLdNode | JsonLdRef;
 
-type Author = { name: string; url?: string } | Embeddable;
+/** A person's `{ name, url }`, written as a `Person`, or a node or a ref. */
+export type AuthorInput = { name: string; url?: string } | JsonLdEmbeddable;
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-const isEmbeddable = (v: unknown): v is Embeddable => isObject(v) && ("@type" in v || "@id" in v);
+const isEmbeddable = (v: unknown): v is JsonLdEmbeddable => isObject(v) && ("@type" in v || "@id" in v);
 
 /** A node embedded in another node or a graph: the `@context` belongs to the document, not the node. Null and undefined give undefined. */
-function nested(n: Embeddable | null | undefined): Embeddable | undefined {
+function nested(n: JsonLdEmbeddable | null | undefined): JsonLdEmbeddable | undefined {
   if (n === undefined || n === null) return undefined;
   const { "@context": _context, ...rest } = n as JsonLdNode;
-  return rest as Embeddable;
+  return rest as JsonLdEmbeddable;
 }
 
 /** "__proto__" in input data (JSON.parse keeps it as an own key) would replace a prototype instead of adding a property: never copied. */
@@ -112,14 +113,14 @@ function node(type: string, fields: Record<string, unknown>, options: JsonLdNode
   return out;
 }
 
-const person = (a: Author | null | undefined) =>
+const person = (a: AuthorInput | null | undefined) =>
   a === undefined || a === null
     ? undefined
     : isEmbeddable(a)
       ? nested(a)
       : definedOnly({ "@type": "Person", name: a.name, url: a.url });
 
-function authors(a: Author | Author[] | null | undefined) {
+function authors(a: AuthorInput | AuthorInput[] | null | undefined) {
   return Array.isArray(a) ? a.map(person).filter((p) => p !== undefined) : person(a);
 }
 
@@ -130,7 +131,7 @@ const named = <T>(type: string, v: string | T) => (typeof v === "string" ? { "@t
 const each = <T, R>(v: T | T[], f: (x: T) => R) => (Array.isArray(v) ? v.map(f) : f(v));
 
 /** Builds `v` with `f` unless it already is a node or a ref. Null and undefined give undefined. */
-function build<T extends object>(v: T | Embeddable | null | undefined, f: (x: T) => JsonLdNode): Embeddable | undefined {
+function build<T extends object>(v: T | JsonLdEmbeddable | null | undefined, f: (x: T) => JsonLdNode): JsonLdEmbeddable | undefined {
   if (v === undefined || v === null) return undefined;
   return isEmbeddable(v) ? v : f(v as T);
 }
@@ -160,7 +161,7 @@ type OfferCommon = {
   priceValidUntil?: string;
   itemCondition?: ItemCondition;
   /** An organization name, or a node or a ref. */
-  seller?: string | Embeddable;
+  seller?: string | JsonLdEmbeddable;
 };
 
 /** One price, written as an `Offer`. */
@@ -170,7 +171,7 @@ export type OfferInput = OfferCommon & { price: number | string };
 export type AggregateOfferInput = OfferCommon & { lowPrice: number | string; highPrice?: number | string; offerCount?: number };
 
 /** One offer, several, or an `AggregateOffer` (`lowPrice`, `highPrice`, `offerCount`); each may also be a node or a ref. */
-export type OffersInput = OfferInput | AggregateOfferInput | Embeddable | Array<OfferInput | AggregateOfferInput | Embeddable>;
+export type OffersInput = OfferInput | AggregateOfferInput | JsonLdEmbeddable | Array<OfferInput | AggregateOfferInput | JsonLdEmbeddable>;
 
 const given = (v: unknown) => v !== undefined && v !== null;
 
@@ -194,7 +195,8 @@ function offer(o: OfferInput | AggregateOfferInput): JsonLdNode {
 /** Builds each offer that is not already a node or a ref. */
 const offers = (v: OffersInput | null | undefined) => each(v, (o) => build(o, offer));
 
-type RatingInput = { ratingValue: number | string; bestRating?: number | string; worstRating?: number | string };
+/** A rating, written as a `Rating`. */
+export type RatingInput = { ratingValue: number | string; bestRating?: number | string; worstRating?: number | string };
 
 /** The overall rating from many reviews, written as an `AggregateRating`. Google needs `ratingCount` or `reviewCount`. */
 export type AggregateRatingInput = RatingInput &
@@ -202,22 +204,25 @@ export type AggregateRatingInput = RatingInput &
 
 /** One review, written as a `Review` with a `Rating`. A string `author` is a person's name. Google needs both. */
 export type ReviewInput = {
-  author: string | Author;
+  author: string | AuthorInput;
   reviewRating: RatingInput;
   reviewBody?: string;
   datePublished?: string;
   name?: string;
 };
 
-/** What the standalone rating and review builders add: the item reviewed and the common options. */
-type Standalone = { itemReviewed?: Embeddable } & JsonLdNodeOptions;
+/** One review or several; each may also be a node or a ref. */
+export type ReviewsInput = ReviewInput | JsonLdEmbeddable | Array<ReviewInput | JsonLdEmbeddable>;
 
-function aggregateRating(i: AggregateRatingInput & Standalone): JsonLdNode {
+/** What the standalone rating and review builders add to their input: the item reviewed and the common options. */
+export type StandaloneOptions = { itemReviewed?: JsonLdEmbeddable } & JsonLdNodeOptions;
+
+function aggregateRating(i: AggregateRatingInput & StandaloneOptions): JsonLdNode {
   const [rest, options] = split(i);
   return node("AggregateRating", rest, options);
 }
 
-function review(i: ReviewInput & Standalone): JsonLdNode {
+function review(i: ReviewInput & StandaloneOptions): JsonLdNode {
   const [{ author, reviewRating, ...rest }, options] = split(i);
   return node(
     "Review",
@@ -230,15 +235,19 @@ function review(i: ReviewInput & Standalone): JsonLdNode {
   );
 }
 
+/** Builds each review that is not already a node or a ref. */
+const reviews = (v: ReviewsInput | null | undefined) => each(v, (r) => build(r, review));
+
 /** Splits the common options off a builder's input. */
 function split<T extends JsonLdNodeOptions>(i: T): [Omit<T, "id" | "extra">, JsonLdNodeOptions] {
   const { id, extra, ...rest } = i;
   return [rest, { id, extra }];
 }
 
-type Crumb = { name: string; url: string };
+/** One breadcrumb, written as a `ListItem`. */
+export type BreadcrumbItem = { name: string; url: string };
 
-function breadcrumbList(items: Crumb[], options?: JsonLdNodeOptions): JsonLdNode {
+function breadcrumbList(items: BreadcrumbItem[], options?: JsonLdNodeOptions): JsonLdNode {
   return node(
     "BreadcrumbList",
     {
@@ -256,17 +265,17 @@ export type PageOptions = {
   description?: string;
   url?: string;
   /** A `schema.breadcrumbList` node, its `{ name, url }` items, or a ref. No items write no breadcrumb. */
-  breadcrumb?: Embeddable | Crumb[];
+  breadcrumb?: JsonLdEmbeddable | BreadcrumbItem[];
   /** What the page is about: a node or a ref. */
-  mainEntity?: Embeddable;
+  mainEntity?: JsonLdEmbeddable;
   /** Usually a ref to the `WebSite`. */
-  isPartOf?: Embeddable;
+  isPartOf?: JsonLdEmbeddable;
   datePublished?: string;
   dateModified?: string;
   inLanguage?: string;
-  image?: string | string[] | Embeddable;
+  image?: string | string[] | JsonLdEmbeddable;
   /** A URL, written as an `ImageObject`, or a node or a ref. */
-  primaryImageOfPage?: string | Embeddable;
+  primaryImageOfPage?: string | JsonLdEmbeddable;
 } & JsonLdNodeOptions;
 
 /** A page node of `type` from the shared page options; `fields` are the builder's own and win. */
@@ -303,7 +312,7 @@ export const schema = {
       image?: string | string[];
       datePublished?: string;
       dateModified?: string;
-      author?: Author | Author[];
+      author?: AuthorInput | AuthorInput[];
       url?: string;
     } & JsonLdNodeOptions,
   ): JsonLdNode {
@@ -316,13 +325,13 @@ export const schema = {
       description?: string;
       image?: string | string[];
       sku?: string;
-      brand?: string | Embeddable;
+      brand?: string | JsonLdEmbeddable;
       offers?: OffersInput;
-      aggregateRating?: AggregateRatingInput | Embeddable;
-      review?: ReviewInput | Embeddable | Array<ReviewInput | Embeddable>;
+      aggregateRating?: AggregateRatingInput | JsonLdEmbeddable;
+      review?: ReviewsInput;
     } & JsonLdNodeOptions,
   ): JsonLdNode {
-    const [{ brand, offers: o, aggregateRating: rating, review: reviews, ...rest }, options] = split(i);
+    const [{ brand, offers: o, aggregateRating: rating, review: r, ...rest }, options] = split(i);
     return node(
       "Product",
       {
@@ -330,7 +339,7 @@ export const schema = {
         brand: named("Brand", brand),
         offers: offers(o),
         aggregateRating: build(rating, aggregateRating),
-        review: each(reviews, (r) => build(r, review)),
+        review: reviews(r),
       },
       options,
     );
@@ -348,12 +357,12 @@ export const schema = {
     });
   },
   breadcrumbList,
-  organization(i: { name: string; url: string; logo?: string | Embeddable; sameAs?: string[] } & JsonLdNodeOptions): JsonLdNode {
+  organization(i: { name: string; url: string; logo?: string | JsonLdEmbeddable; sameAs?: string[] } & JsonLdNodeOptions): JsonLdNode {
     const [rest, options] = split(i);
     return node("Organization", rest, options);
   },
   webSite(
-    i: { name: string; url: string; searchUrlTemplate?: string; publisher?: Embeddable } & JsonLdNodeOptions,
+    i: { name: string; url: string; searchUrlTemplate?: string; publisher?: JsonLdEmbeddable } & JsonLdNodeOptions,
   ): JsonLdNode {
     const [{ searchUrlTemplate, ...rest }, options] = split(i);
     return node(
@@ -375,16 +384,16 @@ export const schema = {
     i: {
       name: string;
       url?: string;
-      image?: string | Embeddable;
+      image?: string | JsonLdEmbeddable;
       jobTitle?: string;
       description?: string;
       email?: string;
       sameAs?: string[];
-      worksFor?: string | { name: string; url?: string } | Embeddable;
+      worksFor?: string | { name: string; url?: string } | JsonLdEmbeddable;
       /** A postal address as text or a `PostalAddress` node. */
-      address?: string | Embeddable;
+      address?: string | JsonLdEmbeddable;
       /** Topics as text, or `Thing`/`DefinedTerm` nodes. */
-      knowsAbout?: string | Embeddable | Array<string | Embeddable>;
+      knowsAbout?: string | JsonLdEmbeddable | Array<string | JsonLdEmbeddable>;
     } & JsonLdNodeOptions,
   ): JsonLdNode {
     const [{ worksFor, ...rest }, options] = split(i);
@@ -413,17 +422,19 @@ export const schema = {
       url?: string;
       image?: string | string[];
       offers?: OffersInput;
-      aggregateRating?: AggregateRatingInput;
-      author?: Author;
+      aggregateRating?: AggregateRatingInput | JsonLdEmbeddable;
+      review?: ReviewsInput;
+      author?: AuthorInput;
     } & JsonLdNodeOptions,
   ): JsonLdNode {
-    const [{ offers: o, aggregateRating: rating, author, ...rest }, options] = split(i);
+    const [{ offers: o, aggregateRating: rating, review: r, author, ...rest }, options] = split(i);
     return node(
       "SoftwareApplication",
       {
         ...rest,
         offers: offers(o),
         aggregateRating: build(rating, aggregateRating),
+        review: reviews(r),
         author: person(author),
       },
       options,
@@ -439,7 +450,7 @@ export const schema = {
       description?: string;
       url?: string;
       image?: string | string[];
-      author?: Author;
+      author?: AuthorInput;
       dateCreated?: string;
       keywords?: string | string[];
       genre?: string | string[];

@@ -522,6 +522,20 @@ describe("0.5: product rich results", () => {
     expect(n.aggregateRating).toEqual({ "@type": "AggregateRating", ratingValue: "4.5", bestRating: "5", worstRating: 1, ratingCount: 8 });
   });
 
+  it("softwareApplication takes the same review input as product: one or an array, nodes and refs", () => {
+    const one = { author: "Ann", reviewRating: { ratingValue: 5 }, reviewBody: "Great" };
+    for (const review of [one, [one, schema.ref("#rev")]]) {
+      expect(schema.softwareApplication({ name: "s", review }).review).toEqual(schema.product({ name: "p", review }).review);
+    }
+    expect(schema.softwareApplication({ name: "s", review: one }).review).toEqual({
+      "@type": "Review",
+      author: { "@type": "Person", name: "Ann" },
+      reviewRating: { "@type": "Rating", ratingValue: 5 },
+      reviewBody: "Great",
+    });
+    expect(schema.softwareApplication({ name: "s", aggregateRating: schema.ref("#r") }).aggregateRating).toEqual({ "@id": "#r" });
+  });
+
   it("types require a rating count and a review rating, as Google does", () => {
     // @ts-expect-error an AggregateRating needs ratingCount or reviewCount
     schema.product({ name: "p", aggregateRating: { ratingValue: 4 } });
@@ -533,6 +547,8 @@ describe("0.5: product rich results", () => {
     schema.product({ name: "p", review: { author: "Ann" } });
     // @ts-expect-error a Review needs reviewRating
     schema.review({ author: "Ann", reviewBody: "Great" });
+    // @ts-expect-error a Review needs reviewRating
+    schema.softwareApplication({ name: "s", review: [{ author: "Ann" }] });
     // Either count, or both, is enough.
     schema.product({ name: "p", aggregateRating: { ratingValue: 4, ratingCount: 9 } });
     schema.product({ name: "p", aggregateRating: { ratingValue: 4, reviewCount: 3 } });

@@ -110,7 +110,7 @@ Search engines truncate long titles and descriptions, and very short description
 - `schema.organization`: `name`, `url`, `logo` (a URL, a node or a ref), `sameAs` (an array of URLs)
 - `schema.webSite`: `name`, `url`, `searchUrlTemplate` (written as a `SearchAction`; use `{search_term_string}` in the URL, as in `"https://example.com/search?q={search_term_string}"`), `publisher` (a node or a ref)
 - `schema.person`: `name`, `url`, `image`, `jobTitle`, `description`, `email`, `sameAs`, `worksFor` (a name, `{ name, url }`, a node or a ref), `address` (text or a `PostalAddress` node), `knowsAbout` (text, nodes or a mix)
-- `schema.softwareApplication`: `name`, `description`, `applicationCategory`, `operatingSystem`, `url`, `image`, `offers` (as in `schema.product`: one offer, an array such as pricing tiers, an `AggregateOffer`, or nodes and refs), `aggregateRating` (as in `schema.product`), `author`. For rich results Google requires `name`, `offers.price` (`0` for a free app) and one of `aggregateRating` or `review`; the [audit](cli.md) warns when one is missing, and checks ratings and reviews as for `Product`.
+- `schema.softwareApplication`: `name`, `description`, `applicationCategory`, `operatingSystem`, `url`, `image`, `offers` (as in `schema.product`: one offer, an array such as pricing tiers, an `AggregateOffer`, or nodes and refs), `aggregateRating` and `review` (one review or an array, as in `schema.product`), `author`. For rich results Google requires `name`, `offers.price` (`0` for a free app) and one of `aggregateRating` or `review`; the [audit](cli.md) warns when one is missing, and checks ratings and reviews as for `Product`.
 - `schema.profilePage`: the page options, with `mainEntity` the person or organization node, or a ref (Google requires it for the rich result), plus `dateCreated`
 - `schema.creativeWork`: `name`, `description`, `url`, `image`, `author`, `dateCreated`, `keywords` (a string or array, written comma-separated), `genre` (a string or array)
 - `schema.webPage`: the page options; `name` and `url` are required
@@ -160,7 +160,7 @@ A personal site uses the same pattern: a `schema.person` node with an `id`, and 
 
 ### Without React
 
-`@anubhav-choubey/web-for-agents/schema` exports `schema`, `serializeJsonLd` and the `JsonLdNode`, `JsonLdGraph`, `JsonLdRef` and `JsonLdNodeOptions` types (and the product input types `OfferInput`, `AggregateOfferInput`, `AggregateRatingInput`, `ReviewInput`, `ItemAvailability` and `ItemCondition`, and `PageOptions`), and imports nothing else: no React, no React DOM. Use it from Node scripts (for example one that writes JSON-LD into static HTML) and from code that should not pull React into its bundle. The root entry still exports the same functions.
+`@anubhav-choubey/web-for-agents/schema` exports `schema`, `serializeJsonLd` and the `JsonLdNode`, `JsonLdGraph`, `JsonLdRef` and `JsonLdNodeOptions` types (and every input type a builder takes: `JsonLdEmbeddable`, `OfferInput`, `AggregateOfferInput`, `OffersInput`, `ItemAvailability`, `ItemCondition`, `RatingInput`, `AggregateRatingInput`, `ReviewInput`, `ReviewsInput`, `StandaloneOptions`, `AuthorInput`, `BreadcrumbItem` and `PageOptions`), and imports nothing else: no React, no React DOM. Use it from Node scripts (for example one that writes JSON-LD into static HTML) and from code that should not pull React into its bundle. The root entry still exports the same functions.
 
 ```js
 import { schema, serializeJsonLd } from "@anubhav-choubey/web-for-agents/schema";
