@@ -45,8 +45,10 @@ describe("agent map build", () => {
   }, 120_000);
 
   it("lists exactly the expected pages and actions, sorted", () => {
-    expect(map.version).toBe(1);
+    expect(map.version).toBe(2);
     expect(map.site.url).toBe("https://example.com");
+    // No action is on all three pages, so nothing is site-wide.
+    expect(map.site).not.toHaveProperty("actions");
     expect(map.llms).toBe("https://example.com/llms.txt");
     expect(map.pages.map((p) => p.path)).toEqual(["/", "/account", "/contact"]);
     expect(map.pages.map((p) => [p.path, p.actions.map((a) => a.name)])).toEqual([

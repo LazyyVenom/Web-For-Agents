@@ -241,8 +241,9 @@ describe("generateAgentFiles", () => {
     expect(unknown).toEqual([
       '[web-for-agents] action "teleport" has an unknown data-agent-kind "teleport" (expected handler, form, click or link); using "click"',
     ]);
-    const map = JSON.parse(t.read("agents.json")) as { pages: Array<{ actions?: Array<{ name: string; kind: string }> }> };
-    expect(map.pages.flatMap((p) => p.actions ?? []).map((a) => [a.name, a.kind])).toContainEqual(["teleport", "click"]);
+    const map = JSON.parse(t.read("agents.json")) as { site: { actions?: Array<{ name: string; kind: string }> } };
+    // On both pages, so listed once in site.actions.
+    expect(map.site.actions?.map((a) => [a.name, a.kind])).toEqual([["teleport", "click"]]);
   });
 
   it("validates options", async () => {

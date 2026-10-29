@@ -267,7 +267,7 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
   }
   guarded.stage(fileOf(ROBOTS_PATH), buildRobots(resolved));
   const extensions = resolved.agentMap
-    ? [agentMapExtension({ siteUrl, fileName: resolved.agentMap.fileName })]
+    ? [agentMapExtension({ siteUrl, ...resolved.agentMap })]
     : [];
   await stageSiteFiles({ siteUrl, markdown, llms: resolved.llms, extensions, logger }, guarded, {
     pages,

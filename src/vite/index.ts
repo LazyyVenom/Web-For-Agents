@@ -30,7 +30,7 @@ import { AI_BOTS } from "./robots";
 export function webForAgents(options: WebForAgentsOptions): Plugin[] {
   const resolved = resolveOptions(options);
   const extensions = resolved.agentMap
-    ? [agentMapExtension({ siteUrl: resolved.siteUrl, fileName: resolved.agentMap.fileName })]
+    ? [agentMapExtension({ siteUrl: resolved.siteUrl, ...resolved.agentMap })]
     : [];
   const plugins = [createBuildPlugin(resolved, extensions)];
   if (resolved.overlay.enabled) plugins.push(overlayPlugin(resolved.overlay, resolved.siteUrl));

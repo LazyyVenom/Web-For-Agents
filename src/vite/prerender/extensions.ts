@@ -37,6 +37,8 @@ export interface PrerenderExtension<T = unknown> {
   llmsSections?(): LlmsSection[];
   /** Once, after llms files are written. */
   finalize?(ctx: ExtensionContext): void | Promise<void>;
+  /** After finalize: a short phrase for the one-line build summary, such as "12 actions". */
+  summary?(): string | undefined;
 }
 
 /**
