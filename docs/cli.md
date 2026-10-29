@@ -9,7 +9,7 @@ npx @anubhav-choubey/web-for-agents audit https://example.com/docs --json --min-
 
 Flags:
 
-- `--site-url <origin>` is the `siteUrl` the site was built with (see [Auditing a local preview](#auditing-a-local-preview)).
+- `--site-url <url>` is the `siteUrl` the site was built with (see [Auditing a local preview](#auditing-a-local-preview)).
 - `--json` prints the report as one JSON document on stdout. Page data is kept as the site sent it (see [Security](security.md#cli-audit)).
 - `--min-score <0-100>` exits with code 1 when the score is lower.
 - `--timeout <ms>` sets the per-request timeout (default 10000).
@@ -112,14 +112,14 @@ The build writes absolute URLs from `siteUrl` into the canonical link, the sitem
 
 ```
 WARN  Canonical URL                 2.5/5  Canonical https://example.com/ points to https://example.com (different origin than the audited page)
-      Fix: Audit the deployed site, or build with siteUrl set to http://localhost:4173 to audit this preview.
+      Fix: Audit the deployed site, or build with siteUrl set to http://localhost:4173 to audit this preview. Auditing a preview? Pass --site-url https://example.com.
 ```
 
 To get a clean local score, build with `siteUrl` set to the preview origin, for example `siteUrl: process.env.SITE_URL ?? "https://example.com"` with `SITE_URL=http://localhost:4173 npx vite build`. Otherwise, audit the deployed site.
 
 ### `--site-url`
 
-If you build the preview with your production `siteUrl`, pass that origin to `--site-url` instead of rebuilding:
+If you build the preview with your production `siteUrl`, pass it to `--site-url` instead of rebuilding:
 
 ```sh
 npx @anubhav-choubey/web-for-agents audit localhost:4173 --site-url https://example.com
@@ -128,6 +128,7 @@ npx @anubhav-choubey/web-for-agents audit localhost:4173 --site-url https://exam
 Every absolute URL on exactly that origin (the canonical link, the markdown alternate link, the `Sitemap:` line in `robots.txt` and the `<loc>` entries in the sitemap) is treated as the same path on the audited origin, and fetched there. The report starts with `Note: mapped https://example.com → http://localhost:4173` (`notes` in `--json`). Rules:
 
 - Only the exact origin (scheme, host and port) is mapped. `http://example.com` or `https://www.example.com` are not, and neither is any URL on another origin. The audit never fetches an origin other than the one you audit.
-- The value must be an origin: an http(s) URL without credentials, path, query or hash. A trailing `/` is fine.
+- The value must be an absolute http(s) URL without credentials, query or hash. A path is allowed, so you can pass your plugin `siteUrl` as is (`https://example.com/blog/`); only its origin is used for mapping.
+- The canonical check shows the URL the page has, with the mapped one after it: `Canonical is https://example.com/ (mapped to http://localhost:4173/)`.
 - Mapped requests go through the same redirect handling as every other request, including `--no-private-redirects`.
 - The same option is `siteUrl` in `AuditOptions`.

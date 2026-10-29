@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { audit } from "../../src/cli/index";
-import { auditWithHooks } from "../../src/cli/audit";
+import { auditWithHooks, parseSiteOrigin } from "../../src/cli/audit";
 import { parseCliArgs } from "../../src/cli/args";
 import { wellFormedPage } from "../helpers/page";
 import { useTestServers } from "../helpers/server";
@@ -14,7 +14,12 @@ describe("--site-url parsing", () => {
     expect(parseCliArgs(["audit", "localhost:4173", "--site-url", "https://example.com/"]).siteUrl).toBe("https://example.com/");
   });
 
-  it.each(["example.com", "ftp://example.com", "https://u:p@example.com", "https://example.com/blog", "https://example.com/?x=1", "https://example.com/#a", ""])(
+  it("accepts a siteUrl with a path and maps by its origin", () => {
+    expect(parseSiteOrigin("https://example.com/blog/")).toBe("https://example.com");
+    expect(parseCliArgs(["audit", "localhost:4173", "--site-url", "https://example.com/blog"]).siteUrl).toBe("https://example.com/blog");
+  });
+
+  it.each(["example.com", "ftp://example.com", "https://u:p@example.com", "https://example.com/?x=1", "https://example.com/#a", "https://example.com/blog?x=1", ""])(
     "rejects %j",
     (v) => {
       expect(() => parseCliArgs(["audit", "localhost:4173", "--site-url", v])).toThrow(/--site-url/);
@@ -28,6 +33,24 @@ describe("--site-url parsing", () => {
   it("audit reports an invalid siteUrl as an error without fetching", async () => {
     const report = await audit("http://127.0.0.1:1/", { siteUrl: "not a url" });
     expect(report.error).toContain("invalid site URL");
+  });
+});
+
+describe("siteUrl mapping", () => {
+  it("maps production URLs to the audited origin and reports the canonical as the page has it", async () => {
+    const prod = "https://prod.example";
+    const s = await serve({
+      "/": { headers: htmlH, body: wellFormedPage({ base: prod, markdown: `${prod}/index.md` }) },
+      "/index.md": { headers: { "content-type": "text/markdown" }, body: "# Home\n" },
+      "/robots.txt": { headers: textH, body: `User-agent: *\nAllow: /\nSitemap: ${prod}/sitemap.xml\n` },
+      "/sitemap.xml": { headers: { "content-type": "application/xml" }, body: `<urlset><url><loc>${prod}/</loc></url></urlset>` },
+    });
+    const report = await audit(s.url + "/", { siteUrl: `${prod}/blog/`, timeoutMs: 3000 });
+    const byId = Object.fromEntries(report.checks.map((c) => [c.id, c]));
+    expect(byId.canonical).toMatchObject({ status: "pass", message: `Canonical is ${prod}/ (mapped to ${s.url}/)` });
+    expect(byId.sitemap!.status).toBe("pass");
+    expect(byId.markdown!.status).toBe("pass");
+    expect(report.notes).toEqual([`mapped ${prod} \u2192 ${s.url}`]);
   });
 });
 

@@ -36,7 +36,8 @@ export interface AuditOptions {
    * The origin the audited site was built for (its `siteUrl`, typically production). URLs on exactly
    * this origin (canonical, markdown alternate, robots.txt `Sitemap:` line, sitemap `<loc>` entries)
    * are treated as the audited page's own origin and fetched there, with the same path. URLs on any
-   * other origin are never mapped. Must be an http(s) origin without credentials, path, query or hash.
+   * other origin are never mapped. Must be an absolute http(s) URL without credentials, query or hash;
+   * a path is allowed and ignored (only the origin is mapped).
    */
   siteUrl?: string;
 }
@@ -64,7 +65,7 @@ export interface AuditReport {
   notes?: string[];
 }
 
-/** Origin of `siteUrl` for `AuditOptions.siteUrl`; throws an Error with a user-facing message if invalid. */
+/** Origin of `siteUrl` (any path is ignored) for `AuditOptions.siteUrl`; throws an Error with a user-facing message if invalid. */
 export function parseSiteOrigin(siteUrl: string): string {
   const input = siteUrl.trim();
   let u: URL;
@@ -79,9 +80,10 @@ export function parseSiteOrigin(siteUrl: string): string {
   if (u.username !== "" || u.password !== "") {
     throw new Error(`invalid site URL "${siteUrl}": must not contain credentials`);
   }
-  if ((u.pathname !== "/" && u.pathname !== "") || u.search !== "" || u.hash !== "") {
-    throw new Error(`invalid site URL "${siteUrl}": give the origin only (for example https://example.com)`);
+  if (u.search !== "" || u.hash !== "") {
+    throw new Error(`invalid site URL "${siteUrl}": must not contain a query string or hash`);
   }
+  // A path (a siteUrl such as https://example.com/blog/) is allowed; mapping uses the origin.
   return u.origin;
 }
 
@@ -195,10 +197,7 @@ export async function auditWithHooks(url: string, opts: AuditOptions = {}, hooks
       }
       return parsed.origin === siteOrigin ? auditedOrigin + parsed.pathname + parsed.search + parsed.hash : u;
     };
-    if (mapping) {
-      for (const l of html.links) if (l.href !== undefined) l.href = mapUrl(l.href);
-      report.notes = [`mapped ${siteOrigin} \u2192 ${auditedOrigin}`];
-    }
+    if (mapping) report.notes = [`mapped ${siteOrigin} \u2192 ${auditedOrigin}`];
     const at = (path: string): string => new URL(path, page.finalUrl).href;
     /** Cross-origin site files are reported, not fetched: a local preview must not call production. */
     const getSameOrigin = (u: string, accept?: string): Promise<FetchResult> =>
@@ -247,6 +246,7 @@ export async function auditWithHooks(url: string, opts: AuditOptions = {}, hooks
       agentMap: agentMap.result,
       tried: { llmsTxt: llmsTxt.tried, agentMap: agentMap.tried },
       ...(custom === undefined ? {} : { agentMapPath: custom }),
+      ...(siteOrigin === undefined ? {} : { siteOrigin, mapUrl }),
     });
     report.score = scoreOf(report.checks);
   } catch (e) {

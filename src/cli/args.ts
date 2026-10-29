@@ -28,7 +28,7 @@ export interface CliArgs {
   agentMap?: string;
   /** --no-private-redirects: refuse redirects from a public host to a private address. */
   blockPrivateRedirects?: boolean;
-  /** --site-url: origin the site was built for; its URLs are audited on the audited origin. */
+  /** --site-url: the siteUrl the site was built for (only its origin is used); its URLs are audited on the audited origin. */
   siteUrl?: string;
 }
 
@@ -71,9 +71,9 @@ Options:
   --min-score <0-100>  exit with code 1 if the score is lower
   --timeout <ms>       per-request timeout (default ${DEFAULT_TIMEOUT_MS})
   --agent-map <path>   agent map file name (probed like agents.json), or a /path or URL
-  --site-url <origin>  the siteUrl the site was built with (for example your production
-                       origin). Its canonical, sitemap and markdown URLs are audited on
-                       <url>'s origin instead; other origins are never fetched
+  --site-url <url>     the siteUrl the site was built with (for example your production
+                       URL). URLs on its origin (canonical, sitemap, markdown) are audited
+                       on <url>'s origin instead; other origins are never fetched
   --no-private-redirects
                        refuse redirects from a public host to a private, loopback or
                        link-local address (default: follow them and print a warning)

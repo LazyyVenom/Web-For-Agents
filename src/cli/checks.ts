@@ -50,6 +50,10 @@ export interface AuditInputs {
   tried?: { llmsTxt?: string[]; agentMap?: string[] };
   /** Agent map path as given to --agent-map; defaults to AGENT_MAP_PATH. */
   agentMapPath?: string;
+  /** The `--site-url` origin, when given. Cross-origin fixes then leave out the `--site-url` hint. */
+  siteOrigin?: string;
+  /** Maps a URL on the `--site-url` origin to the audited origin (the canonical check uses it). Default: identity. */
+  mapUrl?: (u: string) => string;
 }
 
 export const CHECK_WEIGHTS: Record<CheckId, number> = {
@@ -108,11 +112,15 @@ const originOf = (url: string): string => {
   }
 };
 
-/** The `subject` (a URL found on the page or in a site file) points away from the audited origin. */
-function crossOrigin(subject: string, url: string, pageUrl: string): Outcome {
+/**
+ * The `subject` (a URL found on the page or in a site file) points away from the audited origin.
+ * Without `--site-url` (`siteOrigin`), the fix also suggests passing it.
+ */
+function crossOrigin(subject: string, url: string, pageUrl: string, siteOrigin: string | undefined): Outcome {
+  const hint = siteOrigin === undefined ? ` Auditing a preview? Pass --site-url ${originOf(url)}.` : "";
   return warn(
     `${subject} points to ${originOf(url)} (different origin than the audited page)`,
-    `Audit the deployed site, or build with siteUrl set to ${originOf(pageUrl)} to audit this preview.`,
+    `Audit the deployed site, or build with siteUrl set to ${originOf(pageUrl)} to audit this preview.${hint}`,
   );
 }
 
@@ -181,7 +189,7 @@ function checkOpenGraph({ html }: AuditInputs): Outcome {
   return warn(`Missing ${missing.join(", ")}`, fix);
 }
 
-function checkCanonical({ page, html }: AuditInputs): Outcome {
+function checkCanonical({ page, html, siteOrigin, mapUrl = (u) => u }: AuditInputs): Outcome {
   const fix = "Pass canonical to <Seo> and set siteUrl in <SeoProvider> so the URL is absolute.";
   const links = getLinks(html, "canonical").filter((l) => (l.href ?? "").trim() !== "");
   if (links.length === 0) return fail("No canonical link found", fix);
@@ -190,8 +198,9 @@ function checkCanonical({ page, html }: AuditInputs): Outcome {
   const resolved = tryResolveUrl(href, page.finalUrl);
   if (resolved === null) return warn(`Canonical "${href}" is not a valid URL`, fix);
   if (!hasScheme(href)) return warn(`Canonical "${href}" is relative; it resolves to ${resolved}`, fix);
-  if (isCrossOrigin(resolved, page.finalUrl)) return crossOrigin(`Canonical ${resolved}`, resolved, page.finalUrl);
-  return pass(`Canonical is ${resolved}`);
+  const mapped = tryResolveUrl(mapUrl(href), page.finalUrl) ?? resolved;
+  if (isCrossOrigin(mapped, page.finalUrl)) return crossOrigin(`Canonical ${resolved}`, resolved, page.finalUrl, siteOrigin);
+  return pass(mapped === resolved ? `Canonical is ${resolved}` : `Canonical is ${resolved} (mapped to ${mapped})`);
 }
 
 function checkJsonLd({ html }: AuditInputs): Outcome {
@@ -287,10 +296,10 @@ function robotsVerdict(parsed: ParsedRobots, path: string): Outcome {
   return pass(`${ROBOTS_PATH} allows this page for all crawlers`);
 }
 
-function checkSitemap({ page, sitemap }: AuditInputs): Outcome {
+function checkSitemap({ page, sitemap, siteOrigin }: AuditInputs): Outcome {
   const at = sitemap.url;
   const missingFix = `Serve ${SITEMAP_PATH} (webForAgents() generates it) and reference it from ${ROBOTS_PATH}.`;
-  if (isCrossOrigin(at, page.finalUrl)) return crossOrigin(`Sitemap ${at}`, at, page.finalUrl);
+  if (isCrossOrigin(at, page.finalUrl)) return crossOrigin(`Sitemap ${at}`, at, page.finalUrl, siteOrigin);
   if (isMissing(sitemap)) return fail(`Sitemap not found at ${at}${why(sitemap)}`, missingFix);
   const body = sitemap.body;
   if (/<sitemapindex[\s>]/i.test(body)) return pass(`Sitemap index found at ${at}`);
@@ -308,7 +317,7 @@ function checkSitemap({ page, sitemap }: AuditInputs): Outcome {
       elsewhere = loc;
     }
   }
-  if (elsewhere !== undefined) return crossOrigin(`Sitemap ${at} lists ${elsewhere}, which`, elsewhere, page.finalUrl);
+  if (elsewhere !== undefined) return crossOrigin(`Sitemap ${at} lists ${elsewhere}, which`, elsewhere, page.finalUrl, siteOrigin);
   return warn(
     `Sitemap ${at} does not list this page`,
     "Add this route to routes in webForAgents() so it appears in the sitemap.",
@@ -330,7 +339,7 @@ function checkLlmsTxt({ llmsTxt, tried }: AuditInputs): Outcome {
   return pass(`${LLMS_TXT_PATH} found at ${llmsTxt.url}`);
 }
 
-function checkMarkdown({ page, markdown }: AuditInputs): Outcome {
+function checkMarkdown({ page, markdown, siteOrigin }: AuditInputs): Outcome {
   const at = markdown.url;
   if (!isHttpUrl(at)) {
     return warn(
@@ -338,7 +347,7 @@ function checkMarkdown({ page, markdown }: AuditInputs): Outcome {
       `Point <link rel="alternate" type="${MARKDOWN_MIME}"> at an http(s) URL; webForAgents() generates it for each route.`,
     );
   }
-  if (isCrossOrigin(at, page.finalUrl)) return crossOrigin(`Markdown alternate ${at}`, at, page.finalUrl);
+  if (isCrossOrigin(at, page.finalUrl)) return crossOrigin(`Markdown alternate ${at}`, at, page.finalUrl, siteOrigin);
   if (isMissing(markdown)) {
     return fail(
       `No ${MARKDOWN_MIME} copy found at ${at}${why(markdown)}`,
