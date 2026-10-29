@@ -163,10 +163,10 @@ export default {
 By default `generate` prints one summary line, for example:
 
 ```
-[web-for-agents] wrote 47 files (20 pages, 36 actions (27 page-specific, 9 site-wide))
+[web-for-agents] wrote 47 files for 21 pages (20 listed in llms.txt and the sitemap, 1 noindex), 36 actions (27 page-specific, 9 site-wide)
 ```
 
-It counts the files written, the pages found (and how many are `noindex`, if any) and the actions as listed in `agents.json`: the pages' own actions, summed over the pages, plus each site-wide action once. The action counts are left out when an existing `agents.json` was kept. `--verbose` adds the layout, the page list, the file list and the pages whose own markdown link was kept.
+It counts the files written, the pages found, how many are listed in `llms.txt` and the sitemap (the page count the audit reports for `agents.json`), how many are `noindex`, if any, and the actions as listed in `agents.json`: the pages' own actions, summed over the pages, plus each site-wide action once. The action counts are left out when an existing `agents.json` was kept. `--verbose` adds the layout, the page list, the file list and the pages whose own markdown link was kept.
 
 `generate` does not need Vite: it works on any directory of HTML files. Warnings go to stderr. Exit codes: `0` ok, `2` usage error or failure. When it fails, nothing is written.
 

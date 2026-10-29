@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Possibly breaking
+
+- `agents.json` starts with a `"$schema"` key, the URL of the JSON Schema of its format version: `https://cdn.jsdelivr.net/npm/@anubhav-choubey/web-for-agents@0/schemas/agents.v2.schema.json`. Tools that compare the file's keys exactly will see the new one. `agentMap: { siteActions: false }` still writes version 2. See [agents.json](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/agent-actions.md#agentsjson).
+- The `generate` summary line reads like the build's: `wrote 47 files for 21 pages (20 listed in llms.txt and the sitemap, 1 noindex), 36 actions (27 page-specific, 9 site-wide)` instead of `wrote 47 files (21 pages, 1 noindex, 36 actions (...))`. Scripts that parse it need updating.
+
+### New
+
+- The package ships `schemas/agents.v2.schema.json`, a JSON Schema (draft 2020-12) of `agents.json` version 2: `site.actions`, `pages[].actions`, every action field and kind, and the optional fields. The `$schema` URL pins the major version, so it stays valid across minor and patch releases. The audit's agent map check accepts and ignores `$schema`.
+- The duplicate action name warning names what differs, with both values: `/contact: 2 different actions named open-resume (differ in: kind click vs link, readOnly true vs unset); only the first is listed`. It compares kind, `href`, description, flags and form fields (shown as `input schema`); values are sanitized and cut to 40 characters, and 3 or more definitions stay on one line.
+- The build summary counts the routes left out of `llms.txt`, the sitemap and `agents.json`: `prerendered 21 routes (20 listed in llms.txt and the sitemap, 1 noindex), ...`, with `redirected` for routes that redirect to another route. The listed number is the page count the audit reports for `agents.json`.
+
 ## 0.5.0 (2026-10-29)
 
 ### Possibly breaking
