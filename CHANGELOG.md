@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- `schema.product` takes typed `aggregateRating` (written as an `AggregateRating`) and `review` (one or an array, each a `Review` with an `author` person and a `reviewRating` as a `Rating`; a string `author` is a person's name), so they no longer need `extra`.
+- `schema.product` `offers` takes one offer or an array. Offers also take `priceValidUntil`, `itemCondition` (`"New"`, `"Used"`, `"Refurbished"` or `"Damaged"`) and `seller` (an organization name, or a node or a ref). An offer with `lowPrice`, `highPrice` and `offerCount` is written as an `AggregateOffer`.
+- `availability` accepts every schema.org `ItemAvailability` value, such as `"BackOrder"`, `"SoldOut"`, `"PreSale"` or `"MadeToOrder"`, written as `https://schema.org/<value>`. The 0.4 offers give the same output.
+- `schema.aggregateRating` and `schema.review` build standalone nodes (with `itemReviewed`, `id` and `extra`) that a product can point at with `schema.ref`. `schema.softwareApplication` `aggregateRating` also takes `worstRating`, and a string `bestRating`.
+- The input types `OfferInput`, `AggregateOfferInput`, `AggregateRatingInput`, `ReviewInput`, `ItemAvailability` and `ItemCondition` are exported from the root and `/schema` entries.
+
 ## 0.4.0 (2026-10-29)
 
 ### New

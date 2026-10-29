@@ -62,22 +62,28 @@ Search engines truncate long titles and descriptions, and very short description
 `schema` returns typed JSON-LD nodes for `<JsonLd data={...} />`:
 
 - `schema.article`: `headline`, `description`, `image` (a URL or an array), `datePublished`, `dateModified`, `author` (`{ name, url }`, a node or a ref, or an array of them), `url`
-- `schema.product`: `name`, `description`, `image` (a URL or an array), `sku`, `brand` (a name, written as a `Brand`, or a node or a ref), `offers` (one `Offer`: `price`, `priceCurrency`, `availability`, `url`). `availability` is `"InStock"`, `"OutOfStock"` or `"PreOrder"`. There is no typed `aggregateRating` or `review`; pass them in `extra`. Google requires one of `offers`, `aggregateRating` or `review`, and the [audit](cli.md) warns when all are missing. For another availability, such as `BackOrder`, or several offers, pass `offers` in `extra` instead.
+- `schema.product`: `name`, `description`, `image` (a URL or an array), `sku`, `brand` (a name, written as a `Brand`, or a node or a ref), `offers`, `aggregateRating`, `review`. Google requires one of `offers`, `aggregateRating` or `review`, and the [audit](cli.md) warns when all are missing.
+  - `offers`: one offer or an array. An `Offer` has `price`, `priceCurrency`, `availability`, `url`, `priceValidUntil`, `itemCondition` and `seller` (an organization name, or a node or a ref). An offer with `lowPrice` (and optionally `highPrice` and `offerCount`) is written as an `AggregateOffer`, for a price range across sellers or variants.
+  - `availability`: a schema.org `ItemAvailability` name, written as `https://schema.org/<name>`: `"InStock"`, `"OutOfStock"`, `"PreOrder"`, `"BackOrder"`, `"Discontinued"`, `"InStoreOnly"`, `"LimitedAvailability"`, `"OnlineOnly"`, `"SoldOut"`, `"PreSale"`, `"MadeToOrder"` or `"Reserved"`.
+  - `itemCondition`: `"New"`, `"Used"`, `"Refurbished"` or `"Damaged"`, written as `https://schema.org/NewCondition` and so on.
+  - `aggregateRating`: `ratingValue`, `reviewCount`, `ratingCount`, `bestRating`, `worstRating`; written as an `AggregateRating`. Also a node or a ref.
+  - `review`: one review or an array, each with `author` (a person's name, `{ name, url }`, a node or a ref), `reviewRating` (`ratingValue`, `bestRating`, `worstRating`; written as a `Rating`), `reviewBody`, `datePublished` and `name`. Also a node or a ref.
+- `schema.aggregateRating` and `schema.review`: the same fields as a standalone `AggregateRating` or `Review` node, plus `itemReviewed` (a node or a ref). Give one an `id` and point a product at it with `schema.ref`.
 - `schema.faqPage(items, options?)`: `items` is `{ question, answer }[]`, written as `mainEntity` questions, each with an `acceptedAnswer`.
 - `schema.breadcrumbList(items, options?)`: `items` is `{ name, url }[]`, written as `itemListElement` with positions from 1.
 - `schema.organization`: `name`, `url`, `logo` (a URL, a node or a ref), `sameAs` (an array of URLs)
 - `schema.webSite`: `name`, `url`, `searchUrlTemplate` (written as a `SearchAction`; use `{search_term_string}` in the URL, as in `"https://example.com/search?q={search_term_string}"`), `publisher` (a node or a ref)
 - `schema.person`: `name`, `url`, `image`, `jobTitle`, `description`, `email`, `sameAs`, `worksFor` (a name, `{ name, url }`, a node or a ref), `address` (text or a `PostalAddress` node), `knowsAbout` (text, nodes or a mix)
-- `schema.softwareApplication`: `name`, `description`, `applicationCategory`, `operatingSystem`, `url`, `image`, `offers`, `aggregateRating`, `author`. For rich results Google requires `name`, `offers.price` (`0` for a free app) and one of `aggregateRating` or `review`; the [audit](cli.md) warns when one is missing.
+- `schema.softwareApplication`: `name`, `description`, `applicationCategory`, `operatingSystem`, `url`, `image`, `offers` (one `Offer`, as in `schema.product`), `aggregateRating` (as in `schema.product`), `author`. For rich results Google requires `name`, `offers.price` (`0` for a free app) and one of `aggregateRating` or `review`; the [audit](cli.md) warns when one is missing.
 - `schema.profilePage`: `mainEntity` (a person or organization node, or a ref; Google requires it for the rich result), `url`, `name`, `dateCreated`, `dateModified`, `breadcrumb`
 - `schema.creativeWork`: `name`, `description`, `url`, `image`, `author`, `dateCreated`, `keywords` (a string or array, written comma-separated), `genre` (a string or array)
 - `schema.webPage`: `name`, `url`, `description`, `breadcrumb` (a `schema.breadcrumbList` node or a ref), `isPartOf` (usually a ref to the `WebSite`)
 - `schema.graph(nodes)`: combines nodes into one `@graph` document with a single `@context`; nested nodes lose their own `@context`. `null`, `undefined` and `false` entries are skipped, so `cond && node` works.
 - `schema.ref(id)`: `{ "@id": id }`, a pointer to a node defined elsewhere. A missing or empty `id` throws a `TypeError`.
 
-Required fields: `headline` for `article`; `name` and `url` for `organization`, `webSite` and `webPage`; `name` for `product`, `person`, `softwareApplication` and `creativeWork`; none for `profilePage`.
+Required fields: `headline` for `article`; `name` and `url` for `organization`, `webSite` and `webPage`; `name` for `product`, `person`, `softwareApplication` and `creativeWork`; `ratingValue` for `aggregateRating`; `author` for `review`; none for `profilePage`.
 
-Fields left `undefined` or `null` are omitted from every builder, including nested ones: `schema.profilePage({ mainEntity: undefined })` gives a `ProfilePage` without `mainEntity` rather than throwing. `author`, `brand`, `worksFor`, `mainEntity`, `breadcrumb`, `isPartOf`, `publisher` and `logo` also take a node or a ref. Wherever a node is nested, its own `@context` is dropped.
+Fields left `undefined` or `null` are omitted from every builder, including nested ones: `schema.profilePage({ mainEntity: undefined })` gives a `ProfilePage` without `mainEntity` rather than throwing. `author`, `brand`, `worksFor`, `mainEntity`, `breadcrumb`, `isPartOf`, `publisher`, `logo`, `seller`, `aggregateRating`, `review` and `itemReviewed` also take a node or a ref. Wherever a node is nested, its own `@context` is dropped.
 
 Every builder takes two more options (in its input object; `faqPage` and `breadcrumbList` take them as a second argument):
 
@@ -105,8 +111,9 @@ schema.graph([
     name: "Steel kettle",
     sku: "KET-01",
     brand: schema.ref(`${site}/#org`),
-    offers: { price: 49, priceCurrency: "USD", availability: "InStock", url: page },
-    extra: { aggregateRating: { "@type": "AggregateRating", ratingValue: 4.6, reviewCount: 212 } },
+    offers: { price: 49, priceCurrency: "USD", availability: "InStock", itemCondition: "New", url: page, seller: schema.ref(`${site}/#org`) },
+    aggregateRating: { ratingValue: 4.6, reviewCount: 212 },
+    review: { author: "Priya", reviewRating: { ratingValue: 5 }, reviewBody: "Boils fast and pours cleanly.", datePublished: "2026-10-01" },
   }),
 ]);
 ```
@@ -115,7 +122,7 @@ A personal site uses the same pattern: a `schema.person` node with an `id`, and 
 
 ### Without React
 
-`@anubhav-choubey/web-for-agents/schema` exports `schema`, `serializeJsonLd` and the `JsonLdNode`, `JsonLdGraph`, `JsonLdRef` and `JsonLdNodeOptions` types, and imports nothing else: no React, no React DOM. Use it from Node scripts (for example one that writes JSON-LD into static HTML) and from code that should not pull React into its bundle. The root entry still exports the same functions.
+`@anubhav-choubey/web-for-agents/schema` exports `schema`, `serializeJsonLd` and the `JsonLdNode`, `JsonLdGraph`, `JsonLdRef` and `JsonLdNodeOptions` types (and the product input types `OfferInput`, `AggregateOfferInput`, `AggregateRatingInput`, `ReviewInput`, `ItemAvailability` and `ItemCondition`), and imports nothing else: no React, no React DOM. Use it from Node scripts (for example one that writes JSON-LD into static HTML) and from code that should not pull React into its bundle. The root entry still exports the same functions.
 
 ```js
 import { schema, serializeJsonLd } from "@anubhav-choubey/web-for-agents/schema";
