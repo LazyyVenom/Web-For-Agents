@@ -9,6 +9,8 @@ import { isPrivateHost } from "./privateAddress";
 
 export const DEFAULT_TIMEOUT_MS = 10_000;
 export const MAX_BODY_BYTES = 5 * 1024 * 1024;
+/** MAX_BODY_BYTES for messages: "5 MiB". */
+export const MAX_BODY_LABEL = `${MAX_BODY_BYTES / (1024 * 1024)} MiB`;
 /** Redirects followed per request, as in fetch(). */
 export const MAX_REDIRECTS = 20;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);

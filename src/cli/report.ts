@@ -1,6 +1,6 @@
 import { plural } from "../shared/text";
 import type { AuditReport } from "./audit";
-import { MAX_BODY_BYTES } from "./fetch";
+import { MAX_BODY_LABEL } from "./fetch";
 import { MAX_SITEMAP_FILES, type SiteAuditReport } from "./siteAudit";
 import { safeText } from "./terminal";
 
@@ -67,7 +67,7 @@ export function formatSiteText(report: SiteAuditReport): string {
       lines.push(`Warning: sitemap ${safeText(f.url)}${f.kind === "gzip" ? " is " : ": "}${safeText(f.error)}`);
     }
     if (f.truncated) {
-      lines.push(`Warning: sitemap ${safeText(f.url)} was cut at ${MAX_BODY_BYTES / (1024 * 1024)} MiB; only the entries read are used`);
+      lines.push(`Warning: sitemap ${safeText(f.url)} was cut at ${MAX_BODY_LABEL}; only the entries read are used`);
     }
   }
   if (site.skippedTotal > 0) {

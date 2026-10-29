@@ -7,7 +7,7 @@ import { DESCRIPTION_MAX_CHARS, DESCRIPTION_MIN_CHARS, metaLength, TITLE_MAX_CHA
 import { checkSchemaNodes, SCHEMA_RULES, type SchemaIssue, type SchemaRule } from "../shared/schemaRules";
 import { plural, stripBom } from "../shared/text";
 import { hasScheme, trimTrailingSlash, tryResolveUrl } from "../shared/url";
-import { isOk, looksLikeHtml, MAX_BODY_BYTES, type FetchResult } from "./fetch";
+import { isOk, looksLikeHtml, MAX_BODY_LABEL, type FetchResult } from "./fetch";
 import { getLinks, getMeta, type HtmlFacts } from "./html";
 import { isAllowed, parseRobots, type ParsedRobots } from "./robots";
 import { sitemapLocs } from "./sitemap";
@@ -74,7 +74,6 @@ const CONTENT_MIN_CHARS = 200;
 const CONTENT_WARN_CHARS = 50;
 /** Missing structured data fields listed in the JSON-LD message; the rest are counted. */
 const SCHEMA_ISSUES_SHOWN = 3;
-const MAX_BODY_LABEL = `${MAX_BODY_BYTES / (1024 * 1024)} MiB`;
 
 type Outcome = Omit<CheckResult, "id" | "title" | "weight" | "points">;
 
