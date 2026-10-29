@@ -2,16 +2,13 @@ import {
   ACTION_PARAM_ATTR,
   WEBMCP_TOOLPARAMDESCRIPTION_ATTR,
 } from "../../shared/conventions";
+import { EMPTY_OBJECT_SCHEMA } from "../../shared/agent";
 import { hasOwn } from "../../shared/object";
 import { collapseWhitespace as clean } from "../../shared/text";
 import { inDisabledFieldset, isConcealed } from "./dom";
 import type { JsonSchema } from "./types";
 
-export const EMPTY_OBJECT_SCHEMA: JsonSchema = Object.freeze({
-  type: "object",
-  properties: Object.freeze({}),
-  additionalProperties: false,
-}) as JsonSchema;
+export { EMPTY_OBJECT_SCHEMA };
 
 const EXCLUDED_TYPES = new Set(["hidden", "password", "file", "submit", "button", "reset", "image"]);
 

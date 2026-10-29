@@ -1,4 +1,4 @@
-import { READY_GLOBAL } from "../../shared/conventions";
+import { PROBE_GLOBAL, READY_GLOBAL } from "../../shared/conventions";
 import { LOG_PREFIX } from "../../shared/errors";
 
 export const PROBE_ATTR = "data-wfa-probe";
@@ -12,8 +12,7 @@ export const IDLE_MS = 200;
  * resolved before its cap). The settled page leaves little to wait for, so the window is short.
  */
 export const SETTLED_IDLE_MS = 50;
-/** Window property the probe stores its state in. */
-export const PROBE_GLOBAL = "__WFA_PROBE__";
+export { PROBE_GLOBAL };
 
 /** Classic inline script: tracks in-flight requests, DOM activity and errors. */
 export const PROBE_SCRIPT = `(function () {

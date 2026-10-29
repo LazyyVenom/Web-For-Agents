@@ -17,6 +17,13 @@ export type JsonSchema = {
   additionalProperties?: boolean;
 };
 
+/** The input schema of an action that takes no input. Frozen: shared by every such action. */
+export const EMPTY_OBJECT_SCHEMA: JsonSchema = Object.freeze({
+  type: "object",
+  properties: Object.freeze({}),
+  additionalProperties: false,
+}) as JsonSchema;
+
 /** "link": a plain `<a href>` an agent can open without JavaScript (see markupActions). */
 export type ActionKind = "handler" | "form" | "click" | "link";
 

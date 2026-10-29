@@ -15,6 +15,8 @@ export const EXCLUDE_ATTR = "data-wfa-exclude";
 export const PRERENDERED_ATTR = "data-wfa-prerendered";
 /** Window flag that is `false` while a `holdPrerender()` hold is active. */
 export const READY_GLOBAL = "__WFA_READY__";
+/** Window property the prerender probe stores its state in; its presence means a prerender is capturing the page. */
+export const PROBE_GLOBAL = "__WFA_PROBE__";
 /**
  * Markup that hides content from users and assistive tech. Shared by markdown extraction and the
  * agent runtime (which adds inert, closed dialog and closed details to it).
