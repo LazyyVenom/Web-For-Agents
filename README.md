@@ -127,6 +127,16 @@ npx @anubhav-choubey/web-for-agents audit https://example.com --min-score 80
 
 It scores 0 to 100 across content without JavaScript, JSON-LD, robots.txt, title, meta description, sitemap, Open Graph, llms.txt, the markdown copy, canonical URL and the agent map, and prints a `Fix:` line for each miss. The JSON-LD check names missing required rich-result fields (Product, BreadcrumbList, Event, SoftwareApplication and more). Add `--sitemap` to audit every page in the site's sitemap and print one table, bounded by `--max-pages`, `--concurrency` and `--max-time` ([Auditing a whole site](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/cli.md#auditing-a-whole-site)). To audit a preview or local build of a site whose URLs point at production, add `--site-url https://example.com` ([Auditing a local preview](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/cli.md#auditing-a-local-preview)). Flags, weights and JSON output: [CLI](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/cli.md).
 
+## Use with AI coding agents
+
+The package ships an [Agent Skill](https://agentskills.io) for coding agents (Claude Code, Codex, Copilot and others): an integration checklist, a required build-and-audit loop and common mistakes, pointing at the docs that ship in `node_modules`. Copy it into your project:
+
+```sh
+npx web-for-agents skill   # writes .claude/skills/web-for-agents/; --dir .agents/skills for other tools
+```
+
+Then ask your agent to "use the web-for-agents skill". See [skill](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/cli.md#skill).
+
 ## Dev overlay
 
 While `vite` (the dev server) runs, a "WFA" button on every page (or `Alt+Shift+A`) opens a panel showing what an agent sees: head tags, JSON-LD, the generated markdown and agent actions. It is never included in `vite build`. See [Dev overlay](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/overlay.md).

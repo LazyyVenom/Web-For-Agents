@@ -1,6 +1,6 @@
 # CLI
 
-Audit any URL for AI-agent readiness. Nothing is installed in the target site. To add the agent files to a site you prerender yourself, see [generate](#generate).
+Audit any URL for AI-agent readiness. Nothing is installed in the target site. To add the agent files to a site you prerender yourself, see [generate](#generate). To give your coding agent this package's skill, see [skill](#skill).
 
 ```sh
 npx @anubhav-choubey/web-for-agents audit example.com
@@ -171,6 +171,25 @@ It counts the files written, the pages found, how many are listed in `llms.txt` 
 `generate` does not need Vite: it works on any directory of HTML files. Warnings go to stderr. Exit codes: `0` ok, `2` usage error or failure. When it fails, nothing is written.
 
 The same function is available in code as `generateAgentFiles` from `@anubhav-choubey/web-for-agents/vite`.
+
+## skill
+
+Copies the package's [Agent Skill](https://agentskills.io) into your project, so your coding agent (Claude Code, Codex, Copilot or any tool that reads the open Agent Skills format) follows it while it adds SEO, JSON-LD, prerendering, `llms.txt`, agent actions and the audit to your site:
+
+```sh
+npx web-for-agents skill                       # writes .claude/skills/web-for-agents/SKILL.md
+npx web-for-agents skill --dir .agents/skills  # for tools that read .agents/skills
+```
+
+Then ask your agent to "use the web-for-agents skill". The skill is a short checklist, an entry-point table, a required build, serve and audit loop, and common mistakes. It points the agent at these docs in `node_modules/@anubhav-choubey/web-for-agents/docs/`, which ship with the package.
+
+Flags:
+
+- `--dir <path>` is the skills root, relative to the working directory or absolute. The skill is written to `<path>/web-for-agents/`. Default `.claude/skills`.
+- `--force` replaces an existing copy whose files differ (after you upgrade the package, for example). Without it, such a copy is kept and the command exits with `1`, naming the files. An identical copy is reported as up to date. Files of your own in the folder are left alone.
+- `--print` writes `SKILL.md` to stdout and no files, for tools that want it elsewhere or pasted into instructions.
+
+It writes only inside `<path>/web-for-agents/`: it refuses to write when that folder, a subfolder or a file in it is a symbolic link, or when the folder resolves outside `<path>`. Exit codes: `0` written or up to date, `1` a different copy was kept (use `--force`), `2` usage error or failure.
 
 ## Auditing a local preview
 
