@@ -10,7 +10,7 @@ import { EMPTY_OBJECT_SCHEMA, schemaFromForm } from "../runtime/agent/formSchema
  * schema comes from the form's fields (what the markup shows), elsewhere it is empty (its schema
  * lives in code). Link actions are left out: they go through `linkActions` (see markupLinks), as on
  * the prerender path. Sorted by name; the first element with a name wins; invalid names are skipped.
- * `onUnknownKind` is called for each listed action whose `data-agent-kind` value is not known.
+ * `onUnknownKind` is called for each listed action or link whose `data-agent-kind` value is not known.
  */
 export function staticActions(
   document: Document,
@@ -18,8 +18,9 @@ export function staticActions(
 ): AgentActionDescriptor[] {
   const out = new Map<string, AgentActionDescriptor>();
   for (const a of markupActions(document)) {
-    if (a.kind === "link" || !isValidActionName(a.name) || out.has(a.name)) continue;
+    if (!isValidActionName(a.name) || out.has(a.name)) continue;
     if (a.unknownKind !== undefined) onUnknownKind?.(a.name, a.unknownKind, a.kind);
+    if (a.kind === "link") continue;
     out.set(a.name, {
       name: a.name,
       description: a.description?.trim() || a.name,

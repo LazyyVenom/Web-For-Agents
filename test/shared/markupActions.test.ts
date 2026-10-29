@@ -89,6 +89,17 @@ describe("markupKind", () => {
     expect(markupLinks(doc).map((l) => l.name)).toEqual(["resume"]);
     window.happyDOM.close();
   });
+  it("reports an unknown data-agent-kind on a link too, while leaving the link out", () => {
+    const window = new Window();
+    const doc = window.document as unknown as Document;
+    doc.body.innerHTML = `
+      <a href="/cv.pdf" data-agent-action="resume" data-agent-kind="lnk">CV</a>
+      <a href="/x" data-agent-action="bad name" data-agent-kind="lnk">x</a>`;
+    const unknown: Array<[string, string, string]> = [];
+    expect(staticActions(doc, (name, value, kind) => unknown.push([name, value, kind]))).toEqual([]);
+    expect(unknown).toEqual([["resume", "lnk", "link"]]);
+    window.happyDOM.close();
+  });
 });
 
 describe("link actions", () => {
