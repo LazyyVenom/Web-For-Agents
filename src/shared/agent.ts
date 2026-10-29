@@ -19,9 +19,9 @@ export type JsonSchema = {
 };
 
 /** The input schema of an action that takes no input. Frozen: shared by every such action. */
-export const EMPTY_OBJECT_SCHEMA: JsonSchema = Object.freeze({
+export const EMPTY_OBJECT_SCHEMA: JsonSchema = /* @__PURE__ */ Object.freeze({
   type: "object",
-  properties: Object.freeze({}),
+  properties: /* @__PURE__ */ Object.freeze({}),
   additionalProperties: false,
 }) as JsonSchema;
 
@@ -84,6 +84,8 @@ export interface AgentMapPage {
 
 /** agents.json. Keys are emitted in this order. */
 export interface AgentMap {
+  /** The URL of this version's JSON Schema (AGENT_MAP_SCHEMA_URL). */
+  $schema: string;
   version: typeof AGENT_MAP_VERSION;
   generator: string;
   /** `actions`: the actions on every listed page, left out of each page's own list. Absent when there are none. */

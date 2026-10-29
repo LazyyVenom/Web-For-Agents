@@ -68,7 +68,17 @@ In hand-written HTML read by `generate`, an unknown `data-agent-kind` value is i
 
 Names must be 1 to 128 characters of `A-Z a-z 0-9 _ - .`; an invalid name throws. Names are per page: if two mounted components use the same name, only the first mounted one is exposed (in WebMCP and in `agents.json`) and a warning is logged. Give each a unique name, or use one action with an id input.
 
-When two elements on the same page share a name but define it differently (another description, kind, `href` or flag), the build and `generate` warn once per page and name, such as `/products: 2 different actions named add_to_cart; only the first is listed`. Identical copies, such as the same button in every card of a product grid, are not reported.
+When two elements on the same page share a name but define it differently (another kind, `href`, description, flag or form fields), the build and `generate` warn once per page and name, on one line, naming each field that differs with its values and the definition `agents.json` lists:
+
+```
+/contact: 2 different actions named open_status (differ in: href "https://status.example.com/v2" vs "https://status.example.com/"); the first, a link, is listed, which keeps open_status out of site.actions
+```
+
+- Fields are compared on their raw values, with hrefs resolved against the page URL as `agents.json` lists them (`https://status.example.com` is shown as `https://status.example.com/`, and `/terms` and `https://example.com/terms` count as the same href).
+- `unset` is an absent attribute (or a flag that is off), values other than single words are quoted, and each is sanitized (control and bidi characters) and cut to 40 characters. Values that would print alike say how they differ instead: `description (differs after 52 characters)`, `(differs in whitespace)` or `(differs in control or bidi characters)`. Different form fields read `input schema`, without the schema. With 3 or more definitions, each field lists its distinct values in order, the first element's first.
+- The listed definition is the one `agents.json` keeps: a `useAgentAction` or `AgentForm` action of that name, else a form or click action, else the first link in document order (`the second, a click action, is listed`).
+- When the name is on every listed page and the other pages agree, the warning adds that this page's definition keeps it out of `site.actions` (see [agents.json](#agentsjson)).
+- Identical copies, such as the same button in every card of a product grid, are not reported, and neither are invalid names, which get their own warning and are never listed.
 
 ## Destructive actions
 
@@ -108,11 +118,13 @@ import { agentLinkProps } from "@anubhav-choubey/web-for-agents";
 
 `agentLinkProps({ name, description, destructive? })` only returns the `data-agent-action`, `data-agent-description`, `aria-description`, `data-agent-kind="link"` (and, when `destructive`, `data-agent-destructive="true"`) attributes, so it is safe in server rendering and works in hand-written HTML too: any `<a href data-agent-action="...">` is a link action. It throws on an invalid name, like `useAgentAction`.
 
-To keep React and the agent runtime out of a bundle that only marks links (a footer, a static page), import it from the `/link` entry, which imports nothing but a few constants and the name check (about 0.4 KB gzip when bundled):
+To keep React and the agent runtime out of a bundle that only marks links (a footer, a static page), import it from the `/link` entry (about 0.6 KB gzip with esbuild, with or without `register`; Vite adds its own module-preload helper of about 0.5 KB to any chunk with a dynamic import, so a Vite app's entry grows by about 1.2 KB with Vite 7 and 1.3 KB with Vite 8):
 
 ```ts
 import { agentLinkProps } from "@anubhav-choubey/web-for-agents/link";
 ```
+
+`/link` and `/schema` are each one file: they import no chunk shared with the other entries (the few constants they need are copied in), so a footer that imports `/link` adds one file to the page and no extra preloaded request. The only other file `/link` can load is the link tools chunk, with `import()`, and only when the browser has WebMCP and a link uses `register` (see [Links that are also browser tools](#links-that-are-also-browser-tools)). Vite, Rollup, webpack and esbuild with `--splitting` keep that chunk and the runtime it loads lazy, shared with `/form`; a bundle built without code splitting (esbuild without `--splitting`, a single IIFE) has to inline them, about 7.5 KB gzip. Because `register` is a runtime option, bundlers cannot tell that a site never uses it: the link tools and runtime chunks are still emitted to your build output (about 3 KB and 5 KB gzip with Vite) even when no link passes `register`. That is expected: they are emitted but not loaded, and a page only requests them when the browser has WebMCP and a mounted link uses `register`.
 
 In `agents.json` a link action looks like this:
 
@@ -133,8 +145,26 @@ In `agents.json` a link action looks like this:
 - Only `http:`, `https:`, `mailto:` and `tel:` links are listed. Any other href (`javascript:`, `data:`, `blob:`, `file:` and so on) or one that cannot be parsed is left out, with a warning that names the action and the page. Links are never opened or followed at build time.
 - `readOnly` is `true` unless the link is marked `destructive`.
 - The plugin's prerender and `web-for-agents generate` apply the same rules. On a page that also registers an action of the same name (with `useAgentAction`, `AgentForm` or, for `generate`, a form or button in the markup), that action wins and the link is skipped. Among links, the first one with a name wins. A link with an invalid name is skipped with a warning that names the page and the action. The dev overlay shows the same winner for each name, and marks a skipped link "Not listed in agents.json" with the reason.
-- Link actions are not registered as WebMCP tools, even when the runtime is loaded: they only appear in `agents.json`. Use `useAgentAction` on the link if you also want a WebMCP tool; that registered action then wins in `agents.json` too.
+- Link actions are not registered as WebMCP tools unless you pass `register: true` (see [Links that are also browser tools](#links-that-are-also-browser-tools)), which keeps the link action in `agents.json`. `useAgentAction` on the link also makes a WebMCP tool, but that registered action then wins in `agents.json` as a `click` action.
 - The dev overlay lists link actions with their resolved href, as text, and says why a rejected link is left out.
+
+### Links that are also browser tools
+
+A link action is listed in `agents.json`, but on its own it is not a WebMCP tool. Pass `register: true` to make it both, without giving up the `agents.json` entry or `site.actions`:
+
+```tsx
+import { agentLinkProps } from "@anubhav-choubey/web-for-agents/link";
+
+<a href="mailto:sales@example.com" {...agentLinkProps({ name: "contact_sales", description: "Email the sales team", register: true })}>Contact sales</a>
+```
+
+- The attributes are the same as without `register` (`data-agent-kind="link"` included), so `agents.json` is byte for byte the same, and a footer link found on every page is still listed once in `site.actions`. `register` only adds a `ref` to the returned props.
+- The `ref` does nothing unless `document.modelContext` (or the older `navigator.modelContext`) exists, detected as for `useAgentAction`. When it does, it loads the link tools with `import()`, through the same lazy runtime load as `AgentForm` and `useAgentAction` (one load per page, shared by all of them), and registers a tool with the link's name and description, `readOnlyHint` true (unless `destructive`) and no input. Browsers without WebMCP, server rendering and prerendering without WebMCP load nothing.
+- Running the tool clicks the first link with that name still on the page (`element.click()`, or a click event for an SVG `<a>`), so a client-side router, `target="_blank"`, `download` and your own click handlers behave as they do for a user. It never navigates by itself: if no such link is on the page any more, or the tool was unregistered, the agent gets `{ status: "error" }` (`"the link is no longer on the page"`). A `destructive` link asks with `window.confirm` first; if the user declines, the agent gets `{ status: "cancelled", reason: "user-declined" }`.
+- Only links that `agents.json` would list are registered: the `href` attribute must resolve, against `document.baseURI`, to an `http:`, `https:`, `mailto:` or `tel:` URL. A `javascript:`, `data:` or other link, or one without an `href`, is not registered, with a warning. The href is checked again each time the tool runs, so a link whose href changed to `javascript:` is not clicked.
+- The tool is unregistered when the link unmounts: React 19 calls the cleanup function the `ref` returns, React 18 calls the `ref` with `null`; both work. Outside React, call `ref(element)` and later the function it returns (or `ref(null)`). Use one `agentLinkProps` call per element. An element that unmounts before the runtime has loaded is never registered.
+- Several links with the same name and `register: true` (a footer link and a contact card, say) register one tool. It stays while any of them is mounted, is unregistered when the last one goes, and clicks the first one still on the page. Their attributes should match, as for any action name. If they do not, the tool takes the first mounted link's description and is marked destructive if any of them is, a warning is logged once, and each run asks for confirmation whenever the link about to be clicked is destructive. When a re-render changes a link's description or `destructive`, the tool is registered again with the new values.
+- Links registered this way are not in `listAgentActions()` or `window.__WEB_FOR_AGENTS__`, so the prerender still lists them as link actions, not as `click` actions. A `useAgentAction` or `AgentForm` of the same name wins, as it does in `agents.json`: the link is not registered while one is mounted (with a warning), and a link tool already registered is unregistered when one mounts. The link comes back as a tool the next time it mounts without one.
 
 ## agents.json
 
@@ -147,6 +177,7 @@ An action is site-wide only when every page listed in `agents.json` has it with 
 
 ```json
 {
+  "$schema": "https://cdn.jsdelivr.net/npm/@anubhav-choubey/web-for-agents@0/schemas/agents.v2.schema.json",
   "version": 2,
   "generator": "@anubhav-choubey/web-for-agents",
   "site": {
@@ -199,6 +230,8 @@ An action is site-wide only when every page listed in `agents.json` has it with 
 
 `kind` is `"handler"`, `"form"`, `"click"` or `"link"` (see [Link actions](#link-actions-no-javascript)). `llms` is omitted when `llms: false`, and `markdown` when `markdown: false`.
 
-`version` is `2`. Version 1 (0.4 and earlier) had no `site.actions` and repeated site-wide actions on every page; a version 2 file without `site.actions` reads the same way. Set `agentMap: { siteActions: false }` to keep that per-page layout: each page then lists all its actions, exactly as before, and only `version` changes. The CLI audit accepts both versions.
+`version` is `2`. Version 1 (0.4 and earlier) had no `site.actions` and repeated site-wide actions on every page; a version 2 file without `site.actions` reads the same way. Set `agentMap: { siteActions: false }` to keep that per-page layout: each page then lists all its actions, exactly as before, and only `version` changes. That file is still version 2 (`site.actions` is optional in version 2) and matches the version 2 schema. The CLI audit accepts both versions.
+
+`$schema`, always the first key, is the URL of the [JSON Schema](https://json-schema.org/draft/2020-12) (draft 2020-12) of the format version, so editors and validators can check the file. The schema files ship in the package's `schemas/` directory (`schemas/agents.v2.schema.json`) and are served by jsDelivr. The URL pins the package's major version (`@0`) rather than an exact release: it stays valid across every minor and patch release, and a new format version ships as a new file (`agents.v3.schema.json`) next to the old one instead of changing it, so a file keeps pointing at the schema it was written for. An unpinned URL would follow the newest release, which could drop an old schema file in a later major. The CLI audit ignores `$schema`. The schema compiles in Ajv's strict mode (`strict: true`). A link's `href` is checked by its scheme only, not as an RFC 3986 URI, because browsers keep spaces in `tel:` and `mailto:` URLs (`tel:+1 555 0100`, `mailto:Jane Doe <jane@example.com>`).
 
 Use `agentMap: { fileName: "ai.json" }` to change the file name (a plain `.json` name, no directories), or `agentMap: false` to turn the file and the `llms.txt` section off; WebMCP registration at runtime is unaffected. The CLI audit looks for the default `agents.json` unless you pass `--agent-map`. A `public/agents.json` of your own is never overwritten. The agent map needs prerender.

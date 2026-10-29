@@ -26,7 +26,7 @@ export { CONTENT_ATTR, EXCLUDE_ATTR, PRERENDERED_ATTR, READY_GLOBAL } from "./sh
 export { useAgentAction, AgentForm, agentParam } from "./runtime/agent/react";
 export type { AgentHintProps, AgentParamProps } from "./runtime/agent/react";
 export { agentLinkProps } from "./runtime/agent/link";
-export type { AgentLinkSpec } from "./runtime/agent/link";
+export type { AgentLinkSpec, AgentLinkProps, AgentLinkRef } from "./runtime/agent/link";
 export { listAgentActions, executeAgentAction, refreshAgentActions } from "./runtime/agent/core";
 export type {
   AgentActionSpec,

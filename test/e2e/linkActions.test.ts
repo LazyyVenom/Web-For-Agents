@@ -57,7 +57,7 @@ describe("generate e2e: link actions", () => {
       { stdout: (s) => (out += s), stderr: (s) => (err += s) },
     );
     expect(code, err).toBe(0);
-    expect(out).toMatch(/^\[web-for-agents\] wrote \d+ files \(/);
+    expect(out).toMatch(/^\[web-for-agents\] wrote \d+ files for \d+ pages \(/);
 
     const map: AgentMap = JSON.parse(readFileSync(path.join(dist, "agents.json"), "utf8"));
     const actions = (p: string) => map.pages.find((x) => x.path === p)!.actions;

@@ -5,11 +5,13 @@ import {
   ACTION_KIND_ATTR,
   ACTION_READONLY_ATTR,
   AGENT_GLOBAL,
+  AGENT_MAP_SCHEMA_URL,
   LINK_ACTION_SELECTOR,
 } from "../shared/conventions";
 import {
-  differingDuplicates,
+  duplicateNameWarnings,
   firstPerName,
+  type DuplicateWarningContext,
   linkActions,
   type LinkActionMarkup,
   type MarkupDefinition,
@@ -75,6 +77,25 @@ export function collectAgentPageInPage(arg: AgentPageInPageArg): AgentPageData {
   const api = (window as unknown as Record<string, Partial<AgentGlobal> | undefined>)[arg.globalKey];
   const actions = api && typeof api.actions === "function" ? api.actions() : [];
   const markup: MarkupDefinition[] = [];
+  // Same as formFields in shared/markupActions.
+  const formFields = (form: Element): string[] => {
+    const skip = ["hidden", "password", "file", "submit", "button", "reset", "image"];
+    const out: string[] = [];
+    form.querySelectorAll("input, select, textarea").forEach((el) => {
+      const name = el.getAttribute("name");
+      const tag = el.tagName.toLowerCase();
+      const type = tag === "input" ? (el.getAttribute("type") || "text").toLowerCase() : tag;
+      if (!name || skip.includes(type)) return;
+      const values =
+        tag === "select"
+          ? Array.from(el.querySelectorAll("option"), (o) => o.getAttribute("value") ?? o.textContent ?? "")
+          : type === "radio" || type === "checkbox"
+            ? [el.getAttribute("value") ?? "on"]
+            : [];
+      out.push(`${name}:${type}${el.hasAttribute("required") ? "!" : ""}${values.length ? "=" + values.join("|") : ""}`);
+    });
+    return out;
+  };
   document.querySelectorAll(`[${arg.nameAttr}]`).forEach((el) => {
     const name = (el.getAttribute(arg.nameAttr) || "").trim();
     if (!name) return;
@@ -85,6 +106,7 @@ export function collectAgentPageInPage(arg: AgentPageInPageArg): AgentPageData {
       destructive: el.getAttribute(arg.destructiveAttr) === "true",
       readOnly: el.getAttribute(arg.readOnlyAttr) === "true",
       href: el.tagName === "A" ? el.getAttribute("href") : null,
+      ...(el.tagName === "FORM" ? { fields: formFields(el) } : {}),
     });
   });
   const links: LinkActionMarkup[] = [];
@@ -154,6 +176,29 @@ export function hoistSiteActions(pages: AgentMapPage[]): { actions: AgentActionD
   };
 }
 
+/**
+ * What a duplicate-name warning on `route` needs from the written map: the action listed for each
+ * name, and the names that this page alone keeps out of `site.actions` (listed on every page, the
+ * same on all the others, but defined differently here).
+ */
+function warningContext(map: AgentMap, route: string, pageUrl: string, siteActions: boolean): DuplicateWarningContext {
+  const page = map.pages.find((p) => p.path === route);
+  const others = map.pages.filter((p) => p !== page);
+  const keptOutOfSite = new Set<string>();
+  if (siteActions && page && others.length > 0) {
+    for (const a of page.actions) {
+      const keys = new Set(others.map((p) => canonicalJson(p.actions.find((b) => b.name === a.name) ?? null)));
+      const [key] = keys;
+      if (keys.size === 1 && key !== "null" && key !== canonicalJson(a)) keptOutOfSite.add(a.name);
+    }
+  }
+  return {
+    pageUrl,
+    listed: (name) => map.site.actions?.find((a) => a.name === name) ?? page?.actions.find((a) => a.name === name),
+    keptOutOfSite,
+  };
+}
+
 interface AgentMapInput {
   siteUrl: string;
   siteName?: string;
@@ -178,6 +223,7 @@ function agentMapOf(input: AgentMapInput): AgentMap {
   const hoisted = input.siteActions === false ? { actions: [], pages: all } : hoistSiteActions(all);
   if (hoisted.actions.length > 0) site.actions = hoisted.actions;
   return {
+    $schema: AGENT_MAP_SCHEMA_URL,
     version: AGENT_MAP_VERSION,
     generator: AGENT_MAP_GENERATOR,
     site,
@@ -218,10 +264,6 @@ export function agentMapExtension(opts: {
       const pages = ctx.pages.map((p): AgentMapPageInput => {
         const found = data.get(p.route);
         const actions = found?.actions ?? [];
-        // Identical copies (a product grid) are normal; differing ones lose all but the first.
-        for (const [name, n] of differingDuplicates(found?.markup ?? [])) {
-          ctx.warn(`${p.route}: ${n} different actions named ${name}; only the first is listed`);
-        }
         // Same rules on both paths; actions found another way win over links of the same name.
         const links = linkActions(
           found?.links ?? [],
@@ -236,6 +278,12 @@ export function agentMapExtension(opts: {
         return page;
       });
       const map = agentMapOf({ siteUrl, siteName: ctx.site.title, llmsUrl: ctx.llmsUrl, pages, siteActions });
+      // Identical copies (a product grid) are normal; differing ones lose all but the listed one.
+      for (const p of ctx.pages) {
+        const markup = data.get(p.route)?.markup ?? [];
+        if (markup.length < 2) continue;
+        for (const w of duplicateNameWarnings(p.route, markup, warningContext(map, p.route, p.url, siteActions !== false))) ctx.warn(w);
+      }
       summary = actionCountText(agentMapStats(map));
       ctx.emitFile(fileName, agentMapJson(map));
     },

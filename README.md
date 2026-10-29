@@ -111,7 +111,7 @@ import { AgentForm, agentParam } from "@anubhav-choubey/web-for-agents";
 </AgentForm>
 ```
 
-Plain links work too, without JavaScript: `<a href="/pricing.pdf" data-agent-action="download_pricing_pdf" data-agent-description="Download the pricing sheet (PDF)">` (or `agentLinkProps`) is listed in `agents.json` as a `link` action. `agentLinkProps` is also available from `@anubhav-choubey/web-for-agents/link` (under 1 KB gzip, no React). See [Link actions](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/agent-actions.md#link-actions-no-javascript).
+Plain links work too, without JavaScript: `<a href="/pricing.pdf" data-agent-action="download_pricing_pdf" data-agent-description="Download the pricing sheet (PDF)">` (or `agentLinkProps`) is listed in `agents.json` as a `link` action. `agentLinkProps` is also available from `@anubhav-choubey/web-for-agents/link` (one file, about 0.6 KB gzip with esbuild, no React; Vite adds its own module-preload helper of about 0.5 KB to any chunk with a dynamic import), and `agentLinkProps({ ..., register: true })` also makes the link a WebMCP tool that clicks it. See [Link actions](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/agent-actions.md#link-actions-no-javascript).
 
 The agent engine loads lazily, only in browsers with WebMCP or during the prerender, and `@anubhav-choubey/web-for-agents/form` exports just the action API, without `Seo` or react-dom ([Lazy loading](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/agent-actions.md#lazy-loading)).
 

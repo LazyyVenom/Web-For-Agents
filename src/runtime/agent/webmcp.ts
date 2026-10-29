@@ -1,5 +1,8 @@
 import { errorMessage, withPrefix } from "../../shared/errors";
+import { findModelContext } from "./detect";
 import type { JsonSchema } from "./types";
+
+export { hasModelContext } from "./detect";
 
 export interface WebMcpTool {
   name: string;
@@ -25,27 +28,11 @@ declare global {
   }
 }
 
-type Found = { ctx: ModelContextLike; legacy: boolean };
-
-function detect(): Found | null {
-  if (typeof document === "undefined") return null;
-  const d = document.modelContext;
-  if (d && typeof d.registerTool === "function") return { ctx: d, legacy: false };
-  const n = typeof navigator !== "undefined" ? navigator.modelContext : undefined;
-  if (n && typeof n.registerTool === "function") return { ctx: n, legacy: true };
-  return null;
-}
-
-/** Whether document.modelContext or navigator.modelContext is present. */
-export function hasModelContext(): boolean {
-  return detect() !== null;
-}
-
 export async function exposeTool(
   tool: WebMcpTool,
   signal: AbortSignal,
 ): Promise<"registered" | "unsupported" | "failed"> {
-  const found = detect();
+  const found = findModelContext();
   if (!found) return "unsupported";
   if (signal.aborted) return "failed";
   const { ctx, legacy } = found;

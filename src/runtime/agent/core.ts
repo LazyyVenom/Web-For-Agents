@@ -11,7 +11,7 @@ import type {
   JsonSchema,
   RefreshAgentActionsOptions,
 } from "./types";
-import { hasModelContext } from "./webmcp";
+import { hasModelContext, type WebMcpTool } from "./webmcp";
 
 /*
  * The light half of the agent runtime, loaded by every page that uses the React API: it keeps the
@@ -34,6 +34,8 @@ export interface Engine {
   list(): AgentActionDescriptor[];
   /** Runs an exposed action. Never throws. */
   execute(name: string, input: unknown, signal?: AbortSignal): Promise<AgentActionResult>;
+  /** Registers one WebMCP tool until `signal` aborts (used by `agentLinkProps({ register: true })`). */
+  expose(tool: WebMcpTool, signal: AbortSignal): Promise<"registered" | "unsupported" | "failed">;
 }
 
 /** Insertion order = mount order. */
@@ -133,8 +135,11 @@ function prerendering(): boolean {
   return typeof p === "object" && p !== null && Array.isArray(p.errors) && !(typeof Node !== "undefined" && p instanceof Node);
 }
 
-/** Imports the engine once (a failed import is retried on the next call). While prerendering, holds the capture until it has loaded. */
-function loadEngine(): Promise<Engine> {
+/**
+ * Imports the engine once (a failed import is retried on the next call); the one load shared by
+ * the React API and link tools (linkTools.ts). While prerendering, holds the capture until it has loaded.
+ */
+export function loadEngine(): Promise<Engine> {
   if (engine) return Promise.resolve(engine);
   if (loading) return loading;
   const release = prerendering() ? holdPrerender() : () => {};
@@ -177,11 +182,19 @@ export async function executeAgentAction(name: string, input: unknown, signal?: 
   return e.execute(name, input, signal);
 }
 
+let onRegistered: ((name: string) => void) | null = null;
+
+/** Set by linkTools.ts: called with each name registerAgentAction registers, before it is exposed. */
+export function setOnAgentActionRegistered(fn: (name: string) => void): void {
+  onRegistered = fn;
+}
+
 export function registerAgentAction(spec: () => AgentActionSpec, target?: () => Element | null): () => void {
   const name = spec().name;
   assertValidActionName(name);
   const id = nextId++;
   entries.set(id, { name, spec, target });
+  onRegistered?.(name);
   installGlobal();
   scheduleSync();
   let done = false;

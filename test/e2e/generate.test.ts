@@ -118,7 +118,7 @@ describe("generate e2e (bring your own prerender)", () => {
     const first = await cli(argv);
     expect(first.err).toContain("robots.txt already exists with different content");
     expect(first.code).toBe(0);
-    expect(first.out).toMatch(/^\[web-for-agents\] wrote \d+ files \(3 pages, 0 actions\)\n$/);
+    expect(first.out).toMatch(/^\[web-for-agents\] wrote \d+ files for 3 pages \(3 listed in llms\.txt and the sitemap\), 0 actions\n$/);
     // Read before generate's own edit (the markdown link) moves the file's mtime.
     expect(readFileSync(path.join(dist, "sitemap.xml"), "utf8")).toContain(`<loc>${origin}/about</loc><lastmod>2025-06-15</lastmod>`);
     const second = await cli([...argv, "--json"]);
@@ -175,14 +175,14 @@ describe("generate e2e (bring your own prerender)", () => {
     const argv = ["generate", tmp, "--site-url", "https://a.com", "--ai-training", "block", "--ai-search", "allow"];
     const quiet = await cli(argv);
     expect(quiet.code).toBe(0);
-    expect(quiet.out).toMatch(/^\[web-for-agents\] wrote \d+ files \(3 pages, 1 action \(0 page-specific, 1 site-wide\)\)\n$/);
+    expect(quiet.out).toMatch(/^\[web-for-agents\] wrote \d+ files for 3 pages \(3 listed in llms\.txt and the sitemap\), 1 action \(0 page-specific, 1 site-wide\)\n$/);
     // Blocking only training is the recommended policy: no notice about it.
     expect(quiet.err).not.toContain("robots.ai blocks");
 
     const loud = await cli([...argv, "--overwrite", "--verbose"]);
     expect(loud.code).toBe(0);
     const lines = loud.out.trimEnd().split("\n");
-    expect(lines[0]).toMatch(/^\[web-for-agents\] wrote \d+ files \(3 pages, 1 action \(0 page-specific, 1 site-wide\)\)$/);
+    expect(lines[0]).toMatch(/^\[web-for-agents\] wrote \d+ files for 3 pages \(3 listed in llms\.txt and the sitemap\), 1 action \(0 page-specific, 1 site-wide\)$/);
     expect(lines).toContain("Layout: flat");
     expect(lines).toContain("Pages: /, /a, /b");
     expect(lines.some((l) => /^Wrote \d+ files: .*agents\.json/.test(l))).toBe(true);
@@ -202,7 +202,7 @@ describe("generate e2e (bring your own prerender)", () => {
     expect(map().site.actions.map((a: any) => a.name)).toEqual(["terms"]);
     const flag = await cli([...argv, "--no-site-actions"]);
     expect(flag.code).toBe(0);
-    expect(flag.out).toContain("(2 pages, 2 actions)");
+    expect(flag.out).toContain("2 pages (2 listed in llms.txt and the sitemap), 2 actions");
     expect(map().site).not.toHaveProperty("actions");
     expect(map().pages.map((p: any) => p.actions.map((a: any) => a.name))).toEqual([["terms"], ["terms"]]);
 

@@ -8,6 +8,7 @@ import { generateAgentFiles } from "../../src/vite/generate";
 import type { WebForAgentsOptions } from "../../src/vite/options";
 import type { AgentMap, AgentMapPage } from "../../src/shared/agent";
 import { copyFixture, distFiles, jsBundle, removeFixtureCopies } from "./helpers";
+import { validateAgentMap } from "../helpers/agentMapSchema";
 
 afterAll(removeFixtureCopies);
 
@@ -65,6 +66,11 @@ describe("agent map build", () => {
     });
   });
 
+  it("matches the agents.json JSON Schema named by its $schema", () => {
+    expect(Object.keys(map)[0]).toBe("$schema");
+    expect(validateAgentMap(map)).toEqual([]);
+  });
+
   it("keeps only the first mounted action of a duplicate name", () => {
     const subscribe = page("/").actions.filter((a) => a.name === "subscribe");
     expect(subscribe).toHaveLength(1);
@@ -120,8 +126,8 @@ describe("agent map build", () => {
   it("warns once per page about a name defined differently by two elements", () => {
     const dup = warnings.filter((w) => w.includes("different actions named"));
     expect(dup).toEqual([
-      "[web-for-agents] /: 2 different actions named subscribe; only the first is listed",
-      "[web-for-agents] /contact: 2 different actions named contact; only the first is listed",
+      `[web-for-agents] /: 2 different actions named subscribe (differ in: description "Subscribe to the newsletter (header)" vs "Subscribe to the newsletter (footer)"); the first, a handler action, is listed`,
+      `[web-for-agents] /contact: 2 different actions named contact (differ in: kind form vs link, href unset vs "mailto:hello@example.com", description "Send us a message" vs "Email us", input schema); the first, a form, is listed`,
     ]);
   });
 

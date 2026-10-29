@@ -40,19 +40,84 @@ export function hintProps(
 }
 
 export interface AgentLinkSpec {
-  /** 1 to 128 characters of A-Z a-z 0-9 _ - . Unique per page. */
+  /** 1 to 128 characters of A-Z a-z 0-9 _ - . Links that share a name are one action. */
   name: string;
   description: string;
   /** Marks a link with side effects (for example an unsubscribe URL); it is then not readOnly. */
   destructive?: boolean;
+  /**
+   * Also expose the link as a WebMCP tool while it is mounted (when the browser has WebMCP), by
+   * returning a `ref` to put on the `<a>`. Running the tool clicks the link. agents.json is unchanged.
+   */
+  register?: boolean;
+}
+
+/**
+ * A ref callback (React 18 and 19, or call it by hand): pass the element to register, then call it
+ * with null or call the function it returns to unregister. One per element.
+ */
+export type AgentLinkRef = (el: Element | null) => (() => void) | undefined;
+
+export type AgentLinkProps = AgentHintProps & { ref: AgentLinkRef };
+
+/**
+ * What a `register` ref keeps between calls: the element it is on and, once the link tools have
+ * attached it, the function that releases it. linkTools.ts owns the rest.
+ */
+export interface LinkHandle {
+  el: Element | null;
+  off?: () => void;
+}
+
+type LinkTools = typeof import("./linkTools");
+
+let tools: LinkTools | undefined;
+/** One shared import, so links attach in mount order; cleared on failure, so the next mount retries. */
+let loading: Promise<LinkTools> | undefined;
+
+/** document.modelContext, else the legacy navigator.modelContext (see detect.ts); false during SSR. */
+const hasWebMcp = (): boolean =>
+  typeof document !== "undefined" &&
+  typeof (
+    (document as { modelContext?: { registerTool?: unknown } }).modelContext ??
+    (navigator as { modelContext?: { registerTool?: unknown } }).modelContext
+  )?.registerTool === "function";
+
+/** The eager half of a `register` ref: the link tools (imported once, only with WebMCP) do the work. */
+function linkRef(spec: AgentLinkSpec): AgentLinkRef {
+  const h: LinkHandle = { el: null };
+  const detach = (): void => {
+    h.el = null;
+    h.off?.();
+    h.off = undefined;
+  };
+  return (el) => {
+    if (el === h.el) return detach;
+    detach();
+    if (!el || !hasWebMcp()) return undefined;
+    h.el = el;
+    if (tools) tools.attach(h, spec);
+    else {
+      // A failed import (the browser logs the request) is retried by the next mount.
+      (loading ??= import("./linkTools")).then(
+        (m) => (tools = m).attach(h, spec),
+        () => (loading = undefined),
+      );
+    }
+    return detach;
+  };
 }
 
 /**
  * Props that make a plain `<a href>` a link action: listed in agents.json with its absolute href,
- * no JavaScript needed. Only http(s), mailto: and tel: hrefs are listed. Registers nothing and is
- * not exposed through WebMCP; safe to call during SSR and prerendering.
+ * no JavaScript needed. Only http(s), mailto: and tel: hrefs are listed. Safe to call during SSR
+ * and prerendering. With `register: true` it also returns a `ref` that exposes the link as a
+ * WebMCP tool while mounted; the WebMCP code is imported only when the browser has WebMCP.
  */
-export function agentLinkProps(spec: AgentLinkSpec): AgentHintProps {
+export function agentLinkProps(spec: AgentLinkSpec & { register: true }): AgentLinkProps;
+export function agentLinkProps(spec: AgentLinkSpec): AgentHintProps;
+export function agentLinkProps(spec: AgentLinkSpec): AgentHintProps | AgentLinkProps {
   assertValidActionName(spec.name);
-  return hintProps(spec.name, spec.description, "link", spec.destructive);
+  const props = hintProps(spec.name, spec.description, "link", spec.destructive);
+  return spec.register ? { ...props, ref: linkRef(spec) } : props;
 }
