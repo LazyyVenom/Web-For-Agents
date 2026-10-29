@@ -1,3 +1,4 @@
+import { EMPTY_OBJECT_SCHEMA } from "../../shared/agent";
 import { errorMessage, withPrefix } from "../../shared/errors";
 import { hasOwn } from "../../shared/object";
 import { compareStrings } from "../../shared/sort";
@@ -17,12 +18,11 @@ import {
 } from "./core";
 import { isConcealed, isDisabled } from "./dom";
 import { checkFormAction, submitFormAction } from "./formAutomation";
-import { EMPTY_OBJECT_SCHEMA, schemaFromForm, validateFormInput, validateInput } from "./formSchema";
+import { schemaFromForm, validateFormInput, validateInput } from "./formSchema";
 import type { AgentActionDescriptor, AgentActionResult, JsonSchema } from "./types";
 import { exposeTool, hasModelContext, type WebMcpTool } from "./webmcp";
 
 // The engine of the agent runtime; see core.ts. Imported lazily by core.ts, which installs it.
-export { refreshAgentActions, registerAgentAction } from "./core";
 
 interface Exposed {
   id: number;
@@ -59,7 +59,7 @@ function schemaOf(r: Exclude<Resolved, { kind: null }>): JsonSchema {
 const describe = (name: string, entry: Entry): AgentActionDescriptor | null => describeWith(name, entry, schemaOf);
 
 /** The actions currently exposed on the page, sorted by name. */
-export function listAgentActions(): AgentActionDescriptor[] {
+export function listRegistered(): AgentActionDescriptor[] {
   return listWith(schemaOf);
 }
 
@@ -167,7 +167,7 @@ function clickBlocked(el: Element): AgentActionResult | null {
 }
 
 /** Runs an exposed action with `input`. Never throws; failures are reported in the result. */
-export async function executeAgentAction(
+export async function executeRegistered(
   name: string,
   input: unknown,
   signal?: AbortSignal,
@@ -229,7 +229,7 @@ function buildTool(name: string, entry: Entry): WebMcpTool | null {
     name,
     description: d.description,
     inputSchema: d.inputSchema,
-    execute: (input, o) => executeAgentAction(name, input, o?.signal),
+    execute: (input, o) => executeRegistered(name, input, o?.signal),
     annotations: { readOnlyHint: d.readOnly, consequentialHint: d.destructive },
   };
   if (d.title !== undefined) tool.title = d.title;
@@ -313,7 +313,7 @@ function sync(force: boolean): void {
  * Installed by core.ts once this module has loaded. Not installed here at the top level: a module
  * side effect would make bundlers keep this file in every bundle that imports the root entry.
  */
-export const engine: Engine = { sync, list: listAgentActions, execute: executeAgentAction };
+export const engine: Engine = { sync, list: listRegistered, execute: executeRegistered };
 
 /** Test-only: drop all registrations and module state, and install the engine without a lazy load. */
 export function __resetForTests(): void {

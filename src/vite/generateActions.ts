@@ -1,7 +1,7 @@
-import { isValidActionName, type ActionKind, type AgentActionDescriptor } from "../shared/agent";
+import { EMPTY_OBJECT_SCHEMA, isValidActionName, type ActionKind, type AgentActionDescriptor } from "../shared/agent";
 import { markupActions } from "../shared/markupActions";
 import { compareStrings } from "../shared/sort";
-import { EMPTY_OBJECT_SCHEMA, schemaFromForm } from "../runtime/agent/formSchema";
+import { schemaFromForm } from "../runtime/agent/formSchema";
 
 /**
  * Agent actions declared in a page's static markup (see markupActions), with form fields as the
