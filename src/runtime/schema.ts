@@ -225,6 +225,56 @@ function split<T extends JsonLdNodeOptions>(i: T): [Omit<T, "id" | "extra">, Jso
   return [rest, { id, extra }];
 }
 
+type Crumb = { name: string; url: string };
+
+function breadcrumbList(items: Crumb[], options?: JsonLdNodeOptions): JsonLdNode {
+  return node(
+    "BreadcrumbList",
+    {
+      itemListElement: (items ?? [])
+        .filter((it) => it !== undefined && it !== null)
+        .map((it, idx) => ({ "@type": "ListItem", position: idx + 1, name: it.name, item: it.url })),
+    },
+    options,
+  );
+}
+
+/** Options every page builder shares (`webPage`, `profilePage`, `faqPage`), so they are interchangeable. */
+export type PageOptions = {
+  name?: string;
+  description?: string;
+  url?: string;
+  /** A `schema.breadcrumbList` node, its `{ name, url }` items, or a ref. */
+  breadcrumb?: Embeddable | Crumb[];
+  /** What the page is about: a node or a ref. */
+  mainEntity?: Embeddable;
+  /** Usually a ref to the `WebSite`. */
+  isPartOf?: Embeddable;
+  datePublished?: string;
+  dateModified?: string;
+  inLanguage?: string;
+  image?: string | string[] | Embeddable;
+  /** A URL, written as an `ImageObject`, or a node or a ref. */
+  primaryImageOfPage?: string | Embeddable;
+} & JsonLdNodeOptions;
+
+/** A page node of `type` from the shared page options; `fields` are the builder's own and win. */
+function page<T extends PageOptions>(type: string, i: T, fields: Record<string, unknown> = {}): JsonLdNode {
+  const [rest, options] = split(i);
+  // Overwriting the keys in place keeps the input's key order.
+  return node(
+    type,
+    {
+      ...rest,
+      breadcrumb: Array.isArray(rest.breadcrumb) ? breadcrumbList(rest.breadcrumb) : rest.breadcrumb,
+      primaryImageOfPage:
+        typeof rest.primaryImageOfPage === "string" ? { "@type": "ImageObject", url: rest.primaryImageOfPage } : rest.primaryImageOfPage,
+      ...fields,
+    },
+    options,
+  );
+}
+
 /** Builders for typed schema.org JSON-LD nodes. Undefined and null fields are omitted. */
 export const schema = {
   /** `{ "@id": id }`: points at a node defined elsewhere, for example in the same `schema.graph`. */
@@ -275,28 +325,15 @@ export const schema = {
   aggregateRating,
   /** A standalone `Review`, for example one a product points at with `schema.ref`. */
   review,
-  faqPage(items: Array<{ question: string; answer: string }>, options?: JsonLdNodeOptions): JsonLdNode {
-    return node(
-      "FAQPage",
-      {
-        mainEntity: (items ?? [])
-          .filter((q) => q !== undefined && q !== null)
-          .map((q) => ({ "@type": "Question", name: q.question, acceptedAnswer: { "@type": "Answer", text: q.answer } })),
-      },
-      options,
-    );
+  /** Page options (except `mainEntity`, which holds the questions) go in the second argument. */
+  faqPage(items: Array<{ question: string; answer: string }>, options?: Omit<PageOptions, "mainEntity">): JsonLdNode {
+    return page("FAQPage", options ?? {}, {
+      mainEntity: (items ?? [])
+        .filter((q) => q !== undefined && q !== null)
+        .map((q) => ({ "@type": "Question", name: q.question, acceptedAnswer: { "@type": "Answer", text: q.answer } })),
+    });
   },
-  breadcrumbList(items: Array<{ name: string; url: string }>, options?: JsonLdNodeOptions): JsonLdNode {
-    return node(
-      "BreadcrumbList",
-      {
-        itemListElement: (items ?? [])
-          .filter((it) => it !== undefined && it !== null)
-          .map((it, idx) => ({ "@type": "ListItem", position: idx + 1, name: it.name, item: it.url })),
-      },
-      options,
-    );
-  },
+  breadcrumbList,
   organization(i: { name: string; url: string; logo?: string | Embeddable; sameAs?: string[] } & JsonLdNodeOptions): JsonLdNode {
     const [rest, options] = split(i);
     return node("Organization", rest, options);
@@ -378,19 +415,9 @@ export const schema = {
       options,
     );
   },
-  profilePage(
-    i: {
-      /** The person or organization the page is about. Google's profile page rich result requires it. */
-      mainEntity?: Embeddable;
-      url?: string;
-      name?: string;
-      dateCreated?: string;
-      dateModified?: string;
-      breadcrumb?: Embeddable;
-    } & JsonLdNodeOptions,
-  ): JsonLdNode {
-    const [rest, options] = split(i);
-    return node("ProfilePage", rest, options);
+  /** `mainEntity` is the person or organization the page is about; Google's profile page rich result requires it. */
+  profilePage(i: PageOptions & { dateCreated?: string }): JsonLdNode {
+    return page("ProfilePage", i);
   },
   creativeWork(
     i: {
@@ -411,11 +438,8 @@ export const schema = {
       options,
     );
   },
-  webPage(
-    i: { name: string; url: string; description?: string; breadcrumb?: Embeddable; isPartOf?: Embeddable } & JsonLdNodeOptions,
-  ): JsonLdNode {
-    const [rest, options] = split(i);
-    return node("WebPage", rest, options);
+  webPage(i: PageOptions & { name: string; url: string }): JsonLdNode {
+    return page("WebPage", i);
   },
   /**
    * One `@graph` document from several nodes; each node's own `@context` is dropped in favour of a

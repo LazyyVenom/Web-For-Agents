@@ -8,4 +8,5 @@ export type {
   AggregateOfferInput,
   AggregateRatingInput,
   ReviewInput,
+  PageOptions,
 } from "../runtime/schema";

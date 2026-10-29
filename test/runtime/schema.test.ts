@@ -522,3 +522,84 @@ describe("0.5: product rich results", () => {
     expect(n.aggregateRating).toEqual({ "@type": "AggregateRating", ratingValue: "4.5", bestRating: "5", worstRating: 1 });
   });
 });
+
+describe("0.5: one option set for every page builder", () => {
+  const C = "https://schema.org";
+  const options = {
+    name: "About",
+    description: "Who we are",
+    url: "https://a.com/about",
+    breadcrumb: [
+      { name: "Home", url: "https://a.com" },
+      { name: "About", url: "https://a.com/about" },
+    ],
+    mainEntity: schema.ref("#org"),
+    isPartOf: schema.ref("#site"),
+    datePublished: "2026-01-01",
+    dateModified: "2026-02-01",
+    inLanguage: "en",
+    image: "https://a.com/a.png",
+    primaryImageOfPage: "https://a.com/hero.png",
+    id: "https://a.com/about#page",
+  };
+  const fields = {
+    "@id": "https://a.com/about#page",
+    name: "About",
+    description: "Who we are",
+    url: "https://a.com/about",
+    breadcrumb: {
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        { "@type": "ListItem", position: 1, name: "Home", item: "https://a.com" },
+        { "@type": "ListItem", position: 2, name: "About", item: "https://a.com/about" },
+      ],
+    },
+    mainEntity: { "@id": "#org" },
+    isPartOf: { "@id": "#site" },
+    datePublished: "2026-01-01",
+    dateModified: "2026-02-01",
+    inLanguage: "en",
+    image: "https://a.com/a.png",
+    primaryImageOfPage: { "@type": "ImageObject", url: "https://a.com/hero.png" },
+  };
+
+  it("webPage and profilePage take the same options and differ only in @type", () => {
+    const web = schema.webPage(options);
+    const profile = schema.profilePage(options);
+    expect(web).toEqual({ "@context": C, "@type": "WebPage", ...fields });
+    expect({ ...profile, "@type": "WebPage" }).toEqual(web);
+    expect(serializeJsonLd(web).match(/@context/g)).toHaveLength(1);
+  });
+
+  it("faqPage takes the same options next to its questions", () => {
+    const { mainEntity: _mainEntity, ...rest } = options;
+    const { mainEntity: _entity, ...expected } = fields;
+    expect(schema.faqPage([{ question: "q", answer: "a" }], rest)).toEqual({
+      "@context": C,
+      "@type": "FAQPage",
+      ...expected,
+      mainEntity: [{ "@type": "Question", name: "q", acceptedAnswer: { "@type": "Answer", text: "a" } }],
+    });
+  });
+
+  it("breadcrumb is a node, a ref or its items; primaryImageOfPage a URL or a node", () => {
+    const crumbs = schema.breadcrumbList([{ name: "Home", url: "/" }]);
+    expect(schema.webPage({ name: "P", url: "u", breadcrumb: crumbs }).breadcrumb).toEqual({
+      "@type": "BreadcrumbList",
+      itemListElement: [{ "@type": "ListItem", position: 1, name: "Home", item: "/" }],
+    });
+    expect(schema.profilePage({ breadcrumb: [{ name: "Home", url: "/" }] }).breadcrumb).toEqual(
+      schema.webPage({ name: "P", url: "u", breadcrumb: crumbs }).breadcrumb,
+    );
+    const image = { "@type": "ImageObject", url: "/i.png", width: 800 };
+    expect(schema.profilePage({ primaryImageOfPage: image }).primaryImageOfPage).toEqual(image);
+    expect(schema.profilePage({ primaryImageOfPage: null as any, breadcrumb: null as any })).toEqual({ "@context": C, "@type": "ProfilePage" });
+  });
+
+  it("keeps the 0.4 key order and profilePage's dateCreated", () => {
+    expect(serializeJsonLd(schema.webPage({ breadcrumb: schema.ref("#b"), name: "P", url: "u" }))).toBe(
+      '{"@context":"https://schema.org","@type":"WebPage","breadcrumb":{"@id":"#b"},"name":"P","url":"u"}',
+    );
+    expect(schema.profilePage({ dateCreated: "2025-01-01" }).dateCreated).toBe("2025-01-01");
+  });
+});

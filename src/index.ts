@@ -11,6 +11,7 @@ export type {
   AggregateOfferInput,
   AggregateRatingInput,
   ReviewInput,
+  PageOptions,
 } from "./runtime/schema";
 export { ContentRegion, ExcludeFromContent } from "./runtime/content";
 export { holdPrerender } from "./runtime/prerender";
