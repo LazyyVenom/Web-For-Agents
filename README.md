@@ -55,7 +55,7 @@ export function Post() {
 }
 ```
 
-Builders also cover `person`, `softwareApplication`, `profilePage`, `creativeWork`, `webPage` and `graph` (several nodes in one `@graph`); see [Schema builders](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/seo.md#schema-builders). In a Node script, import them from `@anubhav-choubey/web-for-agents/schema` (no React needed; see [Without React](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/seo.md#without-react)). Every builder takes `id`, `extra` fields and nested nodes, and `schema.ref(id)` links to another node by `@id`.
+Builders also cover `product`, `organization`, `webSite`, `webPage`, `breadcrumbList`, `faqPage`, `softwareApplication`, `person`, `profilePage`, `creativeWork` and `graph` (several nodes in one `@graph`); see [Schema builders](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/seo.md#schema-builders). In a Node script, import them from `@anubhav-choubey/web-for-agents/schema` (no React needed; see [Without React](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/seo.md#without-react)). Every builder takes `id`, `extra` fields and nested nodes, and `schema.ref(id)` links to another node by `@id`.
 
 `robots.ai` is required: the plugin throws if you do not state a policy for both `training` and `search`. Use one `SeoProvider` per document. More in [Head tags and JSON-LD](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/seo.md).
 
@@ -74,7 +74,7 @@ After `vite build`, the plugin crawls from `/` plus `routes` and writes:
 
 Already have your own prerender script? Skip the plugin's prerender and run `npx web-for-agents generate dist --site-url https://example.com --ai-training block --ai-search allow` after it. It adds the same `.md`, `llms.txt`, `robots.txt`, `sitemap.xml` and `agents.json` files to your HTML. See [Using your own prerender](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/prerendering.md#using-your-own-prerender).
 
-Put an "About me" summary, key links or featured projects at the top of `llms.txt` with `llms.intro` and `llms.sections`, and add `<lastmod>` dates to the sitemap with `sitemap: { lastmod: "file" }`. See [Custom sections](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/prerendering.md#custom-sections) and [Sitemap lastmod](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/prerendering.md#sitemap-lastmod). Set `sitemap.timeZone` (default `"UTC"`) for local `lastmod` dates, and `robots.sitemapUrl` to change the `Sitemap:` line in `robots.txt` ([details](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/prerendering.md#robotstxt-sitemap-line)).
+Put a summary (of the company, product or author), key links (pricing, API reference, support) or featured pages at the top of `llms.txt` with `llms.intro` and `llms.sections`, and add `<lastmod>` dates to the sitemap with `sitemap: { lastmod: "file" }`. See [Custom sections](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/prerendering.md#custom-sections) and [Sitemap lastmod](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/prerendering.md#sitemap-lastmod). Set `sitemap.timeZone` (default `"UTC"`) for local `lastmod` dates, and `robots.sitemapUrl` to change the `Sitemap:` line in `robots.txt` ([details](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/prerendering.md#robotstxt-sitemap-line)).
 
 Files you place in `public/` are never overwritten. Content regions, `holdPrerender`, `hydrateApp`, host fallback configs and memory limits: see [Prerendering](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/prerendering.md).
 
@@ -111,7 +111,7 @@ import { AgentForm, agentParam } from "@anubhav-choubey/web-for-agents";
 </AgentForm>
 ```
 
-Plain links work too, without JavaScript: `<a href="/resume.pdf" data-agent-action="open_resume" data-agent-description="Open the resume">` (or `agentLinkProps`) is listed in `agents.json` as a `link` action. `agentLinkProps` is also available from `@anubhav-choubey/web-for-agents/link` (under 1 KB gzip, no React). See [Link actions](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/agent-actions.md#link-actions-no-javascript).
+Plain links work too, without JavaScript: `<a href="/pricing.pdf" data-agent-action="download_pricing_pdf" data-agent-description="Download the pricing sheet (PDF)">` (or `agentLinkProps`) is listed in `agents.json` as a `link` action. `agentLinkProps` is also available from `@anubhav-choubey/web-for-agents/link` (under 1 KB gzip, no React). See [Link actions](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/agent-actions.md#link-actions-no-javascript).
 
 Agents can never reach hidden, password, file, disabled or `readonly` fields, or fields hidden by markup. Full API, confirm dialog and field rules: [Agent actions](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/agent-actions.md).
 

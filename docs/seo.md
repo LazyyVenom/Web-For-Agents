@@ -61,12 +61,12 @@ Search engines truncate long titles and descriptions, and very short description
 
 `schema` returns typed JSON-LD nodes for `<JsonLd data={...} />`:
 
-- `schema.article`
-- `schema.product`
-- `schema.faqPage`
-- `schema.breadcrumbList`
-- `schema.organization`
-- `schema.webSite`
+- `schema.article`: `headline`, `description`, `image` (a URL or an array), `datePublished`, `dateModified`, `author` (`{ name, url }`, a node or a ref, or an array of them), `url`
+- `schema.product`: `name`, `description`, `image` (a URL or an array), `sku`, `brand` (a name, written as a `Brand`, or a node or a ref), `offers` (one `Offer`: `price`, `priceCurrency`, `availability`, `url`). `availability` is `"InStock"`, `"OutOfStock"` or `"PreOrder"`. There is no typed `aggregateRating` or `review`; pass them in `extra`. Google requires one of `offers`, `aggregateRating` or `review`, and the [audit](cli.md) warns when all are missing. For another availability, such as `BackOrder`, or several offers, pass `offers` in `extra` instead.
+- `schema.faqPage(items, options?)`: `items` is `{ question, answer }[]`, written as `mainEntity` questions, each with an `acceptedAnswer`.
+- `schema.breadcrumbList(items, options?)`: `items` is `{ name, url }[]`, written as `itemListElement` with positions from 1.
+- `schema.organization`: `name`, `url`, `logo` (a URL, a node or a ref), `sameAs` (an array of URLs)
+- `schema.webSite`: `name`, `url`, `searchUrlTemplate` (written as a `SearchAction`; use `{search_term_string}` in the URL, as in `"https://example.com/search?q={search_term_string}"`), `publisher` (a node or a ref)
 - `schema.person`: `name`, `url`, `image`, `jobTitle`, `description`, `email`, `sameAs`, `worksFor` (a name, `{ name, url }`, a node or a ref), `address` (text or a `PostalAddress` node), `knowsAbout` (text, nodes or a mix)
 - `schema.softwareApplication`: `name`, `description`, `applicationCategory`, `operatingSystem`, `url`, `image`, `offers`, `aggregateRating`, `author`. For rich results Google requires `name`, `offers.price` (`0` for a free app) and one of `aggregateRating` or `review`; the [audit](cli.md) warns when one is missing.
 - `schema.profilePage`: `mainEntity` (a person or organization node, or a ref; Google requires it for the rich result), `url`, `name`, `dateCreated`, `dateModified`, `breadcrumb`
@@ -75,6 +75,8 @@ Search engines truncate long titles and descriptions, and very short description
 - `schema.graph(nodes)`: combines nodes into one `@graph` document with a single `@context`; nested nodes lose their own `@context`. `null`, `undefined` and `false` entries are skipped, so `cond && node` works.
 - `schema.ref(id)`: `{ "@id": id }`, a pointer to a node defined elsewhere. A missing or empty `id` throws a `TypeError`.
 
+Required fields: `headline` for `article`; `name` and `url` for `organization`, `webSite` and `webPage`; `name` for `product`, `person`, `softwareApplication` and `creativeWork`; none for `profilePage`.
+
 Fields left `undefined` or `null` are omitted from every builder, including nested ones: `schema.profilePage({ mainEntity: undefined })` gives a `ProfilePage` without `mainEntity` rather than throwing. `author`, `brand`, `worksFor`, `mainEntity`, `breadcrumb`, `isPartOf`, `publisher` and `logo` also take a node or a ref. Wherever a node is nested, its own `@context` is dropped.
 
 Every builder takes two more options (in its input object; `faqPage` and `breadcrumbList` take them as a second argument):
@@ -82,15 +84,34 @@ Every builder takes two more options (in its input object; `faqPage` and `breadc
 - `id`: written as `"@id"`, so other nodes can point at this one with `schema.ref(id)`. When `id` is given, `extra["@id"]` is ignored.
 - `extra`: any other schema.org properties, merged in last, so they override the typed fields. `@type` and `@context` cannot be overridden (the `JsonLdExtra` type rejects them; untyped data is filtered at runtime), and a `__proto__` key is ignored. Values can be nodes, refs, arrays or plain objects; a node nested anywhere in them loses its own `@context`.
 
+A product page on a store, with the organization and site defined once and linked by `@id`:
+
 ```ts
 const site = "https://example.com";
+const page = `${site}/kettles/steel`;
 schema.graph([
-  schema.webSite({ name: "Ada", url: site, id: `${site}/#site` }),
-  schema.person({ name: "Ada", url: site, id: `${site}/#me`, knowsAbout: ["TypeScript", "SEO"], extra: { alumniOf: "MIT" } }),
-  schema.profilePage({ url: `${site}/about`, mainEntity: schema.ref(`${site}/#me`) }),
-  schema.webPage({ name: "Projects", url: `${site}/projects`, isPartOf: schema.ref(`${site}/#site`) }),
+  schema.organization({
+    name: "Acme",
+    url: site,
+    id: `${site}/#org`,
+    logo: `${site}/logo.png`,
+    sameAs: ["https://www.linkedin.com/company/acme"],
+    extra: { contactPoint: { "@type": "ContactPoint", contactType: "customer support", email: "support@example.com" } },
+  }),
+  schema.webSite({ name: "Acme Store", url: site, id: `${site}/#site`, publisher: schema.ref(`${site}/#org`) }),
+  schema.breadcrumbList([{ name: "Home", url: site }, { name: "Kettles", url: `${site}/kettles` }, { name: "Steel kettle", url: page }], { id: `${page}#crumbs` }),
+  schema.webPage({ name: "Steel kettle", url: page, isPartOf: schema.ref(`${site}/#site`), breadcrumb: schema.ref(`${page}#crumbs`) }),
+  schema.product({
+    name: "Steel kettle",
+    sku: "KET-01",
+    brand: schema.ref(`${site}/#org`),
+    offers: { price: 49, priceCurrency: "USD", availability: "InStock", url: page },
+    extra: { aggregateRating: { "@type": "AggregateRating", ratingValue: 4.6, reviewCount: 212 } },
+  }),
 ]);
 ```
+
+A personal site uses the same pattern: a `schema.person` node with an `id`, and a `schema.profilePage` whose `mainEntity` is `schema.ref` of that id.
 
 ### Without React
 

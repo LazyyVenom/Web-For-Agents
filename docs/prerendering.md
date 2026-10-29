@@ -135,7 +135,7 @@ import { ContentRegion, ExcludeFromContent } from "@anubhav-choubey/web-for-agen
 
 Both accept `as` (default `div`) and pass other props to the element. If a page has neither a `ContentRegion` nor a match for `contentSelector`, the content is taken from `<body>` minus `header`, `nav`, `footer` and `aside`, and the build logs a warning naming those routes.
 
-Layouts often place inline elements side by side with no whitespace between them, such as `<span>Slot 01</span><span>Featured</span>` in a flex row. The page shows two words, so the markdown gets a space between them: `Slot 01 Featured`, not `Slot 01Featured`. The space goes between two adjacent sibling inline elements (custom elements such as `<x-badge>` count as inline) that both have text, with nothing but comments, icons, form fields or empty elements between them. Glue that looks intended is kept:
+Layouts often place inline elements side by side with no whitespace between them, such as `<span>New</span><span>Organic</span>` badges in a flex row. The page shows two words, so the markdown gets a space between them: `New Organic`, not `NewOrganic`. The space goes between two adjacent sibling inline elements (custom elements such as `<x-badge>` count as inline) that both have text, with nothing but comments, icons, form fields or empty elements between them. Glue that looks intended is kept:
 
 - elements whose parent also holds text of its own (not just whitespace), since that parent is running prose, not a row of items: `<p><span>Java</span><span>Script</span> is fun</p>` gives `JavaScript is fun`, and `un<span>believ</span><span>able</span>` stays `unbelievable`;
 - an element next to plain text (`<b>Java</b>Script`, `H<sub>2</sub>O`);
@@ -161,46 +161,51 @@ When a page has no `<h1>`, its markdown starts with a `# title` heading. That he
 
 ### Custom sections
 
-`llms.intro` and `llms.sections` add your own text and links at the top of `llms.txt` (before `## Pages`) and of `llms-full.txt` (before the first page). Use them for an "About me" summary, key links and featured work:
+`llms.intro` and `llms.sections` add your own text and links at the top of `llms.txt` (before `## Pages`) and of `llms-full.txt` (before the first page). Use them for a short overview, key links and featured pages. For a docs site:
 
 ```ts
 llms: {
-  intro: "I am a full-stack developer who builds tools for small teams.",
+  title: "Acme Docs",
+  intro: "Acme is a hosted job queue. These docs cover setup, the HTTP API and the SDKs.",
   sections: [
     {
       title: "Key links",
       links: [
-        { title: "Resume", url: "/resume.pdf", description: "PDF, one page" },
-        { title: "GitHub", url: "https://github.com/me" },
-        { title: "Email", url: "mailto:me@example.com" },
+        { title: "Pricing", url: "/pricing", description: "Plans and limits" },
+        { title: "API reference", url: "/docs/api" },
+        { title: "Status page", url: "https://status.example.com" },
+        { title: "Support", url: "mailto:support@example.com" },
       ],
     },
-    { title: "Featured projects", text: "Things I built recently.", links: [{ title: "Tool", url: "https://github.com/me/tool" }] },
+    { title: "Guides", text: "Start here if you are new to Acme.", links: [{ title: "Quick start", url: "/docs/quick-start" }] },
   ],
 },
 ```
 
 ```md
-# Me
+# Acme Docs
 
 > The summary from llms.description or the root page
 
-I am a full-stack developer who builds tools for small teams.
+Acme is a hosted job queue. These docs cover setup, the HTTP API and the SDKs.
 
 ## Key links
 
-- [Resume](https://example.com/resume.pdf): PDF, one page
-- [GitHub](https://github.com/me)
-- [Email](mailto:me@example.com)
+- [Pricing](https://example.com/pricing): Plans and limits
+- [API reference](https://example.com/docs/api)
+- [Status page](https://status.example.com)
+- [Support](mailto:support@example.com)
 
-## Featured projects
+## Guides
 
 ...
 
 ## Pages
 ```
 
-A link `url` must be http(s) or `mailto:`; a relative URL such as `/resume.pdf` is resolved against `siteUrl`. Each section needs `text` or at least one link. `intro` and `text` are plain text: blank lines separate paragraphs, and they are escaped like titles, with a leading `#`, `>`, `-` or `1.` escaped too, so they cannot add headings, lists or links. Bad values fail the build with an error naming the field, such as `llms.sections[0].links[1].url`. Both work with `generate`, including from a JSON `--config` file.
+A store might list shipping, returns and its contact page instead, and a personal site its resume (`/resume.pdf`), GitHub profile and email.
+
+A link `url` must be http(s) or `mailto:`; a relative URL such as `/pricing` is resolved against `siteUrl`. Each section needs `text` or at least one link. `intro` and `text` are plain text: blank lines separate paragraphs, and they are escaped like titles, with a leading `#`, `>`, `-` or `1.` escaped too, so they cannot add headings, lists or links. Bad values fail the build with an error naming the field, such as `llms.sections[0].links[1].url`. Both work with `generate`, including from a JSON `--config` file.
 
 ## Sitemap lastmod
 

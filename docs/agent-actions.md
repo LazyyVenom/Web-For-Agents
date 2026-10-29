@@ -82,13 +82,14 @@ WebMCP is feature-detected: when `document.modelContext` (or the older `navigato
 
 ## Link actions (no JavaScript)
 
-Some actions are just links: open a resume, email the author, call a number. Mark a plain `<a href>` with `agentLinkProps` and it is listed in `agents.json` as a link action, with no handler, no registration and no JavaScript needed at runtime:
+Some actions are just links: download a price sheet, open a status page, email sales, call a store. Mark a plain `<a href>` with `agentLinkProps` and it is listed in `agents.json` as a link action, with no handler, no registration and no JavaScript needed at runtime:
 
 ```tsx
 import { agentLinkProps } from "@anubhav-choubey/web-for-agents";
 
-<a href="/resume.pdf" {...agentLinkProps({ name: "open-resume", description: "Open the resume (PDF)" })}>Resume</a>
-<a href="mailto:me@example.com" {...agentLinkProps({ name: "contact", description: "Email me" })}>Email</a>
+<a href="/pricing.pdf" {...agentLinkProps({ name: "download_pricing_pdf", description: "Download the pricing sheet (PDF)" })}>Pricing (PDF)</a>
+<a href="https://status.example.com" {...agentLinkProps({ name: "open_status_page", description: "Open the service status page" })}>Status</a>
+<a href="mailto:sales@example.com" {...agentLinkProps({ name: "contact_sales", description: "Email the sales team" })}>Contact sales</a>
 ```
 
 `agentLinkProps({ name, description, destructive? })` only returns the `data-agent-action`, `data-agent-description`, `aria-description`, `data-agent-kind="link"` (and, when `destructive`, `data-agent-destructive="true"`) attributes, so it is safe in server rendering and works in hand-written HTML too: any `<a href data-agent-action="...">` is a link action. It throws on an invalid name, like `useAgentAction`.
@@ -103,13 +104,13 @@ In `agents.json` a link action looks like this:
 
 ```json
 {
-  "name": "open-resume",
-  "description": "Open the resume (PDF)",
+  "name": "download_pricing_pdf",
+  "description": "Download the pricing sheet (PDF)",
   "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
   "destructive": false,
   "readOnly": true,
   "kind": "link",
-  "href": "https://example.com/resume.pdf",
+  "href": "https://example.com/pricing.pdf",
   "method": "GET"
 }
 ```
