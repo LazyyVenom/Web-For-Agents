@@ -14,14 +14,30 @@ describe("parseCliArgs", () => {
 
   it("parses generate with flags", () => {
     expect(
-      parseCliArgs(["generate", "dist", "--site-url", "https://a.com", "--ai-training", "block", "--ai-search", "allow", "--config", "c.mjs", "--no-link-markdown", "--overwrite", "--json"]),
+      parseCliArgs(["generate", "dist", "--site-url", "https://a.com", "--ai-training", "block", "--ai-search", "allow", "--config", "c.mjs", "--no-link-markdown", "--overwrite", "--no-site-actions", "--verbose", "--json"]),
     ).toEqual({
       command: "generate",
-      generate: { outDir: "dist", siteUrl: "https://a.com", aiTraining: "block", aiSearch: "allow", config: "c.mjs", linkMarkdown: false, overwrite: true },
+      generate: {
+        outDir: "dist",
+        siteUrl: "https://a.com",
+        aiTraining: "block",
+        aiSearch: "allow",
+        config: "c.mjs",
+        linkMarkdown: false,
+        overwrite: true,
+        siteActions: false,
+        verbose: true,
+      },
       json: true,
       timeoutMs: 10000,
     });
-    expect(parseCliArgs(["generate", "out"]).generate).toEqual({ outDir: "out", linkMarkdown: true, overwrite: false });
+    expect(parseCliArgs(["generate", "out"]).generate).toEqual({
+      outDir: "out",
+      linkMarkdown: true,
+      overwrite: false,
+      siteActions: true,
+      verbose: false,
+    });
   });
 
   it("rejects bad generate input and mixed-up flags", () => {
@@ -32,6 +48,8 @@ describe("parseCliArgs", () => {
       [["generate", "a", "--min-score", "5"], "--min-score is not an option of generate"],
       [["generate", "a", "--config", " "], "--config must be a file path"],
       [["audit", "u", "--ai-search", "allow"], "--ai-search is an option of generate, not audit"],
+      [["audit", "u", "--verbose"], "--verbose is an option of generate, not audit"],
+      [["audit", "u", "--no-site-actions"], "--no-site-actions is an option of generate, not audit"],
     ] as const) {
       expect(() => parseCliArgs([...argv]), argv.join(" ")).toThrow(msg);
     }
@@ -76,6 +94,42 @@ describe("parseCliArgs", () => {
     expect(normalizeInputUrl("localhost.example.com")).toBe("https://localhost.example.com/");
     expect(normalizeInputUrl("127.0.0.2")).toBe("https://127.0.0.2/");
     expect(normalizeInputUrl("https://localhost/")).toBe("https://localhost/");
+  });
+
+  it("parses --sitemap with --max-pages and --concurrency", () => {
+    expect(parseCliArgs(["audit", "a.com", "--sitemap"])).toEqual({
+      command: "audit",
+      url: "https://a.com/",
+      json: false,
+      timeoutMs: 10000,
+      sitemap: { maxPages: 50, concurrency: 4, maxTimeMs: 300_000 },
+    });
+    expect(
+      parseCliArgs(["audit", "a.com", "--sitemap", "--max-pages", "500", "--concurrency", "1", "--max-time", "3600"]).sitemap,
+    ).toEqual({
+      maxPages: 500,
+      concurrency: 1,
+      maxTimeMs: 3_600_000,
+    });
+    expect(parseCliArgs(["audit", "a.com"]).sitemap).toBeUndefined();
+  });
+
+  it("rejects bad --max-pages and --concurrency, and both without --sitemap", () => {
+    for (const [argv, msg] of [
+      [["audit", "a.com", "--sitemap", "--max-pages", "501"], "--max-pages must be an integer from 1 to 500"],
+      [["audit", "a.com", "--sitemap", "--max-pages", "0"], "--max-pages must be an integer from 1 to 500"],
+      [["audit", "a.com", "--sitemap", "--max-pages", "2.5"], "--max-pages must be an integer from 1 to 500"],
+      [["audit", "a.com", "--sitemap", "--concurrency", "0"], "--concurrency must be an integer from 1 to 16"],
+      [["audit", "a.com", "--sitemap", "--concurrency", "17"], "--concurrency must be an integer from 1 to 16"],
+      [["audit", "a.com", "--sitemap", "--max-time", "0"], "--max-time must be an integer from 1 to 3600"],
+      [["audit", "a.com", "--sitemap", "--max-time", "3601"], "--max-time must be an integer from 1 to 3600"],
+      [["audit", "a.com", "--max-time", "60"], "--max-time requires --sitemap"],
+      [["audit", "a.com", "--max-pages", "5"], "--max-pages requires --sitemap"],
+      [["audit", "a.com", "--concurrency", "2"], "--concurrency requires --sitemap"],
+      [["generate", "out", "--sitemap"], "--sitemap is not an option of generate"],
+    ] as const) {
+      expect(() => parseCliArgs([...argv]), argv.join(" ")).toThrow(msg);
+    }
   });
 
   it("parses --agent-map", () => {

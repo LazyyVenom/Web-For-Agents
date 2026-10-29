@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from "vitest";
-import { EMPTY_OBJECT_SCHEMA, agentFields, schemaFromForm, validateInput } from "../../../src/runtime/agent/formSchema";
+import { agentFields, schemaFromForm, validateInput } from "../../../src/runtime/agent/formSchema";
+import { EMPTY_OBJECT_SCHEMA } from "../../../src/shared/agent";
 
 function form(html: string): HTMLFormElement {
   document.body.innerHTML = `<form>${html}</form>`;

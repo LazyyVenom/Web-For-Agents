@@ -196,6 +196,134 @@ describe("Seo prerendered head", () => {
   });
 });
 
+describe("Seo languages", () => {
+  const root = document.documentElement;
+  const hreflangs = () =>
+    [...document.head.querySelectorAll('link[rel="alternate"][hreflang]')].map((l) => `${l.getAttribute("hreflang")} ${l.getAttribute("href")}`);
+  const altLocales = () => [...document.head.querySelectorAll('meta[property="og:locale:alternate"]')].map((m) => m.getAttribute("content"));
+  beforeEach(() => {
+    root.setAttribute("lang", "en");
+    root.removeAttribute("dir");
+  });
+  afterEach(() => {
+    cleanup();
+    root.setAttribute("lang", "en");
+    root.removeAttribute("dir");
+  });
+
+  const Page = ({ lang }: { lang: "de" | "ar" | "none" }) =>
+    lang === "none" ? (
+      <Seo title="Plain" />
+    ) : (
+      <Seo
+        title={lang}
+        lang={lang}
+        locale={lang === "de" ? "de_DE" : "ar_EG"}
+        alternateLocales={["en_US"]}
+        alternates={[
+          { hrefLang: lang, href: `/${lang}/pricing` },
+          { hrefLang: lang === "de" ? "fr" : "he", href: "/other" },
+          { hrefLang: "x-default", href: "/pricing" },
+        ]}
+      />
+    );
+
+  it("sets <html lang> and dir, og:locale, og:locale:alternate and absolute hreflang links", () => {
+    render(
+      <SeoProvider defaults={{ siteUrl: "https://a.com", locale: "en_US" }}>
+        <Page lang="ar" />
+      </SeoProvider>,
+    );
+    expect([root.getAttribute("lang"), root.getAttribute("dir")]).toEqual(["ar", "rtl"]);
+    expect(meta('meta[property="og:locale"]')).toBe("ar_EG");
+    expect(altLocales()).toEqual(["en_US"]);
+    expect(hreflangs()).toEqual(["ar https://a.com/ar/pricing", "he https://a.com/other", "x-default https://a.com/pricing"]);
+  });
+
+  it("a route change replaces the alternates and lang, and leaves no stale hreflang", () => {
+    const tree = (lang: "de" | "ar" | "none") => (
+      <SeoProvider defaults={{ siteUrl: "https://a.com", lang: "en", locale: "en_US" }}>
+        <Page key={lang} lang={lang} />
+      </SeoProvider>
+    );
+    const { rerender } = render(tree("ar"));
+    rerender(tree("de"));
+    expect([root.getAttribute("lang"), root.getAttribute("dir")]).toEqual(["de", "ltr"]);
+    expect(hreflangs()).toEqual(["de https://a.com/de/pricing", "fr https://a.com/other", "x-default https://a.com/pricing"]);
+    rerender(tree("none"));
+    expect(hreflangs()).toEqual([]);
+    expect(altLocales()).toEqual([]);
+    expect(meta('meta[property="og:locale"]')).toBe("en_US");
+    // The provider's default lang is what remains.
+    expect([root.getAttribute("lang"), root.getAttribute("dir")]).toEqual(["en", "ltr"]);
+  });
+
+  it("without a provider lang, a page that sets none restores the document's original lang and dir", () => {
+    const tree = (lang: "de" | "ar" | "none") => (
+      <SeoProvider defaults={{ siteUrl: "https://a.com" }}>
+        <Seo title="Layout" />
+        <Page key={lang} lang={lang} />
+      </SeoProvider>
+    );
+    const { rerender } = render(tree("ar"));
+    expect([root.getAttribute("lang"), root.getAttribute("dir")]).toEqual(["ar", "rtl"]);
+    rerender(tree("none"));
+    expect([root.getAttribute("lang"), root.hasAttribute("dir")]).toEqual(["en", false]);
+    rerender(tree("de"));
+    rerender(tree("ar"));
+    rerender(tree("none"));
+    expect([root.getAttribute("lang"), root.hasAttribute("dir")]).toEqual(["en", false]);
+  });
+
+  it("the original is captured once: a page mounting before the previous one unmounts does not adopt its lang", () => {
+    const { rerender } = render(<Page lang="ar" />);
+    // The next page mounts while the previous one is still there (a transition), then the previous one goes.
+    rerender(
+      <>
+        <Page lang="ar" />
+        <Page lang="de" />
+      </>,
+    );
+    rerender(<Page lang="de" />);
+    rerender(<Page lang="none" />);
+    expect([root.getAttribute("lang"), root.hasAttribute("dir")]).toEqual(["en", false]);
+  });
+
+  it("on a prerendered page, navigating to a page without lang restores the shell's lang, not the prerendered page's", () => {
+    // The prerender renders the page and serializes <html> with whatever attributes it then has.
+    const { unmount } = render(<Page key="ar" lang="ar" />);
+    const served = [...root.attributes].map((a) => [a.name, a.value] as const);
+    unmount();
+    for (const a of [...root.attributes]) root.removeAttribute(a.name);
+    for (const [name, value] of served) root.setAttribute(name, value);
+    expect([root.getAttribute("lang"), root.getAttribute("dir")]).toEqual(["ar", "rtl"]);
+    // The browser loads that HTML, the app hydrates the same page, then navigates.
+    const { rerender } = render(<Page key="ar" lang="ar" />);
+    rerender(<Page key="none" lang="none" />);
+    expect([root.getAttribute("lang"), root.hasAttribute("dir")]).toEqual(["en", false]);
+  });
+
+  it("a page's alternateLocales replace the provider's list", () => {
+    const tree = (alternateLocales: string[]) => (
+      <SeoProvider defaults={{ locale: "en_US", alternateLocales: ["de_DE", "fr_FR"] }}>
+        <Seo title="Page" alternateLocales={alternateLocales} />
+      </SeoProvider>
+    );
+    const { rerender } = render(tree(["de_DE"]));
+    expect(altLocales()).toEqual(["de_DE"]);
+    rerender(tree([]));
+    expect(altLocales()).toEqual([]);
+  });
+
+  it("unmounting everything restores the document's own lang and dir", () => {
+    const { unmount } = render(<Page lang="ar" />);
+    expect(root.getAttribute("dir")).toBe("rtl");
+    unmount();
+    expect([root.getAttribute("lang"), root.hasAttribute("dir")]).toEqual(["en", false]);
+    expect(hreflangs()).toEqual([]);
+  });
+});
+
 describe("default canonical", () => {
   const setPath = (path: string) => (window as unknown as { happyDOM: { setURL(u: string): void } }).happyDOM.setURL(`https://example.com${path}`);
   const canonical = () => document.head.querySelector('link[rel="canonical"]')?.getAttribute("href");
@@ -452,6 +580,17 @@ describe("Seo length warnings", () => {
     vi.stubEnv("NODE_ENV", "development");
     render(<Seo title="A fine title" description={"d".repeat(120)} />);
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("counts East Asian wide characters as 2", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    // 40 characters of Japanese fill a snippet; 40 of English do not.
+    render(<Seo title="宿" description={"静かな湖畔の宿で季節ごとに変わる景色と地元の料理をゆっくり楽しめます。富士山の麓"} />);
+    expect(warn).not.toHaveBeenCalled();
+    render(<Seo title={"山".repeat(31)} description={"d".repeat(40)} />);
+    const calls = warn.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(calls[0]).toContain("<Seo> title is 62 wide (over 60; 31 characters; Chinese, Japanese and Korean count as 2)");
+    expect(calls[1]).toContain("<Seo> description is 40 characters (aim for 50-160)");
   });
 
   it("does not warn in production", () => {

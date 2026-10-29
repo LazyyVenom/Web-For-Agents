@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { agentLinkProps } from "../../../src/index";
 import { agentLinkProps as fromLinkEntry } from "../../../src/entries/link";
-import { listAgentActions } from "../../../src/runtime/agent/registry";
+import { listRegistered } from "../../../src/runtime/agent/registry";
 
 describe("agentLinkProps", () => {
   it("returns the data-agent-* hints and registers nothing", () => {
@@ -15,7 +15,11 @@ describe("agentLinkProps", () => {
     expect(agentLinkProps({ name: "unsub", description: "Unsubscribe", destructive: true })).toMatchObject({
       "data-agent-destructive": "true",
     });
-    expect(listAgentActions()).toEqual([]);
+    expect(listRegistered()).toEqual([]);
+  });
+
+  it("never writes the read-only hint on a link (links are readOnly unless destructive)", () => {
+    expect(agentLinkProps({ name: "x", description: "X" })).not.toHaveProperty("data-agent-readonly");
   });
 
   it("throws on an invalid name", () => {

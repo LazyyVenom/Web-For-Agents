@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Window } from "happy-dom";
 import { AGENT_GLOBAL } from "../../src/shared/conventions";
+import { markupDefinitions } from "../../src/shared/markupActions";
 import { inPageExpression } from "../../src/vite/prerender/extensions";
 import {
   AGENT_PAGE_IN_PAGE_ARG,
@@ -8,9 +9,10 @@ import {
   agentMapExtension,
   agentMapLlmsSection,
   collectAgentPageInPage,
+  hoistSiteActions,
 } from "../../src/vite/agentMap";
 import type { ExtensionContext } from "../../src/vite/prerender/extensions";
-import type { AgentActionDescriptor } from "../../src/shared/agent";
+import type { AgentActionDescriptor, AgentMapPage } from "../../src/shared/agent";
 
 const desc: AgentActionDescriptor = {
   name: "contact",
@@ -39,11 +41,11 @@ describe("collectAgentPageInPage", () => {
     const data = run((w) => {
       (w as any)[AGENT_GLOBAL] = { version: 1, actions: () => [desc] };
     });
-    expect(data).toEqual({ actions: [desc], links: [] });
+    expect(data).toEqual({ actions: [desc], links: [], markup: [] });
   });
 
   it("defaults to no actions", () => {
-    expect(run(() => {})).toEqual({ actions: [], links: [] });
+    expect(run(() => {})).toEqual({ actions: [], links: [], markup: [] });
   });
 
   it("collects raw link action markup without resolving or following it", () => {
@@ -64,6 +66,22 @@ describe("collectAgentPageInPage", () => {
       { name: "kind-link", description: null, destructive: false, href: "/k" },
     ]);
   });
+
+  it("collects every action element's hint attributes exactly as generate's markupDefinitions does", () => {
+    const html = `
+      <button data-agent-action=" buy " data-agent-description="Buy A" data-agent-kind="handler" data-agent-readonly="true">x</button>
+      <form data-agent-action="find" data-agent-destructive="true"></form>
+      <a href="/k" data-agent-action="docs" data-agent-kind="link">x</a>
+      <a data-agent-action="no-href">x</a>
+      <div data-agent-action="  "></div>
+      <form toolname="declared"></form>`;
+    const data = run((w) => void (w.document.body.innerHTML = html));
+    const w = new Window();
+    w.document.body.innerHTML = html;
+    expect(data.markup).toEqual(markupDefinitions(w.document as unknown as Document));
+    expect(data.markup.map((d: any) => d.name)).toEqual(["buy", "find", "docs", "no-href"]);
+    w.happyDOM.close();
+  });
 });
 
 describe("buildAgentMap", () => {
@@ -81,7 +99,7 @@ describe("buildAgentMap", () => {
   const map = JSON.parse(out);
 
   it("has the exact envelope", () => {
-    expect(map.version).toBe(1);
+    expect(map.version).toBe(2);
     expect(map.generator).toBe("@anubhav-choubey/web-for-agents");
     expect(map.site).toEqual({ url: "https://a.com", name: "Acme" });
     expect(map.llms).toBe("https://a.com/llms.txt");
@@ -108,6 +126,184 @@ describe("buildAgentMap", () => {
     expect(m).not.toHaveProperty("llms");
     expect(m.site).toEqual({ url: "https://a.com" });
     expect(m.pages[0]).toEqual({ path: "/x", url: "https://a.com/x", actions: [] });
+  });
+});
+
+describe("hoistSiteActions", () => {
+  const link = (name: string, href: string): AgentActionDescriptor => ({
+    name,
+    description: name,
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    destructive: false,
+    readOnly: true,
+    kind: "link",
+    href,
+    method: "GET",
+  });
+  const terms = link("terms", "https://a.com/terms");
+  const privacy = link("privacy", "https://a.com/privacy");
+  const pg = (path: string, actions: AgentActionDescriptor[]): AgentMapPage => ({ path, url: "https://a.com" + path, actions });
+
+  it("moves actions found on every page to the site, and keeps each page's own", () => {
+    const own = { ...desc, name: "buy" };
+    const r = hoistSiteActions([pg("/", [privacy, terms]), pg("/shop", [own, privacy, terms]), pg("/docs", [terms, privacy])]);
+    expect(r.actions).toEqual([privacy, terms]);
+    expect(r.pages.map((p) => [p.path, p.actions.map((a) => a.name)])).toEqual([
+      ["/", []],
+      ["/shop", ["buy"]],
+      ["/docs", []],
+    ]);
+  });
+
+  it("hoists nothing with fewer than 2 pages", () => {
+    const one = [pg("/", [terms])];
+    expect(hoistSiteActions(one)).toEqual({ actions: [], pages: one });
+    expect(hoistSiteActions([])).toEqual({ actions: [], pages: [] });
+  });
+
+  it("leaves an action that is missing from any page where it is", () => {
+    const pages = [pg("/", [privacy, terms]), pg("/a", [terms]), pg("/b", [privacy, terms])];
+    const r = hoistSiteActions(pages);
+    expect(r.actions).toEqual([terms]);
+    expect(r.pages.map((p) => p.actions.map((a) => a.name))).toEqual([["privacy"], [], ["privacy"]]);
+  });
+
+  it("does not hoist a name whose definition differs on one page", () => {
+    const pages = [pg("/", [terms]), pg("/a", [terms]), pg("/b", [link("terms", "https://a.com/tos")])];
+    expect(hoistSiteActions(pages)).toEqual({ actions: [], pages });
+    // Same name and href, another kind or description: still different.
+    const kind = [pg("/", [terms]), pg("/a", [{ ...terms, kind: "click" }])];
+    expect(hoistSiteActions(kind).actions).toEqual([]);
+    const text = [pg("/", [terms]), pg("/a", [{ ...terms, description: "Terms of sale" }])];
+    expect(hoistSiteActions(text).actions).toEqual([]);
+  });
+
+  it("treats the same definition with keys in another order as the same", () => {
+    const reordered = Object.fromEntries(Object.entries(terms).reverse()) as unknown as AgentActionDescriptor;
+    reordered.inputSchema = { additionalProperties: false, properties: {}, type: "object" };
+    expect(hoistSiteActions([pg("/", [terms]), pg("/a", [reordered])]).actions).toEqual([terms]);
+  });
+});
+
+describe("buildAgentMap site actions", () => {
+  const footer = { ...desc, name: "newsletter" };
+  const pages = [
+    { route: "/", actions: [footer] },
+    { route: "/a", actions: [footer, { ...desc, name: "buy" }] },
+  ];
+
+  it("lists actions on every page under site.actions, on by default", () => {
+    const m = JSON.parse(buildAgentMap({ siteUrl: "https://a.com", siteName: "Acme", pages }));
+    expect(m.site).toEqual({ url: "https://a.com", name: "Acme", actions: [footer] });
+    expect(m.pages.map((p: any) => p.actions.map((a: any) => a.name))).toEqual([[], ["buy"]]);
+  });
+
+  it("omits site.actions when no action is on every page", () => {
+    const m = JSON.parse(buildAgentMap({ siteUrl: "https://a.com", pages: [pages[1]!, { route: "/b", actions: [] }] }));
+    expect(m.site).toEqual({ url: "https://a.com" });
+  });
+
+  it("keeps the per-page layout with siteActions: false", () => {
+    const m = JSON.parse(buildAgentMap({ siteUrl: "https://a.com", pages, siteActions: false }));
+    expect(m.version).toBe(2);
+    expect(m.site).toEqual({ url: "https://a.com" });
+    expect(m.pages.map((p: any) => p.actions.map((a: any) => a.name))).toEqual([["newsletter"], ["buy", "newsletter"]]);
+  });
+});
+
+describe("site actions across kinds of sites", () => {
+  const link = (name: string, href: string): AgentActionDescriptor => ({
+    name,
+    description: name,
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    destructive: false,
+    readOnly: true,
+    kind: "link",
+    href,
+    method: "GET",
+  });
+  const build = (pages: Array<{ route: string; actions: AgentActionDescriptor[] }>, siteActions?: boolean) =>
+    JSON.parse(buildAgentMap({ siteUrl: "https://a.com", pages, ...(siteActions === undefined ? {} : { siteActions }) }));
+  const names = (m: any) => m.pages.map((p: any) => p.actions.map((a: any) => a.name));
+
+  it("1-page site: no site actions", () => {
+    const m = build([{ route: "/", actions: [link("contact", "https://a.com/contact")] }]);
+    expect(m.site).not.toHaveProperty("actions");
+    expect(names(m)).toEqual([["contact"]]);
+  });
+
+  it("store: a header cart missing on checkout is not hoisted; the footer is", () => {
+    const cart = { ...desc, name: "open-cart", kind: "click" as const };
+    const help = link("help", "https://a.com/help");
+    const products = Array.from({ length: 500 }, (_, i) => ({
+      route: `/products/p${i}`,
+      actions: [cart, help, { ...desc, name: "add-to-cart", description: `Add product ${i}` }],
+    }));
+    const m = build([...products, { route: "/checkout", actions: [help, { ...desc, name: "pay" }] }]);
+    expect(m.site.actions.map((a: any) => a.name)).toEqual(["help"]);
+    expect(m.pages.find((p: any) => p.path === "/checkout").actions.map((a: any) => a.name)).toEqual(["pay"]);
+    expect(m.pages.find((p: any) => p.path === "/products/p7").actions.map((a: any) => a.name)).toEqual(["add-to-cart", "open-cart"]);
+  });
+
+  it("docs: section navs stay on their pages; only the shared search is hoisted", () => {
+    const search = { ...desc, name: "search" };
+    const m = build([
+      { route: "/guide/a", actions: [search, link("guide-next", "https://a.com/guide/b")] },
+      { route: "/guide/b", actions: [search, link("guide-next", "https://a.com/guide/c")] },
+      { route: "/api/x", actions: [search, link("api-index", "https://a.com/api")] },
+    ]);
+    expect(m.site.actions.map((a: any) => a.name)).toEqual(["search"]);
+    expect(names(m)).toEqual([["api-index"], ["guide-next"], ["guide-next"]]);
+  });
+
+  it("locales: the same name with another href per locale is not hoisted", () => {
+    const m = build([
+      { route: "/en", actions: [link("contact", "https://a.com/en/contact")] },
+      { route: "/en/about", actions: [link("contact", "https://a.com/en/contact")] },
+      { route: "/de", actions: [link("contact", "https://a.com/de/kontakt")] },
+    ]);
+    expect(m.site).not.toHaveProperty("actions");
+    expect(names(m)).toEqual([["contact"], ["contact"], ["contact"]]);
+  });
+
+  it("a page with zero actions means nothing is site-wide", () => {
+    const footer = link("terms", "https://a.com/terms");
+    const m = build([{ route: "/", actions: [footer] }, { route: "/a", actions: [footer] }, { route: "/empty", actions: [] }]);
+    expect(m.site).not.toHaveProperty("actions");
+    expect(names(m)).toEqual([["terms"], ["terms"], []]);
+  });
+
+  it("is deterministic: input order does not change the output", () => {
+    const x = link("x", "https://a.com/x");
+    const y = link("y", "https://a.com/y");
+    const pages = [
+      { route: "/b", actions: [y, x] },
+      { route: "/", actions: [x, y, { ...desc, name: "own" }] },
+      { route: "/a", actions: [x, y] },
+    ];
+    const once = buildAgentMap({ siteUrl: "https://a.com", pages });
+    expect(buildAgentMap({ siteUrl: "https://a.com", pages: [...pages].reverse() })).toBe(once);
+    expect(JSON.parse(once).site.actions.map((a: any) => a.name)).toEqual(["x", "y"]);
+  });
+
+  it("siteActions: false writes each page exactly as before", () => {
+    const footer = link("terms", "https://a.com/terms");
+    const out = buildAgentMap({
+      siteUrl: "https://a.com",
+      siteActions: false,
+      pages: [{ route: "/a", actions: [footer] }, { route: "/", title: "Home", actions: [{ ...desc, name: "own" }, footer] }],
+    });
+    const expected = {
+      version: 2,
+      generator: "@anubhav-choubey/web-for-agents",
+      site: { url: "https://a.com" },
+      webmcp: { api: "document.modelContext", spec: "https://webmachinelearning.github.io/webmcp/" },
+      pages: [
+        { path: "/", url: "https://a.com/", title: "Home", actions: [{ ...desc, name: "own" }, footer] },
+        { path: "/a", url: "https://a.com/a", actions: [footer] },
+      ],
+    };
+    expect(out).toBe(JSON.stringify(expected, null, 2) + "\n");
   });
 });
 
@@ -156,6 +352,61 @@ describe("agentMapExtension", () => {
         ],
       }),
     );
+  });
+});
+
+describe("agentMapExtension summary and siteActions", () => {
+  const footer = { ...desc, name: "newsletter" };
+  const finalize = async (siteActions?: boolean) => {
+    const ext = agentMapExtension({ siteUrl: "https://a.com", fileName: "agents.json", ...(siteActions === undefined ? {} : { siteActions }) });
+    expect(ext.summary!()).toBeUndefined();
+    await ext.onRoute!("/", { actions: [footer] });
+    await ext.onRoute!("/a", { actions: [footer, { ...desc, name: "buy" }] });
+    const emitted: string[] = [];
+    await ext.finalize!({
+      site: { url: "https://a.com", title: "Site" },
+      pages: [
+        { route: "/", title: "Home", url: "https://a.com/" },
+        { route: "/a", title: "A", url: "https://a.com/a" },
+      ],
+      emitFile: (_f, s) => void emitted.push(s),
+      warn: () => {},
+    });
+    return { ext, map: JSON.parse(emitted[0]!) };
+  };
+
+  it("hoists by default and sums up the actions", async () => {
+    const { ext, map } = await finalize();
+    expect(map.site.actions.map((a: any) => a.name)).toEqual(["newsletter"]);
+    expect(ext.summary!()).toBe("2 actions (1 page-specific, 1 site-wide)");
+  });
+
+  it("keeps per-page actions with siteActions: false and counts them per page", async () => {
+    const { ext, map } = await finalize(false);
+    expect(map.site).not.toHaveProperty("actions");
+    expect(ext.summary!()).toBe("3 actions");
+  });
+});
+
+describe("agentMapExtension duplicate names", () => {
+  it("warns once per listed page and name defined differently; identical copies stay silent", async () => {
+    const def = (name: string, description: string) => ({ name, kind: "handler", description, destructive: false, readOnly: false, href: null });
+    const ext = agentMapExtension({ siteUrl: "https://a.com", fileName: "agents.json" });
+    const grid = [def("add_to_cart", "Add A"), def("add_to_cart", "Add B"), def("add_to_cart", "Add C"), def("wish", "W"), def("wish", "W")];
+    await ext.onRoute!("/products", { actions: [{ ...desc, name: "add_to_cart" }], markup: grid });
+    await ext.onRoute!("/deals", { actions: [], markup: [def("wish", "W"), def("wish", "W")] });
+    await ext.onRoute!("/hidden", { actions: [], markup: grid });
+    const warnings: string[] = [];
+    await ext.finalize!({
+      site: { url: "https://a.com", title: "Site" },
+      pages: [
+        { route: "/deals", title: "Deals", url: "https://a.com/deals" },
+        { route: "/products", title: "Products", url: "https://a.com/products" },
+      ],
+      emitFile: () => {},
+      warn: (m) => void warnings.push(m),
+    });
+    expect(warnings).toEqual(["/products: 3 different actions named add_to_cart; only the first is listed"]);
   });
 });
 

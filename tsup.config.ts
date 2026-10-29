@@ -1,6 +1,10 @@
 import { defineConfig } from "tsup";
 
-/** Typed public entries. `schema` and `link` are React-free (see test/boundaries.test.ts). */
+/**
+ * Typed public entries. `schema` and `link` are React-free, `form` is React without react-dom (see
+ * test/boundaries.test.ts). `form` also keeps the agent runtime core in its own chunk, apart from
+ * the engine that core imports lazily.
+ */
 const publicEntries = {
   index: "src/index.ts",
   vite: "src/vite/index.ts",
@@ -8,6 +12,7 @@ const publicEntries = {
   overlay: "src/overlay/index.ts",
   schema: "src/entries/schema.ts",
   link: "src/entries/link.ts",
+  form: "src/entries/form.ts",
 };
 
 export default defineConfig({

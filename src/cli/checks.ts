@@ -1,13 +1,13 @@
-import { AGENT_MAP_VERSION, type AgentMap } from "../shared/agent";
+import { AGENT_MAP_VERSION, actionCountText, agentMapStats, type AgentMap } from "../shared/agent";
 import { AI_BOTS } from "../shared/bots";
 import { AGENT_MAP_PATH, LLMS_TXT_PATH, MARKDOWN_MIME, ROBOTS_PATH, SITEMAP_PATH } from "../shared/conventions";
 import { errorMessage } from "../shared/errors";
 import { jsonLdNodes, jsonLdTypes } from "../shared/jsonLd";
-import { DESCRIPTION_MAX_CHARS, DESCRIPTION_MIN_CHARS, TITLE_MAX_CHARS } from "../shared/metaLength";
+import { DESCRIPTION_MAX_CHARS, DESCRIPTION_MIN_CHARS, lengthText, metaLength, TITLE_MAX_CHARS } from "../shared/metaLength";
 import { checkSchemaNodes, SCHEMA_RULES, type SchemaIssue, type SchemaRule } from "../shared/schemaRules";
-import { stripBom } from "../shared/text";
+import { plural, stripBom } from "../shared/text";
 import { hasScheme, trimTrailingSlash, tryResolveUrl } from "../shared/url";
-import { isOk, looksLikeHtml, MAX_BODY_BYTES, type FetchResult } from "./fetch";
+import { isOk, looksLikeHtml, MAX_BODY_LABEL, type FetchResult } from "./fetch";
 import { getLinks, getMeta, type HtmlFacts } from "./html";
 import { isAllowed, parseRobots, type ParsedRobots } from "./robots";
 import { sitemapLocs } from "./sitemap";
@@ -74,7 +74,6 @@ const CONTENT_MIN_CHARS = 200;
 const CONTENT_WARN_CHARS = 50;
 /** Missing structured data fields listed in the JSON-LD message; the rest are counted. */
 const SCHEMA_ISSUES_SHOWN = 3;
-const MAX_BODY_LABEL = `${MAX_BODY_BYTES / (1024 * 1024)} MiB`;
 
 type Outcome = Omit<CheckResult, "id" | "title" | "weight" | "points">;
 
@@ -165,8 +164,8 @@ function checkTitle({ html }: AuditInputs): Outcome {
   const fix = `Set a page title with <Seo title="..." /> (at most ${TITLE_MAX_CHARS} characters).`;
   const t = html.title;
   if (!t) return fail("No <title> found", fix);
-  if (t.length > TITLE_MAX_CHARS) return warn(`Title is ${t.length} characters (over ${TITLE_MAX_CHARS})`, fix);
-  return pass(`Title is ${t.length} characters`);
+  if (metaLength(t) > TITLE_MAX_CHARS) return warn(`Title is ${lengthText(t, `over ${TITLE_MAX_CHARS}`)}`, fix);
+  return pass(`Title is ${lengthText(t)}`);
 }
 
 function checkDescription({ html }: AuditInputs): Outcome {
@@ -174,10 +173,11 @@ function checkDescription({ html }: AuditInputs): Outcome {
   const fix = `Add <Seo description="..." /> with ${range} characters.`;
   const d = getMeta(html, { name: "description" })?.trim();
   if (!d) return fail("No meta description found", fix);
-  if (d.length < DESCRIPTION_MIN_CHARS || d.length > DESCRIPTION_MAX_CHARS) {
-    return warn(`Meta description is ${d.length} characters (aim for ${range})`, fix);
+  const n = metaLength(d);
+  if (n < DESCRIPTION_MIN_CHARS || n > DESCRIPTION_MAX_CHARS) {
+    return warn(`Meta description is ${lengthText(d, `aim for ${range}`)}`, fix);
   }
-  return pass(`Meta description is ${d.length} characters`);
+  return pass(`Meta description is ${lengthText(d)}`);
 }
 
 function checkOpenGraph({ html }: AuditInputs): Outcome {
@@ -225,7 +225,7 @@ function checkJsonLd({ html }: AuditInputs): Outcome {
     return warn("JSON-LD parses but has no @type", "Add an @type (for example Organization) to your JSON-LD.");
   }
   const { issues, total, scored } = checkSchemaNodes(parsed.flatMap(jsonLdNodes), SCHEMA_ISSUES_SHOWN);
-  const base = `${parsed.length} JSON-LD block${parsed.length === 1 ? " parses" : "s parse"} with an @type`;
+  const base = `${plural(parsed.length, "JSON-LD block")} ${parsed.length === 1 ? "parses" : "parse"} with an @type`;
   if (total === 0) return pass(base);
   // Issues come scored first. Gaps in retired rich results (FAQPage) never lower the score: they
   // follow as a note, after the gaps that do.
@@ -357,6 +357,9 @@ function checkMarkdown({ page, markdown, siteOrigin }: AuditInputs): Outcome {
   return pass(`Markdown copy found at ${at}`);
 }
 
+/** Version 1 is version 2 without `site.actions`, so both are current. */
+const KNOWN_AGENT_MAP_VERSIONS: readonly number[] = [1, AGENT_MAP_VERSION];
+
 function checkAgentMap({ agentMap, tried, agentMapPath }: AuditInputs): Outcome {
   const name = agentMapPath ?? AGENT_MAP_PATH;
   const at = agentMap.url;
@@ -372,13 +375,14 @@ function checkAgentMap({ agentMap, tried, agentMapPath }: AuditInputs): Outcome 
   if (json === null || typeof json !== "object" || Array.isArray(json)) return fail(`${at} is not a JSON object`, fix);
   const map = json as Partial<AgentMap>;
   if (!Array.isArray(map.pages)) return warn(`${at} has no pages array`, fix);
-  if (map.version !== AGENT_MAP_VERSION) {
+  if (!KNOWN_AGENT_MAP_VERSIONS.includes(map.version as number)) {
     return warn(
-      `${at} has version ${JSON.stringify(map.version) ?? "(none)"}; expected ${AGENT_MAP_VERSION}`,
+      `${at} has version ${JSON.stringify(map.version) ?? "(none)"}; expected ${KNOWN_AGENT_MAP_VERSIONS.join(" or ")}`,
       `Regenerate ${name} with the current webForAgents().`,
     );
   }
-  return pass(`Agent map found at ${at}`);
+  const stats = agentMapStats(map);
+  return pass(`Agent map found at ${at} (${plural(stats.pages, "page")}, ${actionCountText(stats)})`);
 }
 
 const CHECKS: Record<CheckId, (i: AuditInputs) => Outcome> = {

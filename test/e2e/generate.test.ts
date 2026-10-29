@@ -1,4 +1,4 @@
-// The portfolio scenario: a site with its own prerender script writes flat about.html files after
+// A site with its own prerender script writes flat about.html files after
 // `vite build`; `web-for-agents generate` adds the agent files without replacing that page builder.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -118,7 +118,7 @@ describe("generate e2e (bring your own prerender)", () => {
     const first = await cli(argv);
     expect(first.err).toContain("robots.txt already exists with different content");
     expect(first.code).toBe(0);
-    expect(first.out).toContain("Layout: flat");
+    expect(first.out).toMatch(/^\[web-for-agents\] wrote \d+ files \(3 pages, 0 actions\)\n$/);
     // Read before generate's own edit (the markdown link) moves the file's mtime.
     expect(readFileSync(path.join(dist, "sitemap.xml"), "utf8")).toContain(`<loc>${origin}/about</loc><lastmod>2025-06-15</lastmod>`);
     const second = await cli([...argv, "--json"]);
@@ -162,6 +162,73 @@ describe("generate e2e (bring your own prerender)", () => {
       expect(report.score, route).toBe(100);
     }
   }, 60_000);
+
+  it("prints one summary line by default and the full file list with --verbose", async () => {
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "wfa-gen-quiet-"));
+    tmpDirs.push(tmp);
+    const footer = '<footer><a href="/terms" data-agent-action="terms">Terms</a></footer>';
+    for (const f of ["index.html", "a.html", "b.html"]) {
+      // b.html has its own markdown link, which generate keeps.
+      const own = f === "b.html" ? '<link rel="alternate" type="text/markdown" href="/mine.md">' : "";
+      writeFileSync(path.join(tmp, f), `<!doctype html><html><head><title>${f}</title>${own}</head><body><main><p>x</p></main>${footer}</body></html>`);
+    }
+    const argv = ["generate", tmp, "--site-url", "https://a.com", "--ai-training", "block", "--ai-search", "allow"];
+    const quiet = await cli(argv);
+    expect(quiet.code).toBe(0);
+    expect(quiet.out).toMatch(/^\[web-for-agents\] wrote \d+ files \(3 pages, 1 action \(0 page-specific, 1 site-wide\)\)\n$/);
+    // Blocking only training is the recommended policy: no notice about it.
+    expect(quiet.err).not.toContain("robots.ai blocks");
+
+    const loud = await cli([...argv, "--overwrite", "--verbose"]);
+    expect(loud.code).toBe(0);
+    const lines = loud.out.trimEnd().split("\n");
+    expect(lines[0]).toMatch(/^\[web-for-agents\] wrote \d+ files \(3 pages, 1 action \(0 page-specific, 1 site-wide\)\)$/);
+    expect(lines).toContain("Layout: flat");
+    expect(lines).toContain("Pages: /, /a, /b");
+    expect(lines.some((l) => /^Wrote \d+ files: .*agents\.json/.test(l))).toBe(true);
+    expect(lines).toContain("Kept the page's own markdown link: /b");
+  });
+
+  it("--no-site-actions and agentMap.siteActions in --config keep the per-page layout", async () => {
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "wfa-gen-site-"));
+    tmpDirs.push(tmp);
+    const footer = '<footer><a href="/terms" data-agent-action="terms">Terms</a></footer>';
+    for (const f of ["index.html", "a.html"]) {
+      writeFileSync(path.join(tmp, f), `<!doctype html><html><head><title>${f}</title></head><body><main><p>x</p></main>${footer}</body></html>`);
+    }
+    const map = () => JSON.parse(readFileSync(path.join(tmp, "agents.json"), "utf8"));
+    const argv = ["generate", tmp, "--site-url", "https://a.com", "--ai-training", "allow", "--ai-search", "allow", "--overwrite"];
+    expect((await cli(argv)).code).toBe(0);
+    expect(map().site.actions.map((a: any) => a.name)).toEqual(["terms"]);
+    const flag = await cli([...argv, "--no-site-actions"]);
+    expect(flag.code).toBe(0);
+    expect(flag.out).toContain("(2 pages, 2 actions)");
+    expect(map().site).not.toHaveProperty("actions");
+    expect(map().pages.map((p: any) => p.actions.map((a: any) => a.name))).toEqual([["terms"], ["terms"]]);
+
+    expect((await cli(argv)).code).toBe(0);
+    const config = path.join(tmp, "c.json");
+    writeFileSync(config, JSON.stringify({ agentMap: { fileName: "agents.json", siteActions: false } }));
+    expect((await cli([...argv, "--config", config])).code).toBe(0);
+    expect(map().site).not.toHaveProperty("actions");
+  });
+
+  it("--no-site-actions keeps a config file's other agentMap fields, and agentMap: false", async () => {
+    const { generateOptions } = await import("../../src/cli/generate");
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "wfa-gen-opts-"));
+    tmpDirs.push(tmp);
+    const args = { outDir: "d", siteUrl: "https://a.com", aiTraining: "allow", aiSearch: "allow", linkMarkdown: true, overwrite: false, verbose: false } as const;
+    const withConfig = async (agentMap: unknown) => {
+      const config = path.join(tmp, `c${Math.random()}.json`);
+      writeFileSync(config, JSON.stringify({ agentMap }));
+      return (await generateOptions({ ...args, siteActions: false, config })).agentMap;
+    };
+    expect((await generateOptions({ ...args, siteActions: false })).agentMap).toEqual({ siteActions: false });
+    expect((await generateOptions({ ...args, siteActions: true })).agentMap).toBeUndefined();
+    expect(await withConfig({ fileName: "ai.json" })).toEqual({ fileName: "ai.json", siteActions: false });
+    expect(await withConfig(true)).toEqual({ siteActions: false });
+    expect(await withConfig(false)).toBe(false);
+  });
 
   it("warns about unknown keys in a --config file", async () => {
     const tmp = mkdtempSync(path.join(os.tmpdir(), "wfa-gen-cfg-"));

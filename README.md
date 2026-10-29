@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/LazyyVenom/Web-For-Agents/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/LazyyVenom/Web-For-Agents/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/@anubhav-choubey/web-for-agents)](https://www.npmjs.com/package/@anubhav-choubey/web-for-agents) [![license](https://img.shields.io/npm/l/@anubhav-choubey/web-for-agents)](https://github.com/LazyyVenom/Web-For-Agents/blob/master/LICENSE)
 
-SEO and LLM-readiness helpers for React + Vite. At runtime it manages `<head>` metadata (title, description, canonical, Open Graph, Twitter) and emits typed JSON-LD. At build time a Vite plugin prerenders every route to static HTML and writes a markdown version of each page, `llms.txt`, `llms-full.txt`, an `agents.json` map of the actions agents can take, a `sitemap.xml`, and a `robots.txt` with an explicit AI-crawler policy, so you decide which bots may train on your content and which may use it for search.
+SEO and LLM-readiness helpers for React + Vite. At runtime it manages `<head>` metadata (title, description, canonical, Open Graph, Twitter, [`<html lang>` and hreflang `alternates`](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/seo.md#languages)) and emits typed JSON-LD. At build time a Vite plugin prerenders every route to static HTML and writes a markdown version of each page, `llms.txt`, `llms-full.txt`, an `agents.json` map of the actions agents can take, a `sitemap.xml`, and a `robots.txt` with an explicit AI-crawler policy, so you decide which bots may train on your content and which may use it for search.
 
 ## Install
 
@@ -69,7 +69,7 @@ After `vite build`, the plugin crawls from `/` plus `routes` and writes:
 | `dist/<route>.md` | Markdown version of the page (`dist/index.md` for `/`). |
 | `dist/200.html` | The untouched SPA shell, for host fallbacks. |
 | `llms.txt`, `llms-full.txt` | Page index linking to the `.md` files, and all pages' markdown in one file. |
-| `agents.json` | Every page and the agent actions on it. |
+| `agents.json` | Every page and the agent actions on it; actions on every page (a footer link, a site search) are listed once in `site.actions`. |
 | `sitemap.xml`, `robots.txt` | Sitemap of discovered routes, and your AI-crawler policy. |
 
 Already have your own prerender script? Skip the plugin's prerender and run `npx web-for-agents generate dist --site-url https://example.com --ai-training block --ai-search allow` after it. It adds the same `.md`, `llms.txt`, `robots.txt`, `sitemap.xml` and `agents.json` files to your HTML. See [Using your own prerender](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/prerendering.md#using-your-own-prerender).
@@ -113,6 +113,8 @@ import { AgentForm, agentParam } from "@anubhav-choubey/web-for-agents";
 
 Plain links work too, without JavaScript: `<a href="/pricing.pdf" data-agent-action="download_pricing_pdf" data-agent-description="Download the pricing sheet (PDF)">` (or `agentLinkProps`) is listed in `agents.json` as a `link` action. `agentLinkProps` is also available from `@anubhav-choubey/web-for-agents/link` (under 1 KB gzip, no React). See [Link actions](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/agent-actions.md#link-actions-no-javascript).
 
+The agent engine loads lazily, only in browsers with WebMCP or during the prerender, and `@anubhav-choubey/web-for-agents/form` exports just the action API, without `Seo` or react-dom ([Lazy loading](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/agent-actions.md#lazy-loading)).
+
 Agents can never reach hidden, password, file, disabled or `readonly` fields, or fields hidden by markup. Full API, confirm dialog and field rules: [Agent actions](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/agent-actions.md).
 
 ## CLI
@@ -123,7 +125,7 @@ Audit any URL for AI-agent readiness, with nothing installed in the target site:
 npx @anubhav-choubey/web-for-agents audit https://example.com --min-score 80
 ```
 
-It scores 0 to 100 across content without JavaScript, JSON-LD, robots.txt, title, meta description, sitemap, Open Graph, llms.txt, the markdown copy, canonical URL and the agent map, and prints a `Fix:` line for each miss. The JSON-LD check names missing required rich-result fields (Product, BreadcrumbList, Event, SoftwareApplication and more). To audit a preview or local build of a site whose URLs point at production, add `--site-url https://example.com` ([Auditing a local preview](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/cli.md#auditing-a-local-preview)). Flags, weights and JSON output: [CLI](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/cli.md).
+It scores 0 to 100 across content without JavaScript, JSON-LD, robots.txt, title, meta description, sitemap, Open Graph, llms.txt, the markdown copy, canonical URL and the agent map, and prints a `Fix:` line for each miss. The JSON-LD check names missing required rich-result fields (Product, BreadcrumbList, Event, SoftwareApplication and more). Add `--sitemap` to audit every page in the site's sitemap and print one table, bounded by `--max-pages`, `--concurrency` and `--max-time` ([Auditing a whole site](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/cli.md#auditing-a-whole-site)). To audit a preview or local build of a site whose URLs point at production, add `--site-url https://example.com` ([Auditing a local preview](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/cli.md#auditing-a-local-preview)). Flags, weights and JSON output: [CLI](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/cli.md).
 
 ## Dev overlay
 

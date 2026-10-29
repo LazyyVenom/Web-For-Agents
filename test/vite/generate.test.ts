@@ -110,6 +110,59 @@ describe("generateAgentFiles", () => {
     expect(r.kept).toEqual([]);
   });
 
+  it("logs one summary line: files written, pages and actions", async () => {
+    const footer = '<footer><a href="/terms" data-agent-action="terms">Terms</a><a href="/help" data-agent-action="help">Help</a></footer>';
+    const t = setup({
+      "index.html": page("Home", "<h1>Home</h1>" + footer),
+      "about.html": page("About", '<h1>About</h1><a href="/cv.pdf" data-agent-action="cv">CV</a>' + footer),
+      "secret.html": page("Secret", "<h1>Secret</h1>", '<meta name="robots" content="noindex">\n'),
+    });
+    const r = await t.run();
+    const info = t.logger.info.mock.calls.map((c) => String(c[0]));
+    expect(info).toEqual([`[web-for-agents] wrote ${r.written.length} files (3 pages, 1 noindex, 3 actions (1 page-specific, 2 site-wide))`]);
+
+    const u = setup({ "index.html": page("Home", "<h1>Home</h1>" + footer), "about.html": page("About", "<h1>About</h1>" + footer) });
+    await u.run({ agentMap: { siteActions: false } });
+    expect(u.logger.info.mock.calls.map((c) => String(c[0]))[0]).toMatch(/^\[web-for-agents\] wrote \d+ files \(2 pages, 4 actions\)$/);
+    const map = JSON.parse(u.read("agents.json"));
+    expect(map.site).not.toHaveProperty("actions");
+    expect(map.pages.map((p: any) => p.actions.length)).toEqual([2, 2]);
+
+    const v = setup({ "index.html": page("Home", "<h1>Home</h1>") });
+    await v.run({ agentMap: false });
+    expect(v.logger.info.mock.calls.map((c) => String(c[0]))[0]).toMatch(/^\[web-for-agents\] wrote \d+ files \(1 page\)$/);
+  });
+
+  it("reports no action counts when an existing agents.json was kept", async () => {
+    const footer = '<footer><a href="/terms" data-agent-action="terms">Terms</a></footer>';
+    const t = setup({ "index.html": page("Home", "<h1>Home</h1>" + footer), "agents.json": '{"mine":true}\n' });
+    const r = await t.run();
+    expect(r.kept).toEqual(["agents.json"]);
+    expect(t.read("agents.json")).toBe('{"mine":true}\n');
+    expect(t.logger.info.mock.calls.map((c) => String(c[0]))).toEqual([`[web-for-agents] wrote ${r.written.length} files (1 page)`]);
+  });
+
+  it("warns once per page and name when actions sharing a name differ; identical copies stay silent", async () => {
+    const card = (d: string) => `<button data-agent-action="add_to_cart" data-agent-kind="click" data-agent-description="${d}">Add</button>`;
+    const t = setup({
+      "index.html": page("Home", "<h1>Home</h1>" + card("Add to cart") + card("Add to cart")),
+      "products.html": page("Products", "<h1>Products</h1>" + card("Add A") + card("Add B") + card("Add A")),
+    });
+    const r = await t.run();
+    const dup = r.warnings.filter((w) => w.includes("different actions named"));
+    expect(dup).toEqual(["[web-for-agents] /products: 2 different actions named add_to_cart; only the first is listed"]);
+    const map = JSON.parse(t.read("agents.json"));
+    expect(map.pages.find((p: any) => p.path === "/products").actions.map((a: any) => a.description)).toEqual(["Add A"]);
+  });
+
+  it("lists data-agent-readonly actions as readOnly", async () => {
+    const t = setup({
+      "index.html": page("Home", '<form data-agent-action="search" data-agent-kind="form" data-agent-readonly="true"><input name="q"></form>'),
+    });
+    await t.run();
+    expect(JSON.parse(t.read("agents.json")).pages[0].actions[0]).toMatchObject({ name: "search", readOnly: true });
+  });
+
   it("is idempotent: a second run adds no second link and changes nothing", async () => {
     const t = setup();
     await t.run();
@@ -137,12 +190,12 @@ describe("generateAgentFiles", () => {
     await t.run({ linkMarkdown: false });
     expect(t.read("index.html")).toBe(SITE["index.html"]);
     await t.run();
-    await t.run();
+    const r = await t.run();
     expect(t.read("about.html")).toBe(own);
     expect(t.read("index.html")).toContain("https://me.dev/index.md");
-    expect(t.logger.info.mock.calls.map((c) => String(c[0]))).toContain(
-      "[web-for-agents] kept the page's own markdown link on /about",
-    );
+    // Reported in the result (the CLI prints it with --verbose), not in the default output.
+    expect(r.ownMarkdownLinks).toEqual(["/about"]);
+    expect(t.logger.info.mock.calls.map((c) => String(c[0])).filter((m) => m.includes("markdown link"))).toEqual([]);
   });
 
   it("updates its own marked link in place when the site URL changes, and repeat runs change nothing", async () => {
@@ -179,7 +232,7 @@ describe("generateAgentFiles", () => {
     const t = setup({ "index.html": SITE["index.html"]!, "about.html": page("A".repeat(61), "<p>x</p>") });
     const r = await t.run();
     expect(r.fileLayout).toBe("flat");
-    expect(r.warnings).toContain("[web-for-agents] Title longer than 60 characters on /about (61)");
+    expect(r.warnings).toContain("[web-for-agents] Title longer than 60 characters on /about: 61 characters");
   });
 
   it("keeps the bytes of a windows-1252 page and inserts the link as ASCII", async () => {
@@ -241,8 +294,9 @@ describe("generateAgentFiles", () => {
     expect(unknown).toEqual([
       '[web-for-agents] action "teleport" has an unknown data-agent-kind "teleport" (expected handler, form, click or link); using "click"',
     ]);
-    const map = JSON.parse(t.read("agents.json")) as { pages: Array<{ actions?: Array<{ name: string; kind: string }> }> };
-    expect(map.pages.flatMap((p) => p.actions ?? []).map((a) => [a.name, a.kind])).toContainEqual(["teleport", "click"]);
+    const map = JSON.parse(t.read("agents.json")) as { site: { actions?: Array<{ name: string; kind: string }> } };
+    // On both pages, so listed once in site.actions.
+    expect(map.site.actions?.map((a) => [a.name, a.kind])).toEqual([["teleport", "click"]]);
   });
 
   it("validates options", async () => {

@@ -47,11 +47,26 @@ const ARTICLE: SchemaRule = {
   recommended: ["author", "author.name", "author.url", "dateModified", "datePublished", "headline", "image"],
 };
 
+const AGGREGATE_OFFER: NestedRule = { prop: "offers", whenType: ["AggregateOffer"], required: [req("lowPrice"), req("priceCurrency")] };
+
+/** Google's review snippet: a rating with a count, and reviews with a named author and a rating value. */
+const RATINGS: readonly NestedRule[] = [
+  { prop: "aggregateRating", required: [req("ratingValue"), req("ratingCount", "reviewCount")] },
+  {
+    prop: "review",
+    required: [req("author"), req("reviewRating")],
+    nested: [
+      { prop: "author", required: [req("name")] },
+      { prop: "reviewRating", required: [req("ratingValue")] },
+    ],
+  },
+];
+
 const SOFTWARE_APPLICATION: SchemaRule = {
   docs: `${DOCS}software-app`,
   required: [req("name"), req("offers"), req("aggregateRating", "review")],
   recommended: ["applicationCategory", "operatingSystem"],
-  nested: [{ prop: "offers", whenType: ["Offer"], orUntyped: true, required: [req("price")] }],
+  nested: [{ prop: "offers", whenType: ["Offer"], orUntyped: true, required: [req("price")] }, AGGREGATE_OFFER, ...RATINGS],
 };
 
 export const SCHEMA_RULES: Readonly<Record<string, SchemaRule>> = {
@@ -111,7 +126,8 @@ export const SCHEMA_RULES: Readonly<Record<string, SchemaRule>> = {
     recommended: ["aggregateRating", "offers", "review", "offers.priceCurrency", "offers.availability"],
     nested: [
       { prop: "offers", whenType: ["Offer"], orUntyped: true, required: [req("price", "priceSpecification.price")] },
-      { prop: "offers", whenType: ["AggregateOffer"], required: [req("lowPrice"), req("priceCurrency")] },
+      AGGREGATE_OFFER,
+      ...RATINGS,
     ],
   },
   Recipe: {

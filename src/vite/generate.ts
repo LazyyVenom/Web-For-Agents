@@ -7,7 +7,8 @@ import { agentMapExtension, type AgentPageData } from "./agentMap";
 import { dropFileCollisions, fileOf, pageLengthWarnings, pageMarkdown, prefixed, SPA_FALLBACK_FILE, stageSiteFiles, type SitePage } from "./siteFiles";
 import { createFileStager, type FileStager, type StageSource } from "./fileStager";
 import { staticActions } from "./generateActions";
-import { markupLinks } from "../shared/markupActions";
+import { markupDefinitions, markupLinks } from "../shared/markupActions";
+import { plural } from "../shared/text";
 import {
   isExcluded,
   resolveOptions,
@@ -17,6 +18,7 @@ import {
   type WebForAgentsOptions,
 } from "./options";
 import { analyzeDocument } from "./prerender/analyze";
+import { extensionSummaries } from "./prerender/extensions";
 import { parseHtml } from "./prerender/dom";
 import { byRoute, isSafeRoute, publicMdUrl, publicUrl, routeMdFile, routeOfHtmlFile, shortRoute } from "./prerender/paths";
 import { decodeHtml, setMarkdownLink } from "./generateHtml";
@@ -44,7 +46,7 @@ export interface GenerateOptions {
   linkMarkdown?: boolean;
   /** Replace an existing robots.txt, sitemap.xml, llms.txt, llms-full.txt or agent map that differs. Default false. */
   overwrite?: boolean;
-  /** Where warnings and the summary go. Default console. */
+  /** Where warnings and the one-line summary go. Default console. */
   logger?: { warn(message: string): void; info(message: string): void };
 }
 
@@ -66,6 +68,8 @@ export interface GenerateResult {
   written: string[];
   /** Existing files that were kept because their content differs (see `overwrite`), sorted. */
   kept: string[];
+  /** Routes whose page already had its own markdown link, left untouched, sorted. */
+  ownMarkdownLinks: string[];
   warnings: string[];
 }
 
@@ -228,12 +232,13 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
     try {
       const actions = resolved.agentMap ? staticActions(document, warnUnknownKind) : [];
       const links = resolved.agentMap ? markupLinks(document) : [];
+      const markupDefs = resolved.agentMap ? markupDefinitions(document) : [];
       const info = analyzeDocument(document, {
         pageUrl: url,
         contentSelector: markdown ? markdown.contentSelector : "main",
         route,
       });
-      const inPage: Record<string, unknown> = { "agent-map": { actions, links } satisfies AgentPageData };
+      const inPage: Record<string, unknown> = { "agent-map": { actions, links, markup: markupDefs } satisfies AgentPageData };
       page = { route, info, listed: !info.noindex, inPage };
     } catch (e) {
       throw prefixed(e, `reading ${file} failed`);
@@ -267,7 +272,7 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
   }
   guarded.stage(fileOf(ROBOTS_PATH), buildRobots(resolved));
   const extensions = resolved.agentMap
-    ? [agentMapExtension({ siteUrl, fileName: resolved.agentMap.fileName })]
+    ? [agentMapExtension({ siteUrl, ...resolved.agentMap })]
     : [];
   await stageSiteFiles({ siteUrl, markdown, llms: resolved.llms, extensions, logger }, guarded, {
     pages,
@@ -303,14 +308,19 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
         "content was taken from <body> minus header, nav, footer, aside",
     );
   }
-  if (ownLinks.length > 0) {
-    base.info(`${LOG_PREFIX} kept the page's own markdown link on ${ownLinks.join(", ")}`);
-  }
   if (utf16.length > 0) {
     logger.warn(`${LOG_PREFIX} ${utf16.join(", ")} ${utf16.length === 1 ? "is" : "are"} UTF-16; the markdown link was not added`);
   }
   for (const w of pageLengthWarnings(listed)) logger.warn(w);
-  base.info(`${LOG_PREFIX} generated agent files for ${pages.length} pages (${listed.length} listed) in ${outDir}`);
+  const unlisted = pages.length - listed.length;
+  // A kept agent map is not the one counted: leave its action counts out.
+  const counted = extensions.filter((e) => !(e.name === "agent-map" && resolved.agentMap && kept.includes(resolved.agentMap.fileName)));
+  const counts = [
+    plural(pages.length, "page"),
+    ...(unlisted > 0 ? [`${unlisted} noindex`] : []),
+    ...extensionSummaries(counted),
+  ];
+  base.info(`${LOG_PREFIX} wrote ${plural(written.size, "file")} (${counts.join(", ")})`);
 
   return {
     outDir,
@@ -318,6 +328,7 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
     pages: result.sort(byRoute),
     written: [...written].sort(compareStrings),
     kept: kept.sort(compareStrings),
+    ownMarkdownLinks: ownLinks.sort(compareStrings),
     warnings,
   };
 }

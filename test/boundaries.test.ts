@@ -12,9 +12,11 @@ function walk(dir: string): string[] {
   });
 }
 
-function specifiers(src: string): string[] {
+function specifiers(src: string, dynamic = true): string[] {
   const out: string[] = [];
-  const re = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)["']([^"']+)["']/g;
+  const re = dynamic
+    ? /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)["']([^"']+)["']/g
+    : /(?:\bfrom\s*|\bimport\s+)["']([^"']+)["']/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(src))) out.push(m[1]!);
   return out;
@@ -41,15 +43,18 @@ function sourceFile(base: string): string {
   throw new Error(`cannot resolve ${base}`);
 }
 
-/** Every module `entry` loads at runtime, transitively (`import type` lines are skipped), and every bare specifier. */
-function runtimeGraph(entry: string): { files: Set<string>; bare: Set<string> } {
+/**
+ * Every module `entry` loads at runtime, transitively (`import type` lines are skipped), and every
+ * bare specifier. With `dynamic: false`, only what loads eagerly: `import()` is not followed.
+ */
+function runtimeGraph(entry: string, dynamic = true): { files: Set<string>; bare: Set<string> } {
   const files = new Set<string>();
   const bare = new Set<string>();
   const visit = (file: string) => {
     if (files.has(file)) return;
     files.add(file);
     const src = readFileSync(file, "utf8").replace(/^\s*(?:import|export)\s+type\s[^;]*;/gm, "");
-    for (const spec of specifiers(src)) {
+    for (const spec of specifiers(src, dynamic)) {
       if (spec.startsWith(".")) visit(sourceFile(resolved(file, spec)));
       else bare.add(spec);
     }
@@ -144,11 +149,14 @@ describe("import boundaries", () => {
     expect(specifiers(readFileSync(file, "utf8")).map((s) => resolved(file, s))).toEqual([join(SRC, "shared", "url")]);
   });
 
-  it("shared/agent imports only shared/conventions, as types or values", () => {
+  it("shared/agent imports only shared/conventions and shared/text, as types or values", () => {
     const file = join(SRC, "shared", "agent.ts");
+    const allowed = ["conventions", "text"].map((n) => join(SRC, "shared", n));
     for (const spec of specifiers(readFileSync(file, "utf8"))) {
-      expect(resolved(file, spec), `shared/agent.ts -> ${spec}`).toBe(join(SRC, "shared", "conventions"));
+      expect(allowed, `shared/agent.ts -> ${spec}`).toContain(resolved(file, spec));
     }
+    // shared/text is a leaf: it imports nothing.
+    expect(specifiers(readFileSync(join(SRC, "shared", "text.ts"), "utf8"))).toEqual([]);
   });
 
   it("agentLinkProps (runtime/agent/link) imports only shared modules and types", () => {
@@ -172,6 +180,33 @@ describe("import boundaries", () => {
     }
     // The walker does see react where it is used.
     expect(runtimeGraph(join(SRC, "index.ts")).bare).toContain("react-dom/client");
+  });
+
+  it("the /form entry loads only react, and the agent engine only lazily", () => {
+    const agent = (n: string) => join(SRC, "runtime", "agent", n);
+    const engine = ["registry", "formAutomation", "formSchema", "dom"].map(agent);
+    const head = ["Seo", "JsonLd", "headManager", "hydrate", "content"].map((n) => join(SRC, "runtime", n));
+    const { files, bare } = runtimeGraph(join(SRC, "entries", "form.ts"), false);
+    expect([...bare], "entries/form").toEqual(["react"]);
+    for (const f of files) expect([...engine, ...head], `entries/form -> ${relative(SRC, f)}`).not.toContain(stripExt(f));
+    // The engine is still reachable, through core's import().
+    const lazy = runtimeGraph(join(SRC, "entries", "form.ts")).files;
+    for (const f of engine) expect(lazy.has(sourceFile(f)), relative(SRC, f)).toBe(true);
+  });
+
+  it("the root entry reaches the agent engine only through core's import()", () => {
+    const engine = ["registry", "formAutomation", "formSchema", "dom"].map((n) => join(SRC, "runtime", "agent", n));
+    const files = [...runtimeGraph(join(SRC, "index.ts"), false).files].map(stripExt);
+    for (const f of engine) expect(files, relative(SRC, f)).not.toContain(f);
+  });
+
+  it("the React API reaches the agent engine only through core's import()", () => {
+    expect([...runtimeGraph(join(SRC, "runtime", "agent", "react.tsx"), false).files].map(stripExt)).not.toContain(
+      join(SRC, "runtime", "agent", "registry"),
+    );
+    const core = readFileSync(join(SRC, "runtime", "agent", "core.ts"), "utf8");
+    const eager = specifiers(core, false);
+    expect(specifiers(core).filter((s) => !eager.includes(s))).toEqual(["./registry"]);
   });
 
   it("src/runtime/agent is covered by the runtime rules", () => {

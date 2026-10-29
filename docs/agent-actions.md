@@ -58,15 +58,17 @@ function DeleteAccount() {
 
 With a `handler`, the agent's input is validated against `inputSchema` (an object JSON Schema, empty when omitted) and passed to it. Nested objects and array items are checked the same way, with errors reported by path (`addr.zip`, `items[0].id`); keys not listed in `properties` are rejected unless that object sets `additionalProperties: true`. A string longer than 10,000 characters is rejected, without running the regex, when its schema has a `pattern` or `format: "email"`; this keeps slow polynomial patterns fast, but does not make exponential ones such as `(a+)+$` safe, so avoid those. The handler's return value is reported as `{ status: "ok", result }`. Without a `handler`, `ref` decides: a `<form>` uses the form fallback above, any other element is clicked (`{ status: "clicked" }`), unless it is disabled (`disabled`, `aria-disabled="true"` or inside a `<fieldset disabled>`) or hidden by markup (as above), which reports `{ status: "error" }` instead. An action with neither a handler nor an attached element is not exposed. If a handler throws, the error is caught and reported to the agent as `{ status: "error", message }`.
 
-`hintProps` puts `data-agent-action`, `data-agent-description`, `aria-description`, `data-agent-kind` and, for destructive actions, `data-agent-destructive="true"` on the element, so the hints are also in the prerendered HTML. `data-agent-kind` is how the action runs, decided from the spec at render time (also during server rendering): `"handler"` with a `handler`, otherwise `"click"`; `AgentForm` writes `"form"` (or `"handler"` with a `handler`) and `agentLinkProps` writes `"link"`. So an `<a href>` that is a WebMCP tool is not mistaken for a link action. Without a `handler`, use `AgentForm` for a form: a `<form>` given a handler-less `useAgentAction`'s `hintProps` runs as a form but is marked `"click"`. `agentParam(description)` adds `data-agent-param` to a form field; it is used as that field's description in the schema (otherwise its `<label>`, `aria-label` or `placeholder`).
+`hintProps` puts `data-agent-action`, `data-agent-description`, `aria-description`, `data-agent-kind`, for destructive actions `data-agent-destructive="true"` and for `readOnly` actions `data-agent-readonly="true"` on the element, so the hints are also in the prerendered HTML. `data-agent-kind` is how the action runs, decided from the spec at render time (also during server rendering): `"handler"` with a `handler`, otherwise `"click"`; `AgentForm` writes `"form"` (or `"handler"` with a `handler`) and `agentLinkProps` writes `"link"`. So an `<a href>` that is a WebMCP tool is not mistaken for a link action. Without a `handler`, use `AgentForm` for a form: a `<form>` given a handler-less `useAgentAction`'s `hintProps` runs as a form but is marked `"click"`. `agentParam(description)` adds `data-agent-param` to a form field; it is used as that field's description in the schema (otherwise its `<label>`, `aria-label` or `placeholder`).
 
 In hand-written HTML read by `generate`, an unknown `data-agent-kind` value is ignored with a warning (once per action name), and the kind is inferred from the element: `"form"` for a `<form>`, `"link"` for an `<a href>`, else `"click"`. A `<form>` marked `"handler"` is listed with the schema of its fields, since its code-side `inputSchema` is not in the HTML.
 
-`listAgentActions()` and `executeAgentAction(name, input)` give you the same registry directly. `refreshAgentActions()` re-checks the registry; pass `{ force: true }` to also re-describe actions that are already registered with WebMCP and re-register any whose schema changed.
+`listAgentActions()` and `executeAgentAction(name, input)` give you the same registry directly. `executeAgentAction` loads the runtime first if it has not loaded yet (see [Lazy loading](#lazy-loading)); before then, `listAgentActions()` lists form actions without their fields. `refreshAgentActions()` re-checks the registry; pass `{ force: true }` to also re-describe actions that are already registered with WebMCP and re-register any whose schema changed.
 
 ## Names and duplicates
 
 Names must be 1 to 128 characters of `A-Z a-z 0-9 _ - .`; an invalid name throws. Names are per page: if two mounted components use the same name, only the first mounted one is exposed (in WebMCP and in `agents.json`) and a warning is logged. Give each a unique name, or use one action with an id input.
+
+When two elements on the same page share a name but define it differently (another description, kind, `href` or flag), the build and `generate` warn once per page and name, such as `/products: 2 different actions named add_to_cart; only the first is listed`. Identical copies, such as the same button in every card of a product grid, are not reported.
 
 ## Destructive actions
 
@@ -79,6 +81,18 @@ If the user declines, the agent gets `{ status: "cancelled", reason: "user-decli
 ## WebMCP
 
 WebMCP is feature-detected: when `document.modelContext` (or the older `navigator.modelContext`) exists, each exposed action is registered with `registerTool`; otherwise nothing is registered and nothing breaks. Nothing branches on the user agent. Tools are unregistered when their component unmounts, so the tool list follows what is on screen. The advertised `inputSchema` is captured when the tool is registered: a tool is registered again when its name, title, description, flags, `inputSchema` or handler presence changes, but not when a form's fields change. Execution never relies on that snapshot; it always validates against the current schema (for a form, its current fields). A failed registration is logged as a warning, does not affect the page, and is retried the next time the action list is updated. If `modelContext` appears after the page loads (for example, injected by an extension), actions are registered on the next mount, unmount or `refreshAgentActions()` call.
+
+### Lazy loading
+
+`AgentForm` and `useAgentAction` load only what they need to render hints and record which actions are mounted. The rest of the runtime (form schemas, input validation, form filling, the confirm dialog and WebMCP registration) is a separate chunk. It is loaded with `import()` the first time an action mounts while `modelContext` exists, or while the prerender is capturing the page (the capture waits for it, so `agents.json` is unchanged). All actions on the page share that one load. Browsers without WebMCP never download it, and server rendering never loads it. Tools are registered once it has loaded; an action that unmounts before then is never registered. The hint attributes are rendered as before, also on the server.
+
+The root entry keeps the runtime lazy with Vite (Rollup), webpack and esbuild. `listAgentActions` and `executeAgentAction` do not load it eagerly either: `executeAgentAction` loads it on first use. If you do not need `Seo`, `JsonLd` or `hydrateApp`, the React-only `/form` entry exports `AgentForm`, `useAgentAction`, `agentParam` and `refreshAgentActions` without them and without react-dom:
+
+```tsx
+import { AgentForm, agentParam } from "@anubhav-choubey/web-for-agents/form";
+```
+
+Before the runtime has loaded, the `window.__WEB_FOR_AGENTS__` global (read by the dev overlay) lists form actions with an empty `{ "type": "object" }` input schema, and asking for the list starts the load.
 
 ## Link actions (no JavaScript)
 
@@ -124,13 +138,33 @@ In `agents.json` a link action looks like this:
 
 ## agents.json
 
-After prerendering, the plugin writes `agents.json` with every listed page and the actions found on it, and links it from `llms.txt` in an `## Agents` section. Pages are sorted by path and actions by name; pages without actions are listed with `"actions": []`. Titles and descriptions are the same as in `llms.txt`:
+After prerendering, the plugin writes `agents.json` with every listed page and the actions found on it, and links it from `llms.txt` in an `## Agents` section.
+
+- `site` describes the whole site: its `url`, its `name` (the same title as `llms.txt`) and `actions`, the actions present with the same definition on every page listed in `agents.json`, such as header, footer or layout links and a site search. They are listed once here instead of on each page. `site.actions` is left out when no action is on every listed page, and with fewer than 2 listed pages.
+- `pages` lists each page with only its own actions. The actions an agent can take on a listed page are `site.actions` plus the page's `actions`.
+
+An action is site-wide only when every page listed in `agents.json` has it with the same definition: name, kind, `href`, input schema, description and flags. Pages that are not listed do not count: `noindex` pages and routes matched by `exclude` are left out of `agents.json`, so `site.actions` says nothing about them. A `noindex` checkout page without the cart link does not stop the cart link from being site-wide. If one listed page lacks it (an `/about` page without the cart link) or defines it differently (`contact` linking to `/en/contact` on English pages and `/de/kontakt` on German ones), it stays on each page that has it. Pages are sorted by path and actions by name; pages without actions are listed with `"actions": []`. Titles and descriptions are the same as in `llms.txt`:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "generator": "@anubhav-choubey/web-for-agents",
-  "site": { "url": "https://example.com", "name": "My Site" },
+  "site": {
+    "url": "https://example.com",
+    "name": "My Site",
+    "actions": [
+      {
+        "name": "privacy",
+        "description": "Read the privacy policy",
+        "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+        "destructive": false,
+        "readOnly": true,
+        "kind": "link",
+        "href": "https://example.com/privacy",
+        "method": "GET"
+      }
+    ]
+  },
   "llms": "https://example.com/llms.txt",
   "webmcp": { "api": "document.modelContext", "spec": "https://webmachinelearning.github.io/webmcp/" },
   "pages": [
@@ -164,5 +198,7 @@ After prerendering, the plugin writes `agents.json` with every listed page and t
 ```
 
 `kind` is `"handler"`, `"form"`, `"click"` or `"link"` (see [Link actions](#link-actions-no-javascript)). `llms` is omitted when `llms: false`, and `markdown` when `markdown: false`.
+
+`version` is `2`. Version 1 (0.4 and earlier) had no `site.actions` and repeated site-wide actions on every page; a version 2 file without `site.actions` reads the same way. Set `agentMap: { siteActions: false }` to keep that per-page layout: each page then lists all its actions, exactly as before, and only `version` changes. The CLI audit accepts both versions.
 
 Use `agentMap: { fileName: "ai.json" }` to change the file name (a plain `.json` name, no directories), or `agentMap: false` to turn the file and the `llms.txt` section off; WebMCP registration at runtime is unaffected. The CLI audit looks for the default `agents.json` unless you pass `--agent-map`. A `public/agents.json` of your own is never overwritten. The agent map needs prerender.

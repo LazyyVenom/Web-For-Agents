@@ -11,7 +11,7 @@ function ok(body: string, contentType = "text/plain", url = URL_): FetchResult {
 }
 const SITEMAP_XML = (...locs: string[]) =>
   `<?xml version="1.0"?><urlset>${locs.map((l) => `<url><loc>${l}</loc></url>`).join("")}</urlset>`;
-const AGENT_MAP = '{"version":1,"pages":[]}';
+const AGENT_MAP = '{"version":2,"pages":[]}';
 const spa = (): FetchResult => ok("<!doctype html><div id=root></div>", "text/html");
 
 function pageHtml(over: { head?: string; text?: string } = {}): string {
@@ -257,17 +257,30 @@ describe("checks", () => {
     expect(custom.message).toBe("map.json not found at http://h/map.json");
     expect(custom.fix).toBe("Serve map.json; webForAgents() generates /agents.json from your marked agent actions.");
     expect(byId(inputs(), "llms-txt").message).toBe("/llms.txt found at http://h/llms.txt");
-    expect(byId(inputs(), "agent-map").message).toBe("Agent map found at http://h/agents.json");
+    expect(byId(inputs(), "agent-map").message).toBe("Agent map found at http://h/agents.json (0 pages, 0 actions)");
   });
 
-  it("agent map with another version warns", () => {
+  it("agent map with an unknown version warns", () => {
     const at = (body: string) =>
       byId(inputs({ agentMap: ok(body, "application/json", "http://h/agents.json") }), "agent-map");
-    const v2 = at('{"version":2,"pages":[]}');
-    expect(v2.status).toBe("warn");
-    expect(v2.message).toBe("http://h/agents.json has version 2; expected 1");
-    expect(v2.fix).toBe("Regenerate /agents.json with the current webForAgents().");
-    expect(at('{"pages":[]}').message).toBe("http://h/agents.json has version (none); expected 1");
+    const v3 = at('{"version":3,"pages":[]}');
+    expect(v3.status).toBe("warn");
+    expect(v3.message).toBe("http://h/agents.json has version 3; expected 1 or 2");
+    expect(v3.fix).toBe("Regenerate /agents.json with the current webForAgents().");
+    expect(at('{"pages":[]}').message).toBe("http://h/agents.json has version (none); expected 1 or 2");
+  });
+
+  it("agent map counts site-wide actions once, and still accepts version 1", () => {
+    const at = (map: unknown) =>
+      byId(inputs({ agentMap: ok(JSON.stringify(map), "application/json", "http://h/agents.json") }), "agent-map");
+    const a = (name: string) => ({ name, kind: "link" });
+    const v2 = at({ version: 2, site: { url: "http://h", actions: [a("terms"), a("help")] }, pages: [{ actions: [a("buy")] }, { actions: [] }] });
+    expect(v2.status).toBe("pass");
+    expect(v2.message).toBe("Agent map found at http://h/agents.json (2 pages, 3 actions (1 page-specific, 2 site-wide))");
+    const v1 = at({ version: 1, site: { url: "http://h" }, pages: [{ actions: [a("terms"), a("buy")] }, { actions: [a("terms")] }] });
+    expect(v1.status).toBe("pass");
+    expect(v1.message).toBe("Agent map found at http://h/agents.json (2 pages, 3 actions)");
+    expect(at({ version: 2, pages: [{ actions: [a("x")] }] }).message).toBe("Agent map found at http://h/agents.json (1 page, 1 action)");
   });
 
   it("json-ld with only non-string @type warns", () => {
@@ -369,5 +382,13 @@ describe("checks", () => {
     expect(t(60).status).toBe("pass");
     expect(t(61).message).toBe("Title is 61 characters (over 60)");
     expect(t(61).fix).toBe('Set a page title with <Seo title="..." /> (at most 60 characters).');
+  });
+
+  it("title and description lengths count East Asian wide characters as 2", () => {
+    const desc = (d: string) => byId(inputs({ src: pageHtml({ head: `<title>t</title><meta name="description" content="${d}">` }) }), "description");
+    expect(desc("静かな湖畔の宿で季節ごとに変わる景色と地元の料理をゆっくり楽しめます。富士山の麓").status).toBe("pass");
+    expect(desc("d".repeat(40)).status).toBe("warn");
+    const title = byId(inputs({ src: pageHtml({ head: `<title>${"山".repeat(31)}</title>` }) }), "title");
+    expect(title.message).toBe("Title is 62 wide (over 60; 31 characters; Chinese, Japanese and Korean count as 2)");
   });
 });

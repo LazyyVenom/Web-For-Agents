@@ -251,41 +251,47 @@ describe("prerender and output options", () => {
     bad({ maxRoutes: -1 }, "maxRoutes");
   });
 
-  it("warns when AI crawlers are blocked but agent files are on", () => {
+  it("warns when AI search crawlers are blocked but agent files are on; blocking only training is silent", () => {
     const warn = (ai: object, extra: object = {}) =>
       resolveOptions({ ...base, robots: { ai }, ...extra } as never).warnings;
-    const t = warn({ training: "block", search: "allow" });
-    expect(t).toHaveLength(1);
-    expect(t[0]).toBe(
-      "[web-for-agents] robots.ai blocks AI training crawlers, but llms.txt, llms-full.txt, .md files, agents.json are still generated and publicly fetchable",
+    // The recommended policy: agent files serve search and agents, not training.
+    expect(warn({ training: "block", search: "allow" })).toEqual([]);
+    const s = warn({ training: "allow", search: "block" });
+    expect(s).toHaveLength(1);
+    expect(s[0]).toBe(
+      "[web-for-agents] robots.ai blocks AI search crawlers, but llms.txt, llms-full.txt, .md files, agents.json are still generated and publicly fetchable",
     );
-    for (const s of ["blocks AI training crawlers", "llms.txt", "llms-full.txt", ".md files"]) {
-      expect(t[0]).toContain(s);
-    }
-    expect(warn({ training: "allow", search: "block" })[0]).toContain("blocks AI search crawlers");
     expect(warn({ training: "block", search: "block" })[0]).toContain(
       "blocks AI training and search crawlers",
     );
     expect(warn({ training: "allow", search: "allow", overrides: { GPTBot: "block" } })).toEqual([]);
-    const nm = warn({ training: "block", search: "allow" }, { markdown: false })[0]!;
+    const nm = warn({ training: "allow", search: "block" }, { markdown: false })[0]!;
     expect(nm).toContain("llms.txt");
     expect(nm).not.toContain(".md files");
     expect(nm).not.toContain("llms-full.txt");
-    expect(warn({ training: "block", search: "allow" }, { prerender: false })).toEqual([]);
+    expect(warn({ training: "allow", search: "block" }, { prerender: false })).toEqual([]);
   });
 
   it("agentMap defaults to agents.json and can be disabled", () => {
-    expect(resolveOptions(base).agentMap).toEqual({ fileName: "agents.json" });
-    expect(resolveOptions({ ...base, agentMap: true }).agentMap).toEqual({ fileName: "agents.json" });
-    expect(resolveOptions({ ...base, agentMap: {} }).agentMap).toEqual({ fileName: "agents.json" });
-    expect(resolveOptions({ ...base, agentMap: { fileName: "ai.json" } }).agentMap).toEqual({ fileName: "ai.json" });
+    const def = { fileName: "agents.json", siteActions: true };
+    expect(resolveOptions(base).agentMap).toEqual(def);
+    expect(resolveOptions({ ...base, agentMap: true }).agentMap).toEqual(def);
+    expect(resolveOptions({ ...base, agentMap: {} }).agentMap).toEqual(def);
+    expect(resolveOptions({ ...base, agentMap: { fileName: "ai.json" } }).agentMap).toEqual({ ...def, fileName: "ai.json" });
     expect(resolveOptions({ ...base, agentMap: false }).agentMap).toBe(false);
+  });
+
+  it("agentMap.siteActions can be turned off and must be a boolean", () => {
+    expect(resolveOptions({ ...base, agentMap: { siteActions: false } }).agentMap).toEqual({ fileName: "agents.json", siteActions: false });
+    expect(() => resolveOptions({ ...base, agentMap: { siteActions: "no" } } as unknown as WebForAgentsOptions)).toThrow(
+      "[web-for-agents] agentMap.siteActions must be a boolean",
+    );
   });
 
   it("rejects a non-object agentMap from plain JS with a prefixed error", () => {
     for (const agentMap of [null, "agents.json", 1]) {
       expect(() => resolveOptions({ ...base, agentMap } as unknown as WebForAgentsOptions)).toThrow(
-        "[web-for-agents] agentMap must be a boolean or { fileName }",
+        "[web-for-agents] agentMap must be a boolean or { fileName, siteActions }",
       );
     }
   });
@@ -313,11 +319,12 @@ describe("prerender and output options", () => {
   });
 
   it("the blocked-AI warning names the agent map file only when it is on", () => {
-    const on = resolveOptions(base).warnings;
+    const blocking = { ...base, robots: { ai: { training: "block" as const, search: "block" as const } } };
+    const on = resolveOptions(blocking).warnings;
     expect(on).toHaveLength(1);
     expect(on[0]).toContain("agents.json");
-    expect(resolveOptions({ ...base, agentMap: { fileName: "ai.json" } }).warnings[0]).toContain("ai.json");
-    const off = resolveOptions({ ...base, agentMap: false }).warnings;
+    expect(resolveOptions({ ...blocking, agentMap: { fileName: "ai.json" } }).warnings[0]).toContain("ai.json");
+    const off = resolveOptions({ ...blocking, agentMap: false }).warnings;
     expect(off).toHaveLength(1);
     expect(off[0]).not.toContain("agents.json");
     expect(agentOutputs(resolveOptions({ ...base, markdown: false, llms: false }))).toEqual(["agents.json"]);

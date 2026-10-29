@@ -1,12 +1,8 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { assertValidActionName } from "../../../src/shared/actionName";
-import {
-  executeAgentAction,
-  listAgentActions,
-  refreshAgentActions,
-  registerAgentAction,
-} from "../../../src/runtime/agent/registry";
+import { refreshAgentActions, registerAgentAction } from "../../../src/runtime/agent/core";
+import { executeRegistered, listRegistered } from "../../../src/runtime/agent/registry";
 import type { AgentActionSpec } from "../../../src/runtime/agent/types";
 import { installFakeModelContext, resetAgentRuntime, type FakeModelContext, type ToolCall } from "../../helpers/agent";
 
@@ -55,7 +51,7 @@ describe("registry", () => {
     off();
     await flush();
     expect(calls[0].signal.aborted).toBe(true);
-    expect(listAgentActions()).toEqual([]);
+    expect(listRegistered()).toEqual([]);
   });
 
   it("register/unregister/register in one tick registers once", async () => {
@@ -79,7 +75,7 @@ describe("registry", () => {
     expect(calls[0].tool.description).toBe("a");
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0][0])).toContain('"save"');
-    expect(listAgentActions()).toHaveLength(1);
+    expect(listRegistered()).toHaveLength(1);
 
     offA();
     await flush();
@@ -87,7 +83,7 @@ describe("registry", () => {
     expect(registerTool).toHaveBeenCalledTimes(2);
     expect(calls[1].tool.description).toBe("b");
     expect(calls[1].signal.aborted).toBe(false);
-    expect(await executeAgentAction("save", {})).toEqual({ status: "ok", result: "B" });
+    expect(await executeRegistered("save", {})).toEqual({ status: "ok", result: "B" });
     expect(a).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledTimes(1);
   });
@@ -100,7 +96,7 @@ describe("registry", () => {
       expect(() => reg({ name: bad, description: "d", handler: () => 1 })).toThrow();
     }
     expect(() => assertValidActionName("a.b-c_D9" + "x".repeat(120))).not.toThrow();
-    expect(listAgentActions()).toEqual([]);
+    expect(listRegistered()).toEqual([]);
   });
 
   it("handler path validates and returns ok", async () => {
@@ -111,10 +107,10 @@ describe("registry", () => {
       inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"], additionalProperties: false },
       handler,
     });
-    const bad = await executeAgentAction("x", {});
+    const bad = await executeRegistered("x", {});
     expect(bad.status).toBe("invalid");
     expect(handler).not.toHaveBeenCalled();
-    expect(await executeAgentAction("x", { id: "1" })).toEqual({ status: "ok", result: { got: "1" } });
+    expect(await executeRegistered("x", { id: "1" })).toEqual({ status: "ok", result: { got: "1" } });
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler.mock.calls[0]![1].signal).toBeInstanceOf(AbortSignal);
   });
@@ -131,7 +127,7 @@ describe("registry", () => {
       confirm,
       handler,
     });
-    expect(await executeAgentAction("wipe", { really: "yes" })).toEqual({
+    expect(await executeRegistered("wipe", { really: "yes" })).toEqual({
       status: "cancelled",
       reason: "user-declined",
     });
@@ -150,7 +146,7 @@ describe("registry", () => {
     async function confirmText(input: Record<string, unknown>, inputSchema: object = transfer): Promise<string> {
       const confirm = vi.fn((_m: string) => false);
       reg({ name: "pay", description: "pays", inputSchema, destructive: true, confirm, handler: () => 1 });
-      expect(await executeAgentAction("pay", input)).toEqual({ status: "cancelled", reason: "user-declined" });
+      expect(await executeRegistered("pay", input)).toEqual({ status: "cancelled", reason: "user-declined" });
       return confirm.mock.calls[0]![0];
     }
 
@@ -275,7 +271,7 @@ describe("registry", () => {
       reg({ name: "f", description: "f", destructive: true, confirm, submitSettleMs: 0 }, () => form);
       const input: Record<string, unknown> = { more: true };
       for (let i = 0; i < 10; i++) input[`r${i}`] = `${i}`.repeat(400);
-      expect((await executeAgentAction("f", input)).status).toBe("submitted");
+      expect((await executeRegistered("f", input)).status).toBe("submitted");
       const msg = confirm.mock.calls[0]![0];
       expect(msg).toContain("Agent-provided input (11 fields):\nmore: true\n");
       for (let i = 0; i < 10; i++) {
@@ -290,8 +286,8 @@ describe("registry", () => {
       const confirm = vi.fn(() => true);
       reg({ name: "f", description: "f", destructive: true, confirm }, () => document.getElementById("f"));
       reg({ name: "b", description: "b", destructive: true, confirm }, () => document.getElementById("b"));
-      expect(await executeAgentAction("f", { q: "x" })).toEqual({ status: "error", message: "form submit is disabled" });
-      expect(await executeAgentAction("b", {})).toEqual({ status: "error", message: "element is hidden or inert" });
+      expect(await executeRegistered("f", { q: "x" })).toEqual({ status: "error", message: "form submit is disabled" });
+      expect(await executeRegistered("b", {})).toEqual({ status: "error", message: "element is hidden or inert" });
       expect(confirm).not.toHaveBeenCalled();
     });
 
@@ -300,7 +296,7 @@ describe("registry", () => {
       const form = document.getElementById("f") as HTMLFormElement;
       const confirm = vi.fn(() => true);
       reg({ name: "f", description: "f", destructive: true, confirm }, () => form);
-      expect(await executeAgentAction("f", { q: "x", bogus: 1 })).toEqual({
+      expect(await executeRegistered("f", { q: "x", bogus: 1 })).toEqual({
         status: "invalid",
         errors: [{ field: "bogus", message: "is not an allowed field" }],
       });
@@ -312,7 +308,7 @@ describe("registry", () => {
   it("destructive uses confirmMessage when given", async () => {
     const confirm = vi.fn(() => true);
     reg({ name: "wipe", description: "wipes", destructive: true, confirmMessage: "Sure?", confirm, handler: () => 1 });
-    expect(await executeAgentAction("wipe", {})).toEqual({ status: "ok", result: 1 });
+    expect(await executeRegistered("wipe", {})).toEqual({ status: "ok", result: 1 });
     expect(confirm).toHaveBeenCalledWith("Sure?");
   });
 
@@ -322,7 +318,7 @@ describe("registry", () => {
     (window as any).confirm = spy;
     const handler = vi.fn(() => "done");
     reg({ name: "wipe", description: "wipes", destructive: true, handler });
-    expect(await executeAgentAction("wipe", {})).toEqual({ status: "ok", result: "done" });
+    expect(await executeRegistered("wipe", {})).toEqual({ status: "ok", result: "done" });
     expect(spy).toHaveBeenCalledTimes(1);
     expect(handler).toHaveBeenCalledTimes(1);
   });
@@ -341,24 +337,24 @@ describe("registry", () => {
     reg({ name: "go", description: "g" }, () => btn);
     reg({ name: "none", description: "n" }, () => null);
 
-    const list = listAgentActions();
+    const list = listRegistered();
     expect(list.map((d) => [d.name, d.kind])).toEqual([
       ["contact", "form"],
       ["go", "click"],
     ]);
     expect(list[0].inputSchema.required).toEqual(["email"]);
 
-    expect((await executeAgentAction("contact", {})).status).toBe("invalid");
-    const r = await executeAgentAction("contact", { email: "a@b.c" });
+    expect((await executeRegistered("contact", {})).status).toBe("invalid");
+    const r = await executeRegistered("contact", { email: "a@b.c" });
     expect(r.status).toBe("submitted");
     expect((form.elements.namedItem("email") as HTMLInputElement).value).toBe("a@b.c");
 
-    expect(await executeAgentAction("go", {})).toEqual({ status: "clicked" });
+    expect(await executeRegistered("go", {})).toEqual({ status: "clicked" });
     expect(clicked).toHaveBeenCalledTimes(1);
 
     await flush();
     expect(calls.map((c) => c.tool.name).sort()).toEqual(["contact", "go"]);
-    expect(await executeAgentAction("none", {})).toEqual({
+    expect(await executeRegistered("none", {})).toEqual({
       status: "error",
       message: "action has no handler and no element",
     });
@@ -372,8 +368,8 @@ describe("registry", () => {
       el.addEventListener("click", clicked);
       reg({ name: id, description: id }, () => el);
     }
-    expect(await executeAgentAction("b", {})).toEqual({ status: "error", message: "element is disabled" });
-    expect(await executeAgentAction("c", {})).toEqual({ status: "error", message: "element is disabled" });
+    expect(await executeRegistered("b", {})).toEqual({ status: "error", message: "element is disabled" });
+    expect(await executeRegistered("c", {})).toEqual({ status: "error", message: "element is disabled" });
     expect(clicked).not.toHaveBeenCalled();
   });
 
@@ -381,8 +377,8 @@ describe("registry", () => {
     document.body.innerHTML = `<fieldset disabled><legend><button id="l">L</button></legend><legend><button id="m">M</button></legend></fieldset>`;
     reg({ name: "l", description: "l" }, () => document.getElementById("l"));
     reg({ name: "m", description: "m" }, () => document.getElementById("m"));
-    expect(await executeAgentAction("l", {})).toEqual({ status: "clicked" });
-    expect(await executeAgentAction("m", {})).toEqual({ status: "error", message: "element is disabled" });
+    expect(await executeRegistered("l", {})).toEqual({ status: "clicked" });
+    expect(await executeRegistered("m", {})).toEqual({ status: "error", message: "element is disabled" });
   });
 
   it("clicking an element inside an inert or hidden region returns an error and does not click", async () => {
@@ -395,7 +391,7 @@ describe("registry", () => {
       reg({ name: id, description: id }, () => el);
     }
     for (const id of ids) {
-      expect(await executeAgentAction(id, {})).toEqual({ status: "error", message: "element is hidden or inert" });
+      expect(await executeRegistered(id, {})).toEqual({ status: "error", message: "element is hidden or inert" });
     }
     expect(clicked).not.toHaveBeenCalled();
   });
@@ -414,22 +410,22 @@ describe("registry", () => {
       },
       () => form,
     );
-    const [d] = listAgentActions();
+    const [d] = listRegistered();
     expect(Object.keys(d!.inputSchema.properties!)).toEqual(["email"]);
     expect(d!.inputSchema.required).toEqual(["email"]);
-    listAgentActions();
+    listRegistered();
     await flush();
     expect(calls[0]!.tool.inputSchema).toEqual(d!.inputSchema);
 
     // Enforced once, against the form: one error per problem, the author schema plays no part.
-    expect(await executeAgentAction("contact", { other: "x" })).toEqual({
+    expect(await executeRegistered("contact", { other: "x" })).toEqual({
       status: "invalid",
       errors: [
         { field: "email", message: "is required" },
         { field: "other", message: "is not an allowed field" },
       ],
     });
-    expect((await executeAgentAction("contact", { email: "a@b.c" })).status).toBe("submitted");
+    expect((await executeRegistered("contact", { email: "a@b.c" })).status).toBe("submitted");
 
     const ignored = warn.mock.calls.filter((c) => String(c[0]).includes("inputSchema is ignored"));
     expect(ignored).toHaveLength(1);
@@ -443,7 +439,7 @@ describe("registry", () => {
     reg({ name: "f", description: "f", submitSettleMs: 0 }, () => form);
     await flush();
     form.insertAdjacentHTML("beforeend", `<input name="b" required>`);
-    expect(await executeAgentAction("f", { a: "1" })).toEqual({
+    expect(await executeRegistered("f", { a: "1" })).toEqual({
       status: "invalid",
       errors: [{ field: "b", message: "is required" }],
     });
@@ -473,11 +469,11 @@ describe("registry", () => {
     let el: Element | null = null;
     reg({ name: "later", description: "l" }, () => el);
     await flush();
-    expect(listAgentActions()).toEqual([]);
+    expect(listRegistered()).toEqual([]);
     expect(registerTool).not.toHaveBeenCalled();
 
     el = document.createElement("button");
-    expect(listAgentActions().map((d) => d.kind)).toEqual(["click"]);
+    expect(listRegistered().map((d) => d.kind)).toEqual(["click"]);
     refreshAgentActions();
     await flush();
     expect(registerTool).toHaveBeenCalledTimes(1);
@@ -487,8 +483,8 @@ describe("registry", () => {
     refreshAgentActions();
     await flush();
     expect(calls[0].signal.aborted).toBe(true);
-    expect(listAgentActions()).toEqual([]);
-    expect(await executeAgentAction("later", {})).toEqual({
+    expect(listRegistered()).toEqual([]);
+    expect(await executeRegistered("later", {})).toEqual({
       status: "error",
       message: "action has no handler and no element",
     });
@@ -499,7 +495,7 @@ describe("registry", () => {
     let answer!: (v: boolean) => void;
     const confirm = () => new Promise<boolean>((r) => (answer = r));
     const off = reg({ name: "wipe", description: "w", destructive: true, confirm, handler });
-    const pending = executeAgentAction("wipe", {});
+    const pending = executeRegistered("wipe", {});
     await flush();
     off();
     answer(true);
@@ -514,7 +510,7 @@ describe("registry", () => {
     const confirm = () => new Promise<boolean>((r) => (answer = r));
     const off = reg({ name: "wipe", description: "w", destructive: true, confirm, handler });
     reg({ name: "wipe", description: "w2", handler: () => 2 });
-    const pending = executeAgentAction("wipe", {});
+    const pending = executeRegistered("wipe", {});
     await flush();
     off();
     answer(true);
@@ -549,12 +545,12 @@ describe("registry", () => {
       },
     });
     reg({ name: "rej", description: "r", handler: () => Promise.reject("nope") });
-    expect(await executeAgentAction("boom", {})).toEqual({ status: "error", message: "kaboom" });
-    expect(await executeAgentAction("rej", {})).toEqual({ status: "error", message: "nope" });
+    expect(await executeRegistered("boom", {})).toEqual({ status: "error", message: "kaboom" });
+    expect(await executeRegistered("rej", {})).toEqual({ status: "error", message: "nope" });
   });
 
   it("unknown action → status error", async () => {
-    expect((await executeAgentAction("missing", {})).status).toBe("error");
+    expect((await executeRegistered("missing", {})).status).toBe("error");
   });
 
   it("WebMCP execute routes to the registry with the signal", async () => {
@@ -572,7 +568,7 @@ describe("registry", () => {
     reg({ name: "a", description: "a", readOnly: true, handler: () => 1 });
     const g = (window as any).__WEB_FOR_AGENTS__;
     expect(g.version).toBe(1);
-    expect(g.actions()).toEqual(listAgentActions());
+    expect(g.actions()).toEqual(listRegistered());
     expect(g.actions().map((d: { name: string }) => d.name)).toEqual(["a", "b"]);
   });
 
@@ -580,7 +576,7 @@ describe("registry", () => {
     (window as any).__WEB_FOR_AGENTS__ = { version: 1, actions: () => [] };
     reg({ name: "a", description: "a", handler: () => 1 });
     const g = (window as any).__WEB_FOR_AGENTS__;
-    expect(g.actions).toBe(listAgentActions);
+    expect(g.actions).toBe(listRegistered);
     expect(g.actions().map((d: { name: string }) => d.name)).toEqual(["a"]);
   });
 
@@ -590,7 +586,7 @@ describe("registry", () => {
     reg({ name: "x", description: "x", handler: () => 1 });
     await flush();
     await flush();
-    expect(listAgentActions()).toEqual([
+    expect(listRegistered()).toEqual([
       {
         name: "x",
         description: "x",

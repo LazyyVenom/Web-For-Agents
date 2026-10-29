@@ -14,12 +14,18 @@ Flags:
 - `--min-score <0-100>` exits with code 1 when the score is lower.
 - `--timeout <ms>` sets the per-request timeout (default 10000).
 - `--agent-map <path>` sets where the agent map lives. A file name (`map.json`) is looked for in the same places as `agents.json`. A path starting with `/` or a full URL is fetched as given.
-- `--no-private-redirects` refuses redirects from a public host to a private, loopback or link-local address. By default they are followed with a warning.
+- `--no-private-redirects` refuses redirects from a public host to a private, loopback or link-local address. By default they are followed with a warning. When the URL you pass is public, every connection is also checked against the addresses it actually uses, so the audit cannot reach a private address at all (see [Security](security.md#cli-audit)). `--sitemap` always works this way.
+- `--sitemap` audits every page in the site's sitemap (see [Auditing a whole site](#auditing-a-whole-site)).
+- `--max-pages <n>` (with `--sitemap`) audits at most `n` pages. The default is 50 and the maximum is 500.
+- `--concurrency <n>` (with `--sitemap`) sets how many pages and sitemap files are fetched at once. The default is 4 and the maximum is 16.
+- `--max-time <seconds>` (with `--sitemap`) is the time budget for the whole run. Once it is spent, no new sitemap file or page is started, the pages audited so far are reported, and the exit code is 1. The default is 300 and the maximum is 3600.
 - `-h`, `--help` prints usage.
 
 A URL without a scheme gets `http://` for `localhost`, `127.0.0.1` and `[::1]`, and `https://` for every other host.
 
 `robots.txt` is read from the site root. The sitemap URL comes from its `Sitemap:` line, or `/sitemap.xml` if there is none. `llms.txt` and `agents.json` are looked for at the root and in each parent directory of the page and of its markdown alternate link. For example, auditing `https://example.com/sub/` also tries `/sub/llms.txt` and `/sub/agents.json`, which covers sites deployed under a subpath. If more than one copy exists, the deepest one is used. A missing file's message lists every URL tried.
+
+The agent map check accepts `agents.json` version 1 or 2. Its message counts the pages and the actions as listed, each site-wide action once, for example `Agent map found at https://example.com/agents.json (20 pages, 36 actions (27 page-specific, 9 site-wide))`.
 
 Checks and weights (total 100):
 
@@ -46,10 +52,10 @@ The JSON-LD check fails when there is no JSON-LD or none of it parses. It warns 
 | `BreadcrumbList` | `itemListElement`; each item has `position`, `name` (or `item.name`) and `item` (not needed on the last item) |
 | `Event` | `name`, `startDate`, `location`; `location.address` when the location is a `Place` |
 | `FAQPage` | `mainEntity`; each question has `name` and `acceptedAnswer`; each answer has `text` |
-| `Product` | `name`; one of `offers`, `aggregateRating` or `review`; an `Offer` has `price` (or `priceSpecification.price`); an `AggregateOffer` has `lowPrice` and `priceCurrency` |
+| `Product` | `name`; one of `offers`, `aggregateRating` or `review`; an `Offer` has `price` (or `priceSpecification.price`); an `AggregateOffer` has `lowPrice` and `priceCurrency`; an `aggregateRating` has `ratingValue` and `ratingCount` (or `reviewCount`); each `review` has an `author` with a `name` and a `reviewRating` with a `ratingValue` |
 | `ProfilePage` | `mainEntity`, which has `name` (or `alternateName`) |
 | `Recipe` | `name`, `image` |
-| `SoftwareApplication`, `MobileApplication`, `WebApplication` | `name`, `offers` with `price` (`0` for free apps), and `aggregateRating` or `review` |
+| `SoftwareApplication`, `MobileApplication`, `WebApplication` | `name`, `offers` with `price` (`0` for free apps; an `AggregateOffer` has `lowPrice` and `priceCurrency`), and `aggregateRating` or `review`, checked as for `Product` |
 | `WebSite` | `name`, `url` |
 
 `Article`, `NewsArticle`, `BlogPosting`, `Organization` and `Person` have no required properties, so they are never flagged. Other types are not checked. Google stopped showing FAQ rich results on 7 May 2026. It still reads `FAQPage` markup, so the check still uses Google's last documented FAQ requirements.
@@ -59,9 +65,66 @@ The rules, with Google's recommended properties and a documentation link per typ
 
 A passing check earns its full weight, a warning half, a failure none. Each non-passing check prints a `Fix:` line.
 
-Exit codes: `0` ok, `1` score below `--min-score`, `2` usage error or fatal error (unreachable page, non-2xx status, not HTML, timeout).
+Exit codes: `0` ok, `1` score below `--min-score`, `2` usage error or fatal error (unreachable page, non-2xx status, not HTML, timeout). A fatal error is printed once, in the report on stdout. With `--json`, where stdout is JSON, it is also printed on stderr.
 
-The programmatic API is available from `@anubhav-choubey/web-for-agents/cli` (`audit`, `runCli`, `formatText`, and the `AuditOptions`, `AuditReport`, `CheckResult`, `CheckId` and `CheckStatus` types).
+The programmatic API is available from `@anubhav-choubey/web-for-agents/cli` (`audit`, `auditSite`, `runCli`, `formatText`, `formatSiteText`, and the `AuditOptions`, `AuditReport`, `SiteAuditOptions`, `SiteAuditReport`, `SiteAuditPage`, `SiteAuditLimit`, `SitemapFile`, `CheckResult`, `CheckId` and `CheckStatus` types). `auditSite` takes `maxPages`, `concurrency` and `maxTimeMs` (milliseconds), and clamps them to the CLI's bounds; a value that is not a number is a `site.error`.
+
+## Auditing a whole site
+
+`--sitemap` audits every page that the site's sitemap lists, and prints one table:
+
+```sh
+npx @anubhav-choubey/web-for-agents audit https://example.com --sitemap --min-score 80
+```
+
+```
+web-for-agents audit: https://example.com/ (3 pages from the sitemap)
+
+PATH   SCORE  FAILING
+/      100    -
+/app   37     Content without JavaScript, JSON-LD, Meta description
+/gone  0      error: HTTP 404
+
+Pages: 3 audited, min 0, average 45.7, 2 below --min-score 80 (1 failed to load)
+```
+
+Each row shows the page path, its score and up to three checks that lost the most points. A page that redirects shows as `/old → /new`. Percent-encoded paths are shown decoded, so `/ja/posts/%E5%AF%8C%E5%A3%AB%E5%B1%B1` reads `/ja/posts/富士山` (reserved characters such as `%2F` stay encoded). `--json` keeps the URLs as listed.
+
+How pages are found:
+
+- The sitemap comes from the `Sitemap:` lines in `robots.txt`, or `/sitemap.xml` if there are none. One level of sitemap index is followed. An index inside an index is reported and not followed. At most 50 sitemap files are read, `--concurrency` at a time, and their pages are taken in sitemap order whatever order they arrive in. Once the files read so far list `--max-pages` pages, no further file is fetched.
+- Only `<loc>` URLs are audited, in sitemap order, with duplicates removed. `hreflang` alternates (`<xhtml:link>`) are not audited, so list each language's pages as their own `<loc>` entries. `/docs` and `/docs/` are different URLs, so both are audited if both are listed. A `<loc>` (or `Sitemap:` line) longer than 2048 characters, the sitemap protocol's limit, is skipped and counted in a note. Counting stops at 50,000 distinct pages (`summary.listedCapped` in JSON).
+- Only URLs on the audited origin are audited. With `--site-url`, URLs on that origin are mapped to the audited origin first, as in a single-page audit. Every other URL, and every sitemap on another origin, is skipped, listed in a `Skipped` line (`site.skipped` in JSON) and never fetched.
+- The URL you pass is loaded first. A redirect to the same site is followed: the same host with or without a leading `www.`, and `http` → `https`. Its final origin is then audited for the whole run, and the report starts with `Note: https://example.com/ redirects to https://www.example.com/; auditing https://www.example.com` (`summary.resolvedOrigin` in JSON). Sitemap URLs on the origin you passed are then mapped to the audited origin, like `--site-url` URLs. A redirect to any other site (another host or port, `https` → `http`) is not followed: the run stops with exit code 2, a note naming the target, and `Fix: Pass the final URL directly: <target>`. A redirect from a public host to a private address is never followed. An unreachable URL is a fatal error.
+- After that, page redirects on the audited origin are followed. A redirect to any other origin is not followed: the page fails to load with an error that names the target. Site files (`robots.txt`, sitemaps, `llms.txt`, the agent map and `.md` copies) follow redirects as in a single-page audit, so a site that serves them from another host scores the same either way.
+- A sitemap sent with `Content-Encoding: gzip` is read like any other. A raw `.xml.gz` file is skipped with a warning; serve it uncompressed or with `Content-Encoding: gzip`.
+- Each file is read up to the usual 5 MiB limit, with the usual `--timeout`. A sitemap cut at the limit gives a warning, and only the entries read are used.
+- The report says which limit cut the run: `Only the first 50 of 3000 listed pages were audited (--max-pages 50).`, `Only the first 50 sitemap files were read (the sitemap file limit); the pages they list were audited.`, or `Stopped at the time limit (--max-time 300): 120 of 500 listed pages were audited.` (`summary.limitedBy` in JSON).
+
+`robots.txt`, the sitemap that pages use, and the root `llms.txt` and `agents.json` are fetched once for the whole run and reused for every page. `llms.txt` and agent maps in subdirectories are kept in memory up to 32 MiB in total and fetched again when dropped. Either way each page gets the same score as a single-page audit of its URL.
+
+Exit codes with `--sitemap`: `0` ok, `1` when any page is below `--min-score` or failed to load (it scores 0), or when `--max-time` cut the run, `2` usage error, or no page to audit (no sitemap, no URL on the audited origin, an entry redirect to another site, or `--max-time` spent before any page). The error comes with a `Fix:` line when there is one. Each problem is printed once, in the report on stdout; with `--json` it is also printed on stderr.
+
+`--json` prints `{ site, pages, summary }`:
+
+- `site`: `url`, `origin`, `robots`, `sitemaps` (each with `url`, `kind`, `locs`, and `error` or `truncated` when set), `skipped` (up to 20 `{ url, reason }`), `skippedTotal`, and `notes`, `warnings`, `error` and `fix` when set. URLs and errors from the site are cut at about 2,000 characters (4,000 for errors), ending in `…`.
+- `pages`: `{ url, score, checks }` per page, with `redirectedTo` and `error` when set.
+- `summary`: `audited`, `listed`, `maxPages`, `maxTimeMs`, `limited`, `min`, `average`, `errors`, `belowMinScore`, `minScore` when given, `limitedBy` (`"max-pages"`, `"sitemap-files"` or `"max-time"`) when `limited`, `listedCapped` when counting stopped, and `resolvedOrigin` when the URL you passed redirected to another origin.
+
+### In CI
+
+Audit a preview deployment on every pull request, mapping your production URLs to the preview:
+
+```yaml
+- name: Audit agent readiness
+  run: >
+    npx @anubhav-choubey/web-for-agents audit "$PREVIEW_URL" --sitemap
+    --site-url https://example.com --min-score 80 --max-pages 100
+  env:
+    PREVIEW_URL: ${{ steps.deploy.outputs.preview-url }}
+```
+
+The step fails when any page scores below 80. To audit a build inside the job instead, start a static server first (see [Auditing a local preview](#auditing-a-local-preview)) and pass `http://localhost:4173` as the URL.
 
 ## generate
 
@@ -81,19 +144,29 @@ Flags:
 - `--config <file>` loads options from a `.json`, `.js` or `.mjs` file. A JS file default-exports the options object. Use a JS file for options that are functions or regular expressions, such as `markdown.transform` or `exclude`. Prefer `.mjs`: on Node 20 a `.js` file with `export default` only loads when your `package.json` has `"type": "module"`. Flags take precedence over the file. Keys that are not options (a typo such as `siteURL`, or `prerender`) are reported as a warning.
 - `--no-link-markdown` leaves your HTML files unchanged.
 - `--overwrite` replaces an existing `robots.txt`, `sitemap.xml`, `llms.txt`, `llms-full.txt` or `agents.json` whose content differs. By default such a file is kept, with a warning.
+- `--no-site-actions` lists the actions found on every page on each page of `agents.json`, instead of once in `site.actions` (see [agents.json](agent-actions.md#agentsjson)). The same as `agentMap: { siteActions: false }` in `--config`; other `agentMap` fields in the file are kept.
+- `--verbose` also prints the layout, the pages and every file written.
 - `--json` prints the result (pages found, layout, files written, files kept) as JSON.
 
 ```js
 // wfa.config.mjs
 export default {
   exclude: ["/drafts/*"],
-  llms: { title: "Jane Doe" },
+  llms: { title: "Example Co" },
   markdown: {
     contentSelector: "main",
-    transform: ({ route, markdown }) => (route === "/" ? markdown + "\n\nEmail: jane@example.com\n" : undefined),
+    transform: ({ route, markdown }) => (route === "/" ? markdown + "\n\nEmail: hello@example.com\n" : undefined),
   },
 };
 ```
+
+By default `generate` prints one summary line, for example:
+
+```
+[web-for-agents] wrote 47 files (20 pages, 36 actions (27 page-specific, 9 site-wide))
+```
+
+It counts the files written, the pages found (and how many are `noindex`, if any) and the actions as listed in `agents.json`: the pages' own actions, summed over the pages, plus each site-wide action once. The action counts are left out when an existing `agents.json` was kept. `--verbose` adds the layout, the page list, the file list and the pages whose own markdown link was kept.
 
 `generate` does not need Vite: it works on any directory of HTML files. Warnings go to stderr. Exit codes: `0` ok, `2` usage error or failure. When it fails, nothing is written.
 
@@ -118,6 +191,8 @@ WARN  Canonical URL                 2.5/5  Canonical https://example.com/ points
 ```
 
 To get a clean local score, build with `siteUrl` set to the preview origin, for example `siteUrl: process.env.SITE_URL ?? "https://example.com"` with `SITE_URL=http://localhost:4173 npx vite build`. Otherwise, audit the deployed site.
+
+With `--sitemap` or `--no-private-redirects`, a local URL may reach private addresses on its own site only (the same host, with or without `www.`). A file that redirects to another local server, such as `localhost:3000`, fails to load.
 
 ### `--site-url`
 

@@ -130,6 +130,14 @@ describe("audit e2e", () => {
     expect(err).toContain("HTTP 404");
   });
 
+  it("a fatal error in text mode is printed once, on stdout", async () => {
+    const s = await serve({});
+    const { code, out, err } = await run(["audit", s.url + "/missing"]);
+    expect(code).toBe(2);
+    expect(out.match(/HTTP 404/g)).toHaveLength(1);
+    expect(err).toBe("");
+  });
+
   it("redirect loop is fatal", async () => {
     const s = await serve({ "/": { status: 302, headers: { location: "/" } } });
     const { code, out } = await run(["audit", s.url + "/", "--json"]);
@@ -158,7 +166,7 @@ describe("audit e2e", () => {
     expect(code).toBe(0);
     expect(JSON.parse(out).score).toBe(100);
     expect(checkOf(out, "llms-txt").message).toBe(`/llms.txt found at ${base}/sub/llms.txt`);
-    expect(checkOf(out, "agent-map").message).toBe(`Agent map found at ${base}/sub/agents.json`);
+    expect(checkOf(out, "agent-map").message).toBe(`Agent map found at ${base}/sub/agents.json (0 pages, 0 actions)`);
   });
 
   it("subpath deployment: missing files list every probed URL", async () => {
@@ -187,9 +195,9 @@ describe("audit e2e", () => {
       "/maps/agents.json": { headers: text("application/json"), body: AGENT_MAP },
     });
     const named = await run(["audit", s.url + "/sub/", "--json", "--agent-map", "map.json"]);
-    expect(checkOf(named.out, "agent-map").message).toBe(`Agent map found at ${s.url}/sub/map.json`);
+    expect(checkOf(named.out, "agent-map").message).toBe(`Agent map found at ${s.url}/sub/map.json (0 pages, 0 actions)`);
     const pathed = await run(["audit", s.url + "/sub/", "--json", "--agent-map", "/maps/agents.json"]);
-    expect(checkOf(pathed.out, "agent-map").message).toBe(`Agent map found at ${s.url}/maps/agents.json`);
+    expect(checkOf(pathed.out, "agent-map").message).toBe(`Agent map found at ${s.url}/maps/agents.json (0 pages, 0 actions)`);
   });
 
   it("local preview of a production build names the other origin and does not fetch it", async () => {

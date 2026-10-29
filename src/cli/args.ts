@@ -3,6 +3,14 @@ import { errorMessage, withPrefix } from "../shared/errors";
 import { hasScheme } from "../shared/url";
 import { parseSiteOrigin } from "./audit";
 import { DEFAULT_TIMEOUT_MS } from "./fetch";
+import {
+  DEFAULT_SITE_CONCURRENCY,
+  DEFAULT_SITE_MAX_PAGES,
+  DEFAULT_SITE_MAX_TIME_S,
+  MAX_SITE_CONCURRENCY,
+  MAX_SITE_MAX_TIME_S,
+  MAX_SITE_PAGES,
+} from "./siteAudit";
 
 export interface GenerateArgs {
   outDir: string;
@@ -14,6 +22,10 @@ export interface GenerateArgs {
   /** False with --no-link-markdown. */
   linkMarkdown: boolean;
   overwrite: boolean;
+  /** False with --no-site-actions: repeat site-wide actions on every page of agents.json. */
+  siteActions: boolean;
+  /** --verbose: print the layout, the pages and every file written after the summary line. */
+  verbose: boolean;
 }
 
 export interface CliArgs {
@@ -30,6 +42,17 @@ export interface CliArgs {
   blockPrivateRedirects?: boolean;
   /** --site-url: the siteUrl the site was built for (only its origin is used); its URLs are audited on the audited origin. */
   siteUrl?: string;
+  /** --sitemap: audit every page the sitemap lists. */
+  sitemap?: SitemapArgs;
+}
+
+export interface SitemapArgs {
+  /** --max-pages: at most this many pages are audited. */
+  maxPages: number;
+  /** --concurrency: pages audited at the same time. */
+  concurrency: number;
+  /** --max-time (given in seconds): the overall time budget. */
+  maxTimeMs: number;
 }
 
 const fail = (msg: string): never => {
@@ -61,6 +84,7 @@ export function normalizeInputUrl(input: string): string {
 }
 
 export const USAGE = `Usage: web-for-agents audit <url> [options]
+       web-for-agents audit <url> --sitemap [options]
        web-for-agents generate <outDir> --site-url <url> [options]
 
 audit: check how readable a page is for AI agents and crawlers.
@@ -68,7 +92,14 @@ audit: check how readable a page is for AI agents and crawlers.
 Options:
   --json               print the report as JSON (page data is not sanitized; control
                        and bidi characters are written as \\u escapes)
-  --min-score <0-100>  exit with code 1 if the score is lower
+  --min-score <0-100>  exit with code 1 if the score is lower (with --sitemap: if any
+                       page's score is lower)
+  --sitemap            audit every page listed in the site's sitemap (found through
+                       robots.txt, else /sitemap.xml) on <url>'s origin, and print one table
+  --max-pages <n>      with --sitemap: audit at most n pages (default ${DEFAULT_SITE_MAX_PAGES}, at most ${MAX_SITE_PAGES})
+  --concurrency <n>    with --sitemap: pages audited at once (default ${DEFAULT_SITE_CONCURRENCY}, at most ${MAX_SITE_CONCURRENCY})
+  --max-time <s>       with --sitemap: stop starting pages after s seconds and report
+                       the partial result, exit code 1 (default ${DEFAULT_SITE_MAX_TIME_S}, at most ${MAX_SITE_MAX_TIME_S})
   --timeout <ms>       per-request timeout (default ${DEFAULT_TIMEOUT_MS})
   --agent-map <path>   agent map file name (probed like agents.json), or a /path or URL
   --site-url <url>     the siteUrl the site was built with (for example your production
@@ -93,10 +124,21 @@ Options:
   --no-link-markdown   do not add the markdown <link> to each page's <head>
   --overwrite          replace an existing robots.txt, sitemap.xml, llms.txt,
                        llms-full.txt or agents.json that differs
+  --no-site-actions    list actions found on every page on each page of agents.json,
+                       instead of once in site.actions
+  --verbose            also print the layout, the pages and every file written
   --json               print the result as JSON
 
-Exit codes: 0 ok, 1 score below --min-score, 2 usage error or fatal error
+Exit codes: 0 ok, 1 score below --min-score (with --sitemap: any page below it,
+            failing to load, or --max-time reached), 2 usage error or fatal error
 `;
+
+/** A whole number from 1 to `max`, written as plain digits. */
+function boundedInt(flag: string, value: string, max: number): number {
+  const n = Number(value);
+  if (!/^\d+$/.test(value) || n < 1 || n > max) return fail(`--${flag} must be an integer from 1 to ${max}, got "${value}"`);
+  return n;
+}
 
 export function parseCliArgs(argv: string[]): CliArgs {
   let parsed;
@@ -111,11 +153,17 @@ export function parseCliArgs(argv: string[]): CliArgs {
         "agent-map": { type: "string" },
         "no-private-redirects": { type: "boolean" },
         "site-url": { type: "string" },
+        sitemap: { type: "boolean" },
+        "max-pages": { type: "string" },
+        concurrency: { type: "string" },
+        "max-time": { type: "string" },
         "ai-training": { type: "string" },
         "ai-search": { type: "string" },
         config: { type: "string" },
         "no-link-markdown": { type: "boolean" },
         overwrite: { type: "boolean" },
+        "no-site-actions": { type: "boolean" },
+        verbose: { type: "boolean" },
         help: { type: "boolean", short: "h" },
       },
     });
@@ -125,8 +173,8 @@ export function parseCliArgs(argv: string[]): CliArgs {
   const { values, positionals } = parsed;
   if (values.help || positionals.length === 0) return { command: "help", json: false, timeoutMs: DEFAULT_TIMEOUT_MS };
   const [command, input, ...rest] = positionals;
-  const GENERATE_FLAGS = ["ai-training", "ai-search", "config", "no-link-markdown", "overwrite"] as const;
-  const AUDIT_FLAGS = ["min-score", "timeout", "agent-map", "no-private-redirects"] as const;
+  const GENERATE_FLAGS = ["ai-training", "ai-search", "config", "no-link-markdown", "overwrite", "no-site-actions", "verbose"] as const;
+  const AUDIT_FLAGS = ["min-score", "timeout", "agent-map", "no-private-redirects", "sitemap", "max-pages", "concurrency", "max-time"] as const;
   if (command === "generate") {
     if (input === undefined) return fail("generate requires an output directory");
     if (rest.length > 0) return fail(`unexpected argument "${rest[0]}"`);
@@ -136,6 +184,8 @@ export function parseCliArgs(argv: string[]): CliArgs {
       outDir: input,
       linkMarkdown: values["no-link-markdown"] !== true,
       overwrite: values.overwrite === true,
+      siteActions: values["no-site-actions"] !== true,
+      verbose: values.verbose === true,
     };
     for (const [flag, key] of [["ai-training", "aiTraining"], ["ai-search", "aiSearch"]] as const) {
       const v = values[flag];
@@ -195,6 +245,19 @@ export function parseCliArgs(argv: string[]): CliArgs {
     }
     if (!ok) return fail(`--agent-map must be a file name, a /path or an http(s) URL, got "${values["agent-map"]}"`);
     args.agentMap = v;
+  }
+  if (values.sitemap === true) {
+    const maxTimeS =
+      values["max-time"] === undefined ? DEFAULT_SITE_MAX_TIME_S : boundedInt("max-time", values["max-time"], MAX_SITE_MAX_TIME_S);
+    args.sitemap = {
+      maxPages: values["max-pages"] === undefined ? DEFAULT_SITE_MAX_PAGES : boundedInt("max-pages", values["max-pages"], MAX_SITE_PAGES),
+      concurrency:
+        values.concurrency === undefined ? DEFAULT_SITE_CONCURRENCY : boundedInt("concurrency", values.concurrency, MAX_SITE_CONCURRENCY),
+      maxTimeMs: maxTimeS * 1000,
+    };
+  } else {
+    const orphan = (["max-pages", "concurrency", "max-time"] as const).find((f) => values[f] !== undefined);
+    if (orphan) return fail(`--${orphan} requires --sitemap`);
   }
   return args;
 }

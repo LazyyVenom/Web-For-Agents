@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it, vi } from "vitest";
+import { agentMapExtension } from "../../src/vite/agentMap";
 import { createBuildPlugin } from "../../src/vite/buildPlugin";
 import { resolveOptions, type WebForAgentsOptions } from "../../src/vite/options";
 import type { PrerenderExtension } from "../../src/vite/prerender/extensions";
@@ -214,7 +215,7 @@ describe("createBuildPlugin", () => {
     writeFileSync(path.join(t.outDir, "assets/extra.js"), EXTRA.replace('document.title = "T " + p;', 'document.title = "T".repeat(61) + p;'));
     await t.run();
     const long = t.warnings().filter((w) => w.includes("Title longer than 60"));
-    expect(long).toEqual(["[web-for-agents] Title longer than 60 characters on / (62), /fetch (67)"]);
+    expect(long).toEqual(["[web-for-agents] Title longer than 60 characters on /: 62 characters, /fetch: 67 characters"]);
   }, 30_000);
 
   it("skips when writeBundle never ran", async () => {
@@ -483,26 +484,37 @@ describe("createBuildPlugin", () => {
   });
 
   it("logs resolved warnings once and a summary", async () => {
-    const t = make({ robots: { ai: { training: "block", search: "allow" } }, prerender: { crawl: false } });
+    const t = make({ robots: { ai: { training: "allow", search: "block" } }, prerender: { crawl: false } });
     t.configure();
     await t.run();
-    const blocked = t.warnings().filter((w) => w.includes("robots.ai blocks AI training crawlers"));
+    const blocked = t.warnings().filter((w) => w.includes("robots.ai blocks AI search crawlers"));
     expect(blocked).toHaveLength(1);
-    expect(t.info.mock.calls.some((c) => /prerendered \d+ routes/.test(String(c[0])))).toBe(true);
+    expect(t.info.mock.calls.some((c) => /prerendered \d+ routes?/.test(String(c[0])))).toBe(true);
   }, 30_000);
 
   it("the summary names only the files written", async () => {
     const summary = async (opts: Parameters<typeof make>[0]) => {
-      const t = make(opts);
+      const t = make(opts, opts.agentMap === false ? [] : [agentMapExtension({ siteUrl: "https://a.com", fileName: "agents.json" })]);
       t.configure();
       await t.run();
-      return t.info.mock.calls.map((c) => String(c[0])).find((m) => /prerendered \d+ routes/.test(m))!;
+      return t.info.mock.calls.map((c) => String(c[0])).find((m) => /prerendered \d+ routes?/.test(m))!;
     };
-    expect(await summary({ prerender: { crawl: false } })).toMatch(/listed in llms\.txt and the sitemap; the sitemap also keeps/);
+    // The publicDir clause appears only when the sitemap actually keeps such a route.
+    expect(await summary({ prerender: { crawl: false } })).toMatch(/^\[web-for-agents\] prerendered \d+ routes? \(\d+ listed in llms\.txt and the sitemap\), \d+ actions?$/);
     const noSitemap = await summary({ sitemap: false, prerender: { crawl: false } });
     expect(noSitemap).not.toContain("sitemap");
-    expect(noSitemap).toMatch(/prerendered \d+ routes \(\d+ listed in llms\.txt\)/);
-    expect(await summary({ sitemap: false, llms: false, prerender: { crawl: false } })).toMatch(/prerendered \d+ routes$/);
+    expect(noSitemap).toMatch(/prerendered \d+ routes? \(\d+ listed in llms\.txt\), \d+ actions?$/);
+    expect(await summary({ sitemap: false, llms: false, prerender: { crawl: false } })).toMatch(/prerendered \d+ routes?, \d+ actions?$/);
+    expect(await summary({ sitemap: false, llms: false, agentMap: false, prerender: { crawl: false } })).toMatch(/prerendered \d+ routes?$/);
+  }, 30_000);
+
+  it("the summary names configured routes the sitemap keeps from publicDir", async () => {
+    const t = make({ routes: ["/fetch"], prerender: { crawl: false } });
+    putPublic(t, "fetch/index.html", "<p>mine</p>");
+    t.configure();
+    await t.run();
+    const line = t.info.mock.calls.map((c) => String(c[0])).find((m) => /prerendered \d+ routes?/.test(m))!;
+    expect(line).toMatch(/\(\d+ listed in llms\.txt and the sitemap; the sitemap also keeps 1 configured route served from publicDir\)$/);
   }, 30_000);
 
   it("skips a crawled link with a too-long name and still writes the site", async () => {

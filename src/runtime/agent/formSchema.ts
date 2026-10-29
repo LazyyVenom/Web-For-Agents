@@ -7,12 +7,6 @@ import { collapseWhitespace as clean } from "../../shared/text";
 import { inDisabledFieldset, isConcealed } from "./dom";
 import type { JsonSchema } from "./types";
 
-export const EMPTY_OBJECT_SCHEMA: JsonSchema = Object.freeze({
-  type: "object",
-  properties: Object.freeze({}),
-  additionalProperties: false,
-}) as JsonSchema;
-
 const EXCLUDED_TYPES = new Set(["hidden", "password", "file", "submit", "button", "reset", "image"]);
 
 export type Field = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;

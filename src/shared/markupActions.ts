@@ -4,6 +4,7 @@ import {
   ACTION_DESCRIPTION_ATTR,
   ACTION_DESTRUCTIVE_ATTR,
   ACTION_KIND_ATTR,
+  ACTION_READONLY_ATTR,
   LINK_ACTION_SELECTOR,
   WEBMCP_TOOLDESCRIPTION_ATTR,
   WEBMCP_TOOLNAME_ATTR,
@@ -18,6 +19,8 @@ export interface MarkupAction {
   /** See markupKind. */
   kind: ActionKind;
   destructive: boolean;
+  /** The read-only hint (`data-agent-readonly="true"`, see hintProps). */
+  readOnly: boolean;
   source: "markup" | "webmcp-declarative";
   /** Link actions only: the raw href attribute, not yet checked (see resolveLinkHref). */
   href?: string;
@@ -81,6 +84,7 @@ export function markupActions(doc: ParentNode): MarkupAction[] {
       description: el.getAttribute(ACTION_DESCRIPTION_ATTR) || null,
       kind,
       destructive: el.getAttribute(ACTION_DESTRUCTIVE_ATTR) === "true",
+      readOnly: el.getAttribute(ACTION_READONLY_ATTR) === "true",
       source: "markup",
       ...(link ? { href: el.getAttribute("href") ?? "" } : {}),
       ...(unknownKind === undefined ? {} : { unknownKind }),
@@ -95,10 +99,56 @@ export function markupActions(doc: ParentNode): MarkupAction[] {
       description: el.getAttribute(WEBMCP_TOOLDESCRIPTION_ATTR) || null,
       kind: "form",
       destructive: false,
+      readOnly: false,
       source: "webmcp-declarative",
     });
   });
   return out;
+}
+
+/**
+ * The raw hint attributes of one `data-agent-action` element. JSON-serializable: the prerender
+ * path reads the same fields in the page (see collectAgentPageInPage).
+ */
+export interface MarkupDefinition {
+  name: string;
+  kind: string;
+  description: string;
+  destructive: boolean;
+  readOnly: boolean;
+  href: string | null;
+}
+
+/** Every `data-agent-action` element's hint attributes, in document order; names trimmed, empty names skipped. */
+export function markupDefinitions(doc: ParentNode): MarkupDefinition[] {
+  const out: MarkupDefinition[] = [];
+  doc.querySelectorAll(`[${ACTION_ATTR}]`).forEach((el) => {
+    const name = el.getAttribute(ACTION_ATTR)?.trim();
+    if (!name) return;
+    out.push({
+      name,
+      kind: el.getAttribute(ACTION_KIND_ATTR)?.trim() ?? "",
+      description: el.getAttribute(ACTION_DESCRIPTION_ATTR) ?? "",
+      destructive: el.getAttribute(ACTION_DESTRUCTIVE_ATTR) === "true",
+      readOnly: el.getAttribute(ACTION_READONLY_ATTR) === "true",
+      href: el.tagName === "A" ? el.getAttribute("href") : null,
+    });
+  });
+  return out;
+}
+
+/**
+ * Names that more than one element on a page defines differently, with the number of distinct
+ * definitions, in first-seen order. Identical copies (a product grid) are not reported.
+ */
+export function differingDuplicates(defs: readonly MarkupDefinition[]): Array<[string, number]> {
+  const byName = new Map<string, Set<string>>();
+  for (const d of defs) {
+    const keys = byName.get(d.name) ?? new Set<string>();
+    keys.add(JSON.stringify([d.kind, d.description, d.destructive, d.readOnly, d.href]));
+    byName.set(d.name, keys);
+  }
+  return [...byName].filter(([, keys]) => keys.size > 1).map(([name, keys]) => [name, keys.size]);
 }
 
 /** A link action as found in markup, before its href is checked. JSON-serializable. */

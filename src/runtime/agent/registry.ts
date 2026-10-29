@@ -1,26 +1,28 @@
-import { AGENT_GLOBAL_VERSION, type AgentGlobal } from "../../shared/agent";
-import { assertValidActionName } from "../../shared/actionName";
-import { AGENT_GLOBAL } from "../../shared/conventions";
+import { EMPTY_OBJECT_SCHEMA } from "../../shared/agent";
 import { errorMessage, withPrefix } from "../../shared/errors";
 import { hasOwn } from "../../shared/object";
 import { compareStrings } from "../../shared/sort";
+import { plural } from "../../shared/text";
+import {
+  __resetCoreForTests,
+  activeEntries,
+  describeWith,
+  entries,
+  installEngine,
+  listWith,
+  refreshAgentActions,
+  resolve,
+  type Engine,
+  type Entry,
+  type Resolved,
+} from "./core";
 import { isConcealed, isDisabled } from "./dom";
 import { checkFormAction, submitFormAction } from "./formAutomation";
-import { EMPTY_OBJECT_SCHEMA, schemaFromForm, validateFormInput, validateInput } from "./formSchema";
-import type {
-  AgentActionDescriptor,
-  AgentActionResult,
-  AgentActionSpec,
-  JsonSchema,
-  RefreshAgentActionsOptions,
-} from "./types";
+import { schemaFromForm, validateFormInput, validateInput } from "./formSchema";
+import type { AgentActionDescriptor, AgentActionResult, JsonSchema } from "./types";
 import { exposeTool, hasModelContext, type WebMcpTool } from "./webmcp";
 
-interface Entry {
-  name: string;
-  spec: () => AgentActionSpec;
-  target?: () => Element | null;
-}
+// The engine of the agent runtime; see core.ts. Imported lazily by core.ts, which installs it.
 
 interface Exposed {
   id: number;
@@ -28,70 +30,17 @@ interface Exposed {
   tool: WebMcpTool;
 }
 
-/** Insertion order = mount order. */
-const entries = new Map<number, Entry>();
 /** Name -> entry currently exposed via WebMCP. */
 const exposed = new Map<string, Exposed>();
-const warnedDuplicates = new Set<string>();
 const warnedIgnoredSchema = new Set<string>();
-let nextId = 1;
-let syncScheduled = false;
-let forceScheduled = false;
 
 const CONFIRM_BUDGET = 1000;
-
-function installGlobal(): void {
-  if (typeof window === "undefined") return;
-  const w = window as unknown as Record<string, AgentGlobal | undefined>;
-  if (w[AGENT_GLOBAL]?.actions === listAgentActions) return;
-  w[AGENT_GLOBAL] = { version: AGENT_GLOBAL_VERSION, actions: listAgentActions };
-}
-
-export function registerAgentAction(spec: () => AgentActionSpec, target?: () => Element | null): () => void {
-  const name = spec().name;
-  assertValidActionName(name);
-  const id = nextId++;
-  entries.set(id, { name, spec, target });
-  installGlobal();
-  scheduleSync();
-  let done = false;
-  return () => {
-    if (done) return;
-    done = true;
-    entries.delete(id);
-    scheduleSync();
-  };
-}
-
-/** First-mounted entry per name, in mount order. */
-function activeEntries(): Map<string, [number, Entry]> {
-  const active = new Map<string, [number, Entry]>();
-  for (const [id, entry] of entries) {
-    if (!active.has(entry.name)) active.set(entry.name, [id, entry]);
-  }
-  return active;
-}
-
-type Resolved =
-  | { kind: "handler"; spec: AgentActionSpec }
-  | { kind: "form"; spec: AgentActionSpec; el: HTMLFormElement }
-  | { kind: "click"; spec: AgentActionSpec; el: Element }
-  | { kind: null; spec: AgentActionSpec };
-
-function resolve(entry: Entry): Resolved {
-  const spec = entry.spec();
-  if (spec.handler) return { kind: "handler", spec };
-  const el = entry.target?.() ?? null;
-  if (typeof HTMLFormElement !== "undefined" && el instanceof HTMLFormElement) return { kind: "form", spec, el };
-  if (typeof Element !== "undefined" && el instanceof Element) return { kind: "click", spec, el };
-  return { kind: null, spec };
-}
 
 /**
  * The one schema an action advertises and enforces. A form action without a handler always
  * uses the form's current fields; an author inputSchema there is ignored (warned once).
  */
-function schemaOf(r: Resolved): JsonSchema {
+function schemaOf(r: Exclude<Resolved, { kind: null }>): JsonSchema {
   if (r.kind === "form") {
     const name = r.spec.name;
     if (r.spec.inputSchema && !warnedIgnoredSchema.has(name)) {
@@ -107,27 +56,11 @@ function schemaOf(r: Resolved): JsonSchema {
   return r.spec.inputSchema ?? EMPTY_OBJECT_SCHEMA;
 }
 
-/** Null when the action has neither a handler nor an element (hidden, not exposed). */
-function describe(name: string, entry: Entry): AgentActionDescriptor | null {
-  const r = resolve(entry);
-  if (r.kind === null) return null;
-  const d: AgentActionDescriptor = {
-    name,
-    description: r.spec.description,
-    inputSchema: schemaOf(r),
-    destructive: r.spec.destructive === true,
-    readOnly: r.spec.readOnly === true,
-    kind: r.kind,
-  };
-  if (r.spec.title !== undefined) d.title = r.spec.title;
-  return d;
-}
+const describe = (name: string, entry: Entry): AgentActionDescriptor | null => describeWith(name, entry, schemaOf);
 
 /** The actions currently exposed on the page, sorted by name. */
-export function listAgentActions(): AgentActionDescriptor[] {
-  return Array.from(activeEntries(), ([name, [, entry]]) => describe(name, entry))
-    .filter((d): d is AgentActionDescriptor => d !== null)
-    .sort((a, b) => compareStrings(a.name, b.name));
+export function listRegistered(): AgentActionDescriptor[] {
+  return listWith(schemaOf);
 }
 
 /** Controls (C0 but \n, C1), bidi and line/paragraph separators, and invisible format chars; ZWJ/ZWNJ kept. */
@@ -149,7 +82,7 @@ function clip(s: string, max: number): string {
   return out + "\u2026(truncated)";
 }
 
-const plural = (n: number): string => `${n} field${n === 1 ? "" : "s"}`;
+const fields = (n: number): string => plural(n, "field");
 
 /** [path, JSON value, path made only of schema properties] */
 type Leaf = [string, string, boolean];
@@ -199,8 +132,8 @@ function describeInput(schema: JsonSchema, value: Record<string, unknown>, flat:
     const line = `${clip(neutralize(path), budget)}: ${clip(neutralize(v), budget)}`;
     if (declared || (extra += line.length + 1) <= CONFIRM_BUDGET) lines.push(line);
   }
-  if (lines.length < n) lines.push(`\u2026(${plural(n - lines.length)} omitted)`);
-  return `Agent-provided input (${plural(n)})${n ? ":\n" + lines.join("\n") : "."}`;
+  if (lines.length < n) lines.push(`\u2026(${fields(n - lines.length)} omitted)`);
+  return `Agent-provided input (${fields(n)})${n ? ":\n" + lines.join("\n") : "."}`;
 }
 
 function confirmMessage(name: string, r: Resolved, schema: JsonSchema, value: Record<string, unknown>): string {
@@ -234,7 +167,7 @@ function clickBlocked(el: Element): AgentActionResult | null {
 }
 
 /** Runs an exposed action with `input`. Never throws; failures are reported in the result. */
-export async function executeAgentAction(
+export async function executeRegistered(
   name: string,
   input: unknown,
   signal?: AbortSignal,
@@ -276,23 +209,6 @@ export async function executeAgentAction(
   }
 }
 
-/**
- * Re-evaluate actions at the next microtask: exposes new or newly attached actions (and picks up a
- * WebMCP that appeared since the last sync). Already exposed tools are not re-described, which keeps
- * mounts cheap; pass `force: true` after revealing form fields (a modal, tab or wizard step) to
- * re-describe them and re-register any whose name, description, schema or hints changed.
- */
-export function refreshAgentActions(opts?: RefreshAgentActionsOptions): void {
-  if (opts?.force) forceScheduled = true;
-  scheduleSync();
-}
-
-function scheduleSync(): void {
-  if (syncScheduled) return;
-  syncScheduled = true;
-  queueMicrotask(sync);
-}
-
 type Active = Map<string, [number, Entry]>;
 
 function warnUndescribable(name: string, err: unknown): void {
@@ -313,7 +229,7 @@ function buildTool(name: string, entry: Entry): WebMcpTool | null {
     name,
     description: d.description,
     inputSchema: d.inputSchema,
-    execute: (input, o) => executeAgentAction(name, input, o?.signal),
+    execute: (input, o) => executeRegistered(name, input, o?.signal),
     annotations: { readOnlyHint: d.readOnly, consequentialHint: d.destructive },
   };
   if (d.title !== undefined) tool.title = d.title;
@@ -356,21 +272,6 @@ function revokeStale(active: Active, force: boolean): Map<string, WebMcpTool | n
   return fresh;
 }
 
-function warnDuplicates(): void {
-  const counts = new Map<string, number>();
-  for (const entry of entries.values()) counts.set(entry.name, (counts.get(entry.name) ?? 0) + 1);
-  for (const [name, n] of counts) {
-    if (n > 1 && !warnedDuplicates.has(name)) {
-      warnedDuplicates.add(name);
-      console.warn(
-        withPrefix(
-          `duplicate agent action "${name}": only the first mounted one is exposed. Give each a unique name, or use one action with an id input.`,
-        ),
-      );
-    }
-  }
-}
-
 /**
  * Register tools not yet exposed; only these are described, so a sync costs one schema per new
  * action. A "failed" registration is unmarked so the next sync retries.
@@ -391,7 +292,7 @@ function exposeNew(active: Active, fresh: Map<string, WebMcpTool | null>): void 
         if (status !== "failed") return;
         unmark();
         // The old tool is already gone: retry once (a plain sync, which does not reschedule itself).
-        if (reregister) scheduleSync();
+        if (reregister) refreshAgentActions();
       },
       (err: unknown) => {
         console.warn(withPrefix(`could not expose agent action "${name}": ${errorMessage(err)}`));
@@ -401,24 +302,24 @@ function exposeNew(active: Active, fresh: Map<string, WebMcpTool | null>): void 
   }
 }
 
-function sync(): void {
-  const force = forceScheduled;
-  syncScheduled = forceScheduled = false;
-  warnDuplicates();
+function sync(force: boolean): void {
   // Without WebMCP nothing is exposed: skip describing (and building form schemas for) every action.
-  // A WebMCP that appears later is picked up by the next sync (a mount, unmount or refreshAgentActions).
   if (exposed.size === 0 && !hasModelContext()) return;
   const active = activeEntries();
   exposeNew(active, revokeStale(active, force));
 }
 
-/** Test-only: drop all registrations and module state. */
+/**
+ * Installed by core.ts once this module has loaded. Not installed here at the top level: a module
+ * side effect would make bundlers keep this file in every bundle that imports the root entry.
+ */
+export const engine: Engine = { sync, list: listRegistered, execute: executeRegistered };
+
+/** Test-only: drop all registrations and module state, and install the engine without a lazy load. */
 export function __resetForTests(): void {
   for (const { controller } of exposed.values()) controller.abort();
   exposed.clear();
-  entries.clear();
-  warnedDuplicates.clear();
   warnedIgnoredSchema.clear();
-  syncScheduled = forceScheduled = false;
-  nextId = 1;
+  __resetCoreForTests();
+  installEngine(engine);
 }

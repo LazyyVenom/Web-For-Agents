@@ -1,4 +1,4 @@
-import { stripBom } from "../shared/text";
+import { plural, stripBom } from "../shared/text";
 
 export interface RobotsRule {
   allow: boolean;
@@ -68,7 +68,7 @@ export function parseRobots(text: string): ParsedRobots {
   if (capped !== null) notes.push(`exceeds ${MAX_ROBOTS_BYTES / 1024} KiB; rules beyond that were ignored`);
   if (longPatterns > 0) {
     notes.push(
-      `has ${longPatterns} pattern${longPatterns === 1 ? "" : "s"} over ${MAX_PATTERN_CHARS} characters, which ${longPatterns === 1 ? "was" : "were"} ignored`,
+      `has ${plural(longPatterns, "pattern")} over ${MAX_PATTERN_CHARS} characters, which ${longPatterns === 1 ? "was" : "were"} ignored`,
     );
   }
   if (notes.length > 0) out.truncated = `robots.txt ${notes.join(" and ")}`;

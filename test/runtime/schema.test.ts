@@ -364,3 +364,349 @@ describe("0.4: @id, refs and extra fields", () => {
     expect(entry.serializeJsonLd).toBe(serializeJsonLd);
   });
 });
+
+describe("0.5: product rich results", () => {
+  const C = "https://schema.org";
+  it("product: offers array, AggregateOffer, condition and seller", () => {
+    const n = schema.product({
+      name: "p",
+      offers: [
+        {
+          price: 5,
+          priceCurrency: "USD",
+          availability: "BackOrder",
+          url: "https://a.com/p",
+          priceValidUntil: "2026-12-31",
+          itemCondition: "Refurbished",
+          seller: "Acme",
+        },
+        { price: "6.50", priceCurrency: "USD", availability: "SoldOut", itemCondition: "New", seller: schema.ref("#org") },
+      ],
+    });
+    expect(n.offers).toEqual([
+      {
+        "@type": "Offer",
+        price: 5,
+        priceCurrency: "USD",
+        availability: "https://schema.org/BackOrder",
+        url: "https://a.com/p",
+        priceValidUntil: "2026-12-31",
+        itemCondition: "https://schema.org/RefurbishedCondition",
+        seller: { "@type": "Organization", name: "Acme" },
+      },
+      {
+        "@type": "Offer",
+        price: "6.50",
+        priceCurrency: "USD",
+        availability: "https://schema.org/SoldOut",
+        itemCondition: "https://schema.org/NewCondition",
+        seller: { "@id": "#org" },
+      },
+    ]);
+    expect(schema.product({ name: "p", offers: { lowPrice: 10, highPrice: 20, offerCount: 3, priceCurrency: "EUR" } }).offers).toEqual({
+      "@type": "AggregateOffer",
+      lowPrice: 10,
+      highPrice: 20,
+      offerCount: 3,
+      priceCurrency: "EUR",
+    });
+  });
+
+  it("availability: every ItemAvailability value expands to a schema.org URL; the 0.4 offer is unchanged", () => {
+    const values = [
+      "InStock",
+      "OutOfStock",
+      "PreOrder",
+      "BackOrder",
+      "Discontinued",
+      "InStoreOnly",
+      "LimitedAvailability",
+      "OnlineOnly",
+      "SoldOut",
+      "PreSale",
+      "MadeToOrder",
+      "Reserved",
+    ] as const;
+    for (const availability of values) {
+      const n = schema.product({ name: "p", offers: { price: 1, priceCurrency: "USD", availability } });
+      expect((n.offers as any).availability).toBe(`https://schema.org/${availability}`);
+    }
+    expect(
+      serializeJsonLd(schema.product({ name: "p", offers: { price: 5, priceCurrency: "USD", availability: "InStock", url: "u" } })),
+    ).toBe(
+      '{"@context":"https://schema.org","@type":"Product","name":"p","offers":{"@type":"Offer","price":5,"priceCurrency":"USD","availability":"https://schema.org/InStock","url":"u"}}',
+    );
+  });
+
+  it("product: aggregateRating and review", () => {
+    const n = schema.product({
+      name: "p",
+      aggregateRating: { ratingValue: 4.6, reviewCount: 212, ratingCount: 300, bestRating: 5, worstRating: "1" },
+      review: [
+        { author: "Ann", reviewRating: { ratingValue: 5, bestRating: 5 }, reviewBody: "Great", datePublished: "2026-01-02", name: "Love it" },
+        { author: { name: "Bo", url: "https://bo.dev" }, reviewRating: { ratingValue: 3, worstRating: 1 } },
+        { author: schema.ref("#me"), reviewRating: { ratingValue: 4 } },
+      ],
+    });
+    expect(n.aggregateRating).toEqual({
+      "@type": "AggregateRating",
+      ratingValue: 4.6,
+      reviewCount: 212,
+      ratingCount: 300,
+      bestRating: 5,
+      worstRating: "1",
+    });
+    expect(n.review).toEqual([
+      {
+        "@type": "Review",
+        reviewBody: "Great",
+        datePublished: "2026-01-02",
+        name: "Love it",
+        author: { "@type": "Person", name: "Ann" },
+        reviewRating: { "@type": "Rating", ratingValue: 5, bestRating: 5 },
+      },
+      {
+        "@type": "Review",
+        author: { "@type": "Person", name: "Bo", url: "https://bo.dev" },
+        reviewRating: { "@type": "Rating", ratingValue: 3, worstRating: 1 },
+      },
+      { "@type": "Review", author: { "@id": "#me" }, reviewRating: { "@type": "Rating", ratingValue: 4 } },
+    ]);
+    expect(schema.product({ name: "p", review: { author: "Ann" } as any }).review).toEqual({
+      "@type": "Review",
+      author: { "@type": "Person", name: "Ann" },
+    });
+    expect(serializeJsonLd(n).match(/@context/g)).toHaveLength(1);
+  });
+
+  it("product: missing new fields are omitted", () => {
+    const missing = null as any;
+    expect(schema.product({ name: "p", aggregateRating: missing, review: missing, offers: [missing] })).toEqual({
+      "@context": C,
+      "@type": "Product",
+      name: "p",
+      offers: [],
+    });
+    expect(
+      schema.product({ name: "p", offers: { price: 1, priceCurrency: "USD", itemCondition: missing, seller: missing } }).offers,
+    ).toEqual({ "@type": "Offer", price: 1, priceCurrency: "USD" });
+  });
+
+  it("standalone aggregateRating and review builders, linkable by @id", () => {
+    expect(schema.aggregateRating({ ratingValue: 4, reviewCount: 2, itemReviewed: schema.ref("#p"), id: "#r" })).toEqual({
+      "@context": C,
+      "@type": "AggregateRating",
+      "@id": "#r",
+      ratingValue: 4,
+      reviewCount: 2,
+      itemReviewed: { "@id": "#p" },
+    });
+    const review = schema.review({ author: "Ann", reviewRating: { ratingValue: 5 }, id: "#rev" });
+    expect(review).toEqual({
+      "@context": C,
+      "@type": "Review",
+      "@id": "#rev",
+      author: { "@type": "Person", name: "Ann" },
+      reviewRating: { "@type": "Rating", ratingValue: 5 },
+    });
+    const p = schema.product({ name: "p", review: [review, schema.ref("#rev2")], aggregateRating: schema.ref("#r") });
+    expect(p.review).toEqual([
+      { "@type": "Review", "@id": "#rev", author: { "@type": "Person", name: "Ann" }, reviewRating: { "@type": "Rating", ratingValue: 5 } },
+      { "@id": "#rev2" },
+    ]);
+    expect(p.aggregateRating).toEqual({ "@id": "#r" });
+  });
+
+  it("softwareApplication takes the same aggregateRating fields", () => {
+    const n = schema.softwareApplication({ name: "s", aggregateRating: { ratingValue: "4.5", bestRating: "5", worstRating: 1, ratingCount: 8 } });
+    expect(n.aggregateRating).toEqual({ "@type": "AggregateRating", ratingValue: "4.5", bestRating: "5", worstRating: 1, ratingCount: 8 });
+  });
+
+  it("softwareApplication takes the same review input as product: one or an array, nodes and refs", () => {
+    const one = { author: "Ann", reviewRating: { ratingValue: 5 }, reviewBody: "Great" };
+    for (const review of [one, [one, schema.ref("#rev")]]) {
+      expect(schema.softwareApplication({ name: "s", review }).review).toEqual(schema.product({ name: "p", review }).review);
+    }
+    expect(schema.softwareApplication({ name: "s", review: one }).review).toEqual({
+      "@type": "Review",
+      author: { "@type": "Person", name: "Ann" },
+      reviewRating: { "@type": "Rating", ratingValue: 5 },
+      reviewBody: "Great",
+    });
+    expect(schema.softwareApplication({ name: "s", aggregateRating: schema.ref("#r") }).aggregateRating).toEqual({ "@id": "#r" });
+  });
+
+  it("types require a rating count and a review rating, as Google does", () => {
+    // @ts-expect-error an AggregateRating needs ratingCount or reviewCount
+    schema.product({ name: "p", aggregateRating: { ratingValue: 4 } });
+    // @ts-expect-error an AggregateRating needs ratingCount or reviewCount
+    schema.softwareApplication({ name: "s", aggregateRating: { ratingValue: 4 } });
+    // @ts-expect-error an AggregateRating needs ratingCount or reviewCount
+    schema.aggregateRating({ ratingValue: 4, bestRating: 5 });
+    // @ts-expect-error a Review needs reviewRating
+    schema.product({ name: "p", review: { author: "Ann" } });
+    // @ts-expect-error a Review needs reviewRating
+    schema.review({ author: "Ann", reviewBody: "Great" });
+    // @ts-expect-error a Review needs reviewRating
+    schema.softwareApplication({ name: "s", review: [{ author: "Ann" }] });
+    // Either count, or both, is enough.
+    schema.product({ name: "p", aggregateRating: { ratingValue: 4, ratingCount: 9 } });
+    schema.product({ name: "p", aggregateRating: { ratingValue: 4, reviewCount: 3 } });
+    schema.product({ name: "p", aggregateRating: { ratingValue: 4, ratingCount: 9, reviewCount: 3 } });
+  });
+});
+
+describe("0.5: one option set for every page builder", () => {
+  const C = "https://schema.org";
+  const options = {
+    name: "About",
+    description: "Who we are",
+    url: "https://a.com/about",
+    breadcrumb: [
+      { name: "Home", url: "https://a.com" },
+      { name: "About", url: "https://a.com/about" },
+    ],
+    mainEntity: schema.ref("#org"),
+    isPartOf: schema.ref("#site"),
+    datePublished: "2026-01-01",
+    dateModified: "2026-02-01",
+    inLanguage: "en",
+    image: "https://a.com/a.png",
+    primaryImageOfPage: "https://a.com/hero.png",
+    id: "https://a.com/about#page",
+  };
+  const fields = {
+    "@id": "https://a.com/about#page",
+    name: "About",
+    description: "Who we are",
+    url: "https://a.com/about",
+    breadcrumb: {
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        { "@type": "ListItem", position: 1, name: "Home", item: "https://a.com" },
+        { "@type": "ListItem", position: 2, name: "About", item: "https://a.com/about" },
+      ],
+    },
+    mainEntity: { "@id": "#org" },
+    isPartOf: { "@id": "#site" },
+    datePublished: "2026-01-01",
+    dateModified: "2026-02-01",
+    inLanguage: "en",
+    image: "https://a.com/a.png",
+    primaryImageOfPage: { "@type": "ImageObject", url: "https://a.com/hero.png" },
+  };
+
+  it("webPage and profilePage take the same options and differ only in @type", () => {
+    const web = schema.webPage(options);
+    const profile = schema.profilePage(options);
+    expect(web).toEqual({ "@context": C, "@type": "WebPage", ...fields });
+    expect({ ...profile, "@type": "WebPage" }).toEqual(web);
+    expect(serializeJsonLd(web).match(/@context/g)).toHaveLength(1);
+  });
+
+  it("faqPage takes the same options next to its questions", () => {
+    const { mainEntity: _mainEntity, ...rest } = options;
+    const { mainEntity: _entity, ...expected } = fields;
+    expect(schema.faqPage([{ question: "q", answer: "a" }], rest)).toEqual({
+      "@context": C,
+      "@type": "FAQPage",
+      ...expected,
+      mainEntity: [{ "@type": "Question", name: "q", acceptedAnswer: { "@type": "Answer", text: "a" } }],
+    });
+  });
+
+  it("breadcrumb is a node, a ref or its items; primaryImageOfPage a URL or a node", () => {
+    const crumbs = schema.breadcrumbList([{ name: "Home", url: "/" }]);
+    expect(schema.webPage({ name: "P", url: "u", breadcrumb: crumbs }).breadcrumb).toEqual({
+      "@type": "BreadcrumbList",
+      itemListElement: [{ "@type": "ListItem", position: 1, name: "Home", item: "/" }],
+    });
+    expect(schema.profilePage({ breadcrumb: [{ name: "Home", url: "/" }] }).breadcrumb).toEqual(
+      schema.webPage({ name: "P", url: "u", breadcrumb: crumbs }).breadcrumb,
+    );
+    const image = { "@type": "ImageObject", url: "/i.png", width: 800 };
+    expect(schema.profilePage({ primaryImageOfPage: image }).primaryImageOfPage).toEqual(image);
+    expect(schema.profilePage({ primaryImageOfPage: null as any, breadcrumb: null as any })).toEqual({ "@context": C, "@type": "ProfilePage" });
+  });
+
+  it("keeps the 0.4 key order and profilePage's dateCreated", () => {
+    expect(serializeJsonLd(schema.webPage({ breadcrumb: schema.ref("#b"), name: "P", url: "u" }))).toBe(
+      '{"@context":"https://schema.org","@type":"WebPage","breadcrumb":{"@id":"#b"},"name":"P","url":"u"}',
+    );
+    expect(schema.profilePage({ dateCreated: "2025-01-01" }).dateCreated).toBe("2025-01-01");
+  });
+});
+
+describe("0.5: offers, breadcrumbs and unsafe keys", () => {
+  const C = "https://schema.org";
+  const priced = {
+    "@type": "Offer",
+    priceCurrency: "EUR",
+    priceSpecification: { "@type": "UnitPriceSpecification", price: 9, priceCurrency: "EUR", referenceQuantity: 1 },
+  };
+
+  it("product and softwareApplication offers keep a node or a ref as given", () => {
+    for (const build of [schema.product, schema.softwareApplication]) {
+      expect(build({ name: "p", offers: priced }).offers).toEqual(priced);
+      expect(build({ name: "p", offers: [priced, schema.ref("#offer")] }).offers).toEqual([priced, { "@id": "#offer" }]);
+      expect(build({ name: "p", offers: { ...priced, "@context": C } }).offers).toEqual(priced);
+    }
+  });
+
+  it("softwareApplication takes an offers array and an AggregateOffer like product", () => {
+    const tiers = [
+      { price: 0, priceCurrency: "EUR" },
+      { price: 49, priceCurrency: "EUR" },
+    ];
+    expect(schema.softwareApplication({ name: "S", offers: tiers }).offers).toEqual([
+      { "@type": "Offer", price: 0, priceCurrency: "EUR" },
+      { "@type": "Offer", price: 49, priceCurrency: "EUR" },
+    ]);
+    expect(schema.softwareApplication({ name: "S", offers: { lowPrice: 0, highPrice: 49, priceCurrency: "EUR" } }).offers).toEqual({
+      "@type": "AggregateOffer",
+      lowPrice: 0,
+      highPrice: 49,
+      priceCurrency: "EUR",
+    });
+  });
+
+  it("an offer is an AggregateOffer only when lowPrice or highPrice has a value", () => {
+    const o = { price: 5, priceCurrency: "USD", lowPrice: undefined, highPrice: null } as any;
+    expect(schema.product({ name: "p", offers: o }).offers).toEqual({ "@type": "Offer", price: 5, priceCurrency: "USD" });
+    expect((schema.product({ name: "p", offers: { highPrice: 9, priceCurrency: "USD" } as any }).offers as any)["@type"]).toBe(
+      "AggregateOffer",
+    );
+  });
+
+  it("an empty breadcrumb array writes no breadcrumb", () => {
+    expect(schema.webPage({ name: "P", url: "u", breadcrumb: [] })).not.toHaveProperty("breadcrumb");
+    expect(schema.profilePage({ breadcrumb: [null as any] })).not.toHaveProperty("breadcrumb");
+  });
+
+  it("a __proto__ key in input data is dropped and never changes a prototype", () => {
+    const evil = (json: string) => JSON.parse(json);
+    const nodes = [
+      schema.product({ name: "p", ...evil('{"__proto__":{"polluted":1}}'), extra: evil('{"x":{"__proto__":{"polluted":1}}}') }),
+      schema.product({
+        name: "p",
+        offers: evil('{"price":1,"priceCurrency":"USD","seller":{"@type":"Organization","__proto__":{"polluted":1}}}'),
+      }),
+      schema.review(evil('{"author":"Ann","reviewRating":{"ratingValue":5,"__proto__":{"polluted":1}},"__proto__":{"polluted":1}}')),
+      schema.webPage({ name: "P", url: "u", ...evil('{"__proto__":{"polluted":1},"mainEntity":{"@type":"Thing","__proto__":{"polluted":1}}}') }),
+    ];
+    const walk = (v: unknown): void => {
+      if (v === null || typeof v !== "object") return;
+      if (!Array.isArray(v)) {
+        expect(Object.getPrototypeOf(v)).toBe(Object.prototype);
+        expect(Object.hasOwn(v, "__proto__")).toBe(false);
+      }
+      Object.values(v).forEach(walk);
+    };
+    for (const n of nodes) {
+      walk(n);
+      expect((n as any).polluted).toBeUndefined();
+      expect(serializeJsonLd(n)).not.toMatch(/__proto__|polluted/);
+    }
+    expect(({} as any).polluted).toBeUndefined();
+  });
+});

@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as formSchema from "../../../src/runtime/agent/formSchema";
-import { listAgentActions, refreshAgentActions, registerAgentAction } from "../../../src/runtime/agent/registry";
+import { refreshAgentActions, registerAgentAction } from "../../../src/runtime/agent/core";
+import { listRegistered } from "../../../src/runtime/agent/registry";
 import { installFakeModelContext, resetAgentRuntime } from "../../helpers/agent";
 
 vi.mock("../../../src/runtime/agent/formSchema", async (importOriginal) => {
@@ -45,11 +46,11 @@ describe("registry sync cost", () => {
     expect(schemaFromForm).not.toHaveBeenCalled();
   });
 
-  it("listAgentActions and the window global build schemas only when called", async () => {
+  it("listRegistered and the window global build schemas only when called", async () => {
     mountForms(3);
     await flush();
     expect(schemaFromForm).not.toHaveBeenCalled();
-    expect(listAgentActions()).toHaveLength(3);
+    expect(listRegistered()).toHaveLength(3);
     expect(schemaFromForm).toHaveBeenCalledTimes(3);
     const g = (window as unknown as { __WEB_FOR_AGENTS__: { actions(): unknown[] } }).__WEB_FOR_AGENTS__;
     expect(g.actions()).toHaveLength(3);

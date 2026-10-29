@@ -3,12 +3,21 @@ import {
   ACTION_DESCRIPTION_ATTR,
   ACTION_DESTRUCTIVE_ATTR,
   ACTION_KIND_ATTR,
+  ACTION_READONLY_ATTR,
   AGENT_GLOBAL,
   LINK_ACTION_SELECTOR,
 } from "../shared/conventions";
-import { firstPerName, linkActions, type LinkActionMarkup } from "../shared/markupActions";
+import {
+  differingDuplicates,
+  firstPerName,
+  linkActions,
+  type LinkActionMarkup,
+  type MarkupDefinition,
+} from "../shared/markupActions";
 import {
   AGENT_MAP_VERSION,
+  actionCountText,
+  agentMapStats,
   type AgentActionDescriptor,
   type AgentGlobal,
   type AgentMap,
@@ -30,6 +39,8 @@ export interface AgentPageData {
   actions: AgentActionDescriptor[];
   /** Link actions in the markup, hrefs not yet checked: `linkActions` resolves them at finalize. */
   links?: LinkActionMarkup[];
+  /** Every action element's hint attributes (see markupDefinitions), to report names defined differently on one page. */
+  markup?: MarkupDefinition[];
 }
 
 /** The argument of collectAgentPageInPage: the conventions it reads, passed in as JSON. */
@@ -39,6 +50,7 @@ export interface AgentPageInPageArg {
   nameAttr: string;
   descriptionAttr: string;
   destructiveAttr: string;
+  readOnlyAttr: string;
   kindAttr: string;
 }
 
@@ -48,18 +60,33 @@ export const AGENT_PAGE_IN_PAGE_ARG: AgentPageInPageArg = {
   nameAttr: ACTION_ATTR,
   descriptionAttr: ACTION_DESCRIPTION_ATTR,
   destructiveAttr: ACTION_DESTRUCTIVE_ATTR,
+  readOnlyAttr: ACTION_READONLY_ATTR,
   kindAttr: ACTION_KIND_ATTR,
 };
 
 /**
  * Runs inside the page (happy-dom or Chrome). Must stay self-contained: no imports or outer
- * helpers, so it survives toString() / page.evaluate. Reads the registry global and the raw link
- * action markup (same fields as markupLinks); hrefs are checked outside the page, never followed.
+ * helpers, so it survives toString() / page.evaluate. Reads the registry global, the raw link
+ * action markup (same fields as markupLinks) and every action element's hint attributes (same
+ * fields as markupDefinitions); hrefs are checked outside the page, never followed.
  * An `<a href>` whose kind attribute names another kind ("handler", "click") is not a link action.
  */
 export function collectAgentPageInPage(arg: AgentPageInPageArg): AgentPageData {
   const api = (window as unknown as Record<string, Partial<AgentGlobal> | undefined>)[arg.globalKey];
   const actions = api && typeof api.actions === "function" ? api.actions() : [];
+  const markup: MarkupDefinition[] = [];
+  document.querySelectorAll(`[${arg.nameAttr}]`).forEach((el) => {
+    const name = (el.getAttribute(arg.nameAttr) || "").trim();
+    if (!name) return;
+    markup.push({
+      name,
+      kind: (el.getAttribute(arg.kindAttr) || "").trim(),
+      description: el.getAttribute(arg.descriptionAttr) ?? "",
+      destructive: el.getAttribute(arg.destructiveAttr) === "true",
+      readOnly: el.getAttribute(arg.readOnlyAttr) === "true",
+      href: el.tagName === "A" ? el.getAttribute("href") : null,
+    });
+  });
   const links: LinkActionMarkup[] = [];
   document.querySelectorAll(arg.linkSelector).forEach((el) => {
     const name = (el.getAttribute(arg.nameAttr) || "").trim();
@@ -72,7 +99,7 @@ export function collectAgentPageInPage(arg: AgentPageInPageArg): AgentPageData {
       href: el.getAttribute("href") || "",
     });
   });
-  return { actions, links };
+  return { actions, links, markup };
 }
 
 export interface AgentMapPageInput {
@@ -99,24 +126,65 @@ function toPage(siteUrl: string, p: AgentMapPageInput): AgentMapPage {
   };
 }
 
-export function buildAgentMap(input: {
+/** JSON with object keys sorted at every depth, so equal definitions compare equal whatever their key order. */
+function canonicalJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(",")}]`;
+  if (typeof v === "object" && v !== null) {
+    const entries = Object.entries(v).filter(([, x]) => x !== undefined).sort(([a], [b]) => compareStrings(a, b));
+    return `{${entries.map(([k, x]) => `${JSON.stringify(k)}:${canonicalJson(x)}`).join(",")}}`;
+  }
+  return JSON.stringify(v);
+}
+
+/**
+ * Splits out the actions found on every page with the same definition (name, kind, href, schema,
+ * description and flags all equal), so a footer is listed once instead of on each page. Pages keep
+ * the rest in their order; a name defined differently on any page stays on every page. Needs 2 or
+ * more pages. Expects at most one action per name on a page (see toPage).
+ */
+export function hoistSiteActions(pages: AgentMapPage[]): { actions: AgentActionDescriptor[]; pages: AgentMapPage[] } {
+  if (pages.length < 2) return { actions: [], pages };
+  const keysOf = pages.map((p) => new Map(p.actions.map((a) => [a.name, canonicalJson(a)])));
+  const [first, ...rest] = keysOf;
+  const shared = new Set([...first!].filter(([name, key]) => rest.every((k) => k.get(name) === key)).map(([name]) => name));
+  if (shared.size === 0) return { actions: [], pages };
+  return {
+    actions: pages[0]!.actions.filter((a) => shared.has(a.name)),
+    pages: pages.map((p) => ({ ...p, actions: p.actions.filter((a) => !shared.has(a.name)) })),
+  };
+}
+
+interface AgentMapInput {
   siteUrl: string;
   siteName?: string;
   /** Absolute llms.txt URL. */
   llmsUrl?: string;
   pages: AgentMapPageInput[];
-}): string {
+  /** List the actions found on every page once, in `site.actions`. Default true. */
+  siteActions?: boolean;
+}
+
+/** The agent map as written to agents.json. */
+export function buildAgentMap(input: AgentMapInput): string {
+  return agentMapJson(agentMapOf(input));
+}
+
+const agentMapJson = (map: AgentMap): string => JSON.stringify(map, null, 2) + "\n";
+
+function agentMapOf(input: AgentMapInput): AgentMap {
   const site: AgentMap["site"] = { url: trimTrailingSlash(input.siteUrl) };
   if (input.siteName) site.name = input.siteName;
-  const map: AgentMap = {
+  const all = [...input.pages].sort(byRoute).map((p) => toPage(input.siteUrl, p));
+  const hoisted = input.siteActions === false ? { actions: [], pages: all } : hoistSiteActions(all);
+  if (hoisted.actions.length > 0) site.actions = hoisted.actions;
+  return {
     version: AGENT_MAP_VERSION,
     generator: AGENT_MAP_GENERATOR,
     site,
     ...(input.llmsUrl ? { llms: input.llmsUrl } : {}),
     webmcp: { ...WEBMCP_INFO },
-    pages: [...input.pages].sort(byRoute).map((p) => toPage(input.siteUrl, p)),
+    pages: hoisted.pages,
   };
-  return JSON.stringify(map, null, 2) + "\n";
 }
 
 export function agentMapLlmsSection(siteUrl: string, fileName: string): LlmsSection {
@@ -129,9 +197,15 @@ export function agentMapLlmsSection(siteUrl: string, fileName: string): LlmsSect
 }
 
 /** Prerender extension: collects each page's actions and link actions and writes the agent map. */
-export function agentMapExtension(opts: { siteUrl: string; fileName: string }): PrerenderExtension<AgentPageData> {
-  const { siteUrl, fileName } = opts;
+export function agentMapExtension(opts: {
+  siteUrl: string;
+  fileName: string;
+  /** See buildAgentMap. Default true. */
+  siteActions?: boolean;
+}): PrerenderExtension<AgentPageData> {
+  const { siteUrl, fileName, siteActions } = opts;
   const data = new Map<string, AgentPageData>();
+  let summary: string | undefined;
   return {
     name: "agent-map",
     inPage: collectAgentPageInPage,
@@ -144,6 +218,10 @@ export function agentMapExtension(opts: { siteUrl: string; fileName: string }): 
       const pages = ctx.pages.map((p): AgentMapPageInput => {
         const found = data.get(p.route);
         const actions = found?.actions ?? [];
+        // Identical copies (a product grid) are normal; differing ones lose all but the first.
+        for (const [name, n] of differingDuplicates(found?.markup ?? [])) {
+          ctx.warn(`${p.route}: ${n} different actions named ${name}; only the first is listed`);
+        }
         // Same rules on both paths; actions found another way win over links of the same name.
         const links = linkActions(
           found?.links ?? [],
@@ -157,7 +235,10 @@ export function agentMapExtension(opts: { siteUrl: string; fileName: string }): 
         if (p.mdUrl) page.markdown = p.mdUrl;
         return page;
       });
-      ctx.emitFile(fileName, buildAgentMap({ siteUrl, siteName: ctx.site.title, llmsUrl: ctx.llmsUrl, pages }));
+      const map = agentMapOf({ siteUrl, siteName: ctx.site.title, llmsUrl: ctx.llmsUrl, pages, siteActions });
+      summary = actionCountText(agentMapStats(map));
+      ctx.emitFile(fileName, agentMapJson(map));
     },
+    summary: () => summary,
   };
 }
