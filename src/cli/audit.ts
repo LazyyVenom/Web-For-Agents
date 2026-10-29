@@ -61,10 +61,12 @@ export interface AuditContext {
   isPrivate: (host: string) => Promise<boolean>;
   /** Site file fetches by URL. Page and markdown fetches are never cached. */
   siteFiles: Map<string, Promise<FetchResult>>;
+  /** Refuse every redirect to another origin (a site audit never leaves the audited origin). */
+  sameOriginRedirects: boolean;
 }
 
 /** @internal */
-export function createAuditContext(hooks: AuditHooks = {}): AuditContext {
+export function createAuditContext(hooks: AuditHooks = {}, sameOriginRedirects = false): AuditContext {
   const classify = hooks.isPrivateHost ?? isPrivateHost;
   const classified = new Map<string, Promise<boolean>>();
   return {
@@ -74,6 +76,7 @@ export function createAuditContext(hooks: AuditHooks = {}): AuditContext {
       return p;
     },
     siteFiles: new Map(),
+    sameOriginRedirects,
   };
 }
 
@@ -93,6 +96,7 @@ export function auditFetcher(opts: AuditOptions, ctx: AuditContext, onWarning: (
       userAgent: opts.userAgent,
       isPrivateHost: ctx.isPrivate,
       ...(opts.blockPrivateRedirects ? { blockPrivateRedirects: true } : {}),
+      ...(ctx.sameOriginRedirects ? { sameOriginRedirects: true } : {}),
       ...(accept ? { accept } : {}),
     });
   return async (u, accept, cached = false) => {
