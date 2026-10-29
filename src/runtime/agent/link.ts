@@ -7,8 +7,6 @@ import {
   ACTION_KIND_ATTR,
   ACTION_READONLY_ATTR,
 } from "../../shared/conventions";
-import { errorMessage, withPrefix } from "../../shared/errors";
-import { hasModelContext } from "./detect";
 
 /** Attributes that describe an action in the markup, so static HTML (agents.json, the overlay) sees it. */
 export type AgentHintProps = {
@@ -62,44 +60,48 @@ export type AgentLinkRef = (el: Element | null) => (() => void) | undefined;
 
 export type AgentLinkProps = AgentHintProps & { ref: AgentLinkRef };
 
-type LinkTools = typeof import("./linkTools");
-
-let tools: LinkTools | null = null;
-let loading: Promise<LinkTools> | null = null;
-
-/** Imports linkTools.ts once (a failed import is retried on the next mount). */
-function loadTools(): Promise<LinkTools> {
-  loading ??= import("./linkTools").then(
-    (m) => (tools = m),
-    (err: unknown) => {
-      loading = null;
-      throw err;
-    },
-  );
-  return loading;
+/**
+ * What a `register` ref keeps between calls: the element it is on and, once the link tools have
+ * attached it, the function that releases it. linkTools.ts owns the rest.
+ */
+export interface LinkHandle {
+  el: Element | null;
+  off?: () => void;
 }
 
-function linkRef(name: string, description: string, destructive: boolean): AgentLinkRef {
-  let current: Element | null = null;
-  let release: (() => void) | null = null;
+type LinkTools = typeof import("./linkTools");
+
+let tools: LinkTools | undefined;
+/** One shared import, so links attach in mount order; cleared on failure, so the next mount retries. */
+let loading: Promise<LinkTools> | undefined;
+
+/** document.modelContext, else the legacy navigator.modelContext (see detect.ts); false during SSR. */
+const hasWebMcp = (): boolean =>
+  typeof document !== "undefined" &&
+  typeof (
+    (document as { modelContext?: { registerTool?: unknown } }).modelContext ??
+    (navigator as { modelContext?: { registerTool?: unknown } }).modelContext
+  )?.registerTool === "function";
+
+/** The eager half of a `register` ref: the link tools (imported once, only with WebMCP) do the work. */
+function linkRef(spec: AgentLinkSpec): AgentLinkRef {
+  const h: LinkHandle = { el: null };
   const detach = (): void => {
-    current = null;
-    release?.();
-    release = null;
-  };
-  const attach = (el: Element, m: LinkTools): void => {
-    if (current === el && !release) release = m.retainLinkTool(name, description, destructive, el);
+    h.el = null;
+    h.off?.();
+    h.off = undefined;
   };
   return (el) => {
-    if (el === current) return detach;
+    if (el === h.el) return detach;
     detach();
-    if (!el || !hasModelContext()) return undefined;
-    current = el;
-    if (tools) attach(el, tools);
+    if (!el || !hasWebMcp()) return undefined;
+    h.el = el;
+    if (tools) tools.attach(h, spec);
     else {
-      loadTools().then(
-        (m) => attach(el, m),
-        (err: unknown) => console.warn(withPrefix(`could not load the agent runtime: ${errorMessage(err)}`)),
+      // A failed import (the browser logs the request) is retried by the next mount.
+      (loading ??= import("./linkTools")).then(
+        (m) => (tools = m).attach(h, spec),
+        () => (loading = undefined),
       );
     }
     return detach;
@@ -117,5 +119,5 @@ export function agentLinkProps(spec: AgentLinkSpec): AgentHintProps;
 export function agentLinkProps(spec: AgentLinkSpec): AgentHintProps | AgentLinkProps {
   assertValidActionName(spec.name);
   const props = hintProps(spec.name, spec.description, "link", spec.destructive);
-  return spec.register ? { ...props, ref: linkRef(spec.name, spec.description, spec.destructive === true) } : props;
+  return spec.register ? { ...props, ref: linkRef(spec) } : props;
 }

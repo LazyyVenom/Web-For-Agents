@@ -119,10 +119,13 @@ function splitSizes(outDir: string, entry: string): { eager: number; lazy: numbe
   return { eager: eagerBytes, lazy: lazyBytes };
 }
 
-/** Builds `formConsumer(from)` with the consumer's own Vite, react external and minified. */
-async function viteSplit(dir: string, from: string): Promise<{ eager: number; lazy: number }> {
-  const name = from.endsWith("/form") ? "split-form" : "split-root";
-  writeFileSync(path.join(dir, `${name}.mjs`), formConsumer(from));
+/**
+ * Builds `source` with the consumer's own Vite, minified, react external, and returns the gzip
+ * sizes of its eager and lazy files. `modulePreload: false` leaves out the preload links Vite adds
+ * to index.html; the `__vitePreload` wrapper around each import() stays either way.
+ */
+async function viteBuild(dir: string, name: string, source: string, modulePreload = false): Promise<{ eager: number; lazy: number }> {
+  writeFileSync(path.join(dir, `${name}.mjs`), source);
   writeFileSync(
     path.join(dir, `${name}.config.mjs`),
     `export default ${JSON.stringify({
@@ -131,7 +134,7 @@ async function viteSplit(dir: string, from: string): Promise<{ eager: number; la
         outDir: name,
         emptyOutDir: true,
         minify: true,
-        modulePreload: false,
+        modulePreload,
         rollupOptions: {
           input: `${name}.mjs`,
           preserveEntrySignatures: "strict",
@@ -144,6 +147,13 @@ async function viteSplit(dir: string, from: string): Promise<{ eager: number; la
   await sh(path.join(dir, "node_modules/.bin/vite"), ["build", "--config", `${name}.config.mjs`], dir);
   return splitSizes(path.join(dir, name), "entry.js");
 }
+
+/** Builds `formConsumer(from)` with the consumer's own Vite. */
+const viteSplit = (dir: string, from: string) => viteBuild(dir, from.endsWith("/form") ? "split-form" : "split-root", formConsumer(from));
+
+/** A footer that marks one link with agentLinkProps from /link, optionally with `register`. */
+const footerSource = (register: boolean) =>
+  `import { agentLinkProps } from "@anubhav-choubey/web-for-agents/link";\nexport const footer = agentLinkProps({ name: "email", description: "Email me"${register ? ", register: true" : ""} });\n`;
 
 let work: string;
 let app: string;
@@ -162,7 +172,7 @@ beforeAll(async () => {
   // deleted first, so the published package.json has no install script for npm to warn about.
   const stage = path.join(work, "stage");
   mkdirSync(stage);
-  for (const f of ["package.json", "README.md", "LICENSE", "CHANGELOG.md", "dist"]) cpSync(path.join(repo, f), path.join(stage, f), { recursive: true });
+  for (const f of ["package.json", "README.md", "LICENSE", "CHANGELOG.md", "dist", "schemas"]) cpSync(path.join(repo, f), path.join(stage, f), { recursive: true });
   await sh("npm", ["pkg", "delete", "scripts.prepare"], stage);
   // dist/ is already built; --ignore-scripts keeps any other lifecycle output out of the JSON.
   const packed = JSON.parse(await sh("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", work], stage)) as Array<{
@@ -208,6 +218,7 @@ describe(`packed package in a Vite ${viteMajor} app`, () => {
   it("ships only dist and package metadata", () => {
     expect(packedFiles).toContain("dist/bin.js");
     expect(packedFiles).toContain("CHANGELOG.md");
+    expect(packedFiles).toContain("schemas/agents.v2.schema.json");
     expect(packedFiles).toContain("dist/vite.js");
     expect(packedFiles).toContain("dist/schema.js");
     expect(packedFiles).toContain("dist/schema.d.ts");
@@ -262,6 +273,17 @@ describe(`packed package in a Vite ${viteMajor} app`, () => {
       // Measured at 2988 bytes gzip with Vite 8, root and /form alike, plus about 10%. The engine (about 5 KB) was eager before.
       expect(eager, from).toBeLessThan(3290);
       expect(lazy, from).toBeGreaterThan(4000);
+    }
+  });
+
+  it("a footer using only /link stays small with Vite, which adds its own preload helper for the import()", async () => {
+    // Measured eager gzip in this build (strict entry signatures), register or not: 1512 bytes with Vite 8 (a 712-byte
+    // entry plus Vite's preload helper, 800 bytes, in a chunk of its own) and 1265 with Vite 7 (helper inlined), plus
+    // about 10%. In an app's own entry chunk: 1301 (Vite 8) and 1169 (Vite 7). Vite adds the helper to any chunk with an import().
+    for (const register of [false, true]) {
+      const { eager, lazy } = await viteBuild(app, register ? "vite-footer-register" : "vite-footer", footerSource(register), true);
+      expect(eager, String(register)).toBeLessThan(1660);
+      expect(lazy, String(register)).toBeGreaterThan(4000);
     }
   });
 
@@ -361,21 +383,19 @@ describe("packed package without vite", () => {
     expect(out.link["data-agent-kind"]).toBe("link");
   });
 
-  it("a footer using only agentLinkProps from /link bundles to under 1 KB gzip eager, with or without register", async () => {
-    // Measured with esbuild: 876 and 881 bytes. The link tools and the engine are only in lazy chunks.
+  it("a footer using only agentLinkProps from /link bundles to about 0.6 KB gzip eager with esbuild, with or without register", async () => {
+    // Measured with esbuild: 623 bytes, register or not, plus about 10%. The link tools and the engine are only in lazy chunks.
     for (const register of [false, true]) {
       const name = register ? "footer-register" : "footer";
       const entry = path.join(bare, `${name}.mjs`);
-      writeFileSync(
-        entry,
-        `import { agentLinkProps } from "@anubhav-choubey/web-for-agents/link";\nexport const footer = agentLinkProps({ name: "email", description: "Email me"${register ? ", register: true" : ""} });\n`,
-      );
+      writeFileSync(entry, footerSource(register));
       const outdir = path.join(bare, `${name}-split`);
       await sh(esbuildBin, [entry, "--bundle", "--minify", "--format=esm", "--splitting", `--outdir=${outdir}`, "--log-level=error"], bare);
       const code = readFileSync(path.join(outdir, `${name}.js`), "utf8");
       expect(code, name).not.toMatch(/\bfrom\s*["']/);
+      expect(code.match(/\bimport\(/g), name).toHaveLength(1);
       const { eager, lazy } = splitSizes(outdir, `${name}.js`);
-      expect(eager, name).toBeLessThan(1024);
+      expect(eager, name).toBeLessThan(690);
       expect(lazy, name).toBeGreaterThan(4000);
     }
   });
@@ -399,15 +419,15 @@ describe("packed package without vite", () => {
     const engine = files.filter((f) => readFileSync(path.join(outdir, f), "utf8").includes("requestSubmit"));
     expect(engine).toHaveLength(1);
     const { eager } = splitSizes(outdir, "link-form.js");
-    // Measured at 3266 bytes gzip: /form (2516) plus /link's register code.
-    expect(eager).toBeLessThan(3600);
+    // Measured at 3049 bytes gzip: /form (2553) plus /link's register code, plus about 10%.
+    expect(eager).toBeLessThan(3350);
   });
 
   it("an AgentForm + useAgentAction page bundled by esbuild loads the agent engine lazily, from /form and the root", async () => {
-    // Eager gzip, measured plus about 10%: /form 2351, root 2608. The root was 7165 while it imported the engine statically.
+    // Eager gzip, measured plus about 10%: /form 2553, root 2643. The root was 7165 while it imported the engine statically.
     const budgets: Array<[string, string, number]> = [
-      ["form-page", "@anubhav-choubey/web-for-agents/form", 2600],
-      ["root-page", "@anubhav-choubey/web-for-agents", 2870],
+      ["form-page", "@anubhav-choubey/web-for-agents/form", 2810],
+      ["root-page", "@anubhav-choubey/web-for-agents", 2910],
     ];
     const externals = ["react", "react/jsx-runtime", "react-dom", "react-dom/client"].map((m) => `--external:${m}`);
     for (const [name, from, budget] of budgets) {

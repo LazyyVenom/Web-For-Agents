@@ -182,11 +182,19 @@ export async function executeAgentAction(name: string, input: unknown, signal?: 
   return e.execute(name, input, signal);
 }
 
+let onRegistered: ((name: string) => void) | null = null;
+
+/** Set by linkTools.ts: called with each name registerAgentAction registers, before it is exposed. */
+export function setOnAgentActionRegistered(fn: (name: string) => void): void {
+  onRegistered = fn;
+}
+
 export function registerAgentAction(spec: () => AgentActionSpec, target?: () => Element | null): () => void {
   const name = spec().name;
   assertValidActionName(name);
   const id = nextId++;
   entries.set(id, { name, spec, target });
+  onRegistered?.(name);
   installGlobal();
   scheduleSync();
   let done = false;
