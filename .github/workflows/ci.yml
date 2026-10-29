@@ -30,8 +30,8 @@ jobs:
         # Vite 8 and plugin-react 6 need Node ^20.19 || >=22.12, so 20 is pinned to 20.19.
         node: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '["20.19", "22", "24"]' || '["22"]') }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -53,8 +53,8 @@ jobs:
         # Vite 8 is the installed version, already tested by the "Node 22" job.
         vite: ["5", "6", "7"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: npm
@@ -77,8 +77,8 @@ jobs:
       matrix:
         vite: ["5", "6", "7", "8"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: npm
