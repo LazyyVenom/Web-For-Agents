@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { build } from "vite";
 import { webForAgents } from "../../src/vite/index";
 import type { WebForAgentsOptions } from "../../src/vite/options";
+import { parseHtml } from "../../src/vite/prerender/dom";
 import { startStaticServer } from "../../src/vite/prerender/server";
 import { probeChrome } from "../helpers/chrome";
 import { copyFixture, distFiles, jsBundle, makeTempDir, removeFixtureCopies } from "./helpers";
@@ -72,6 +73,23 @@ describe("default build", () => {
     expect(html).toContain('<link rel="alternate" type="text/markdown" href="https://example.com/about.md">');
     expect(html).not.toContain("data-wfa-probe");
     expect(html).toContain('<script type="module"');
+  });
+
+  it("captures each page's <html lang> and dir, og:locale and hreflang alternates", () => {
+    const { document: hidden, dispose } = parseHtml(read(dist, "hidden/index.html"));
+    try {
+      expect([hidden.documentElement.getAttribute("lang"), hidden.documentElement.getAttribute("dir")]).toEqual(["ar", "rtl"]);
+      expect(hidden.querySelector('meta[property="og:locale"]')?.getAttribute("content")).toBe("ar_EG");
+      const alternates = [...hidden.querySelectorAll('meta[property="og:locale:alternate"]')].map((m) => m.getAttribute("content"));
+      expect(alternates).toEqual(["en_US"]);
+      const links = [...hidden.querySelectorAll('link[rel="alternate"][hreflang]')].map((l) => `${l.getAttribute("hreflang")} ${l.getAttribute("href")}`);
+      expect(links).toEqual(["ar https://example.com/hidden", "en https://example.com/about", "x-default https://example.com/about"]);
+    } finally {
+      dispose();
+    }
+    const about = read(dist, "about/index.html");
+    expect(about).toMatch(/<html lang="en" dir="ltr"[ >]/);
+    expect(about).not.toContain("hreflang");
   });
 
   it("runs lazy chunks", () => {

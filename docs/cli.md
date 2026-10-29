@@ -51,10 +51,10 @@ The JSON-LD check fails when there is no JSON-LD or none of it parses. It warns 
 | `BreadcrumbList` | `itemListElement`; each item has `position`, `name` (or `item.name`) and `item` (not needed on the last item) |
 | `Event` | `name`, `startDate`, `location`; `location.address` when the location is a `Place` |
 | `FAQPage` | `mainEntity`; each question has `name` and `acceptedAnswer`; each answer has `text` |
-| `Product` | `name`; one of `offers`, `aggregateRating` or `review`; an `Offer` has `price` (or `priceSpecification.price`); an `AggregateOffer` has `lowPrice` and `priceCurrency` |
+| `Product` | `name`; one of `offers`, `aggregateRating` or `review`; an `Offer` has `price` (or `priceSpecification.price`); an `AggregateOffer` has `lowPrice` and `priceCurrency`; an `aggregateRating` has `ratingValue` and `ratingCount` (or `reviewCount`); each `review` has an `author` with a `name` and a `reviewRating` with a `ratingValue` |
 | `ProfilePage` | `mainEntity`, which has `name` (or `alternateName`) |
 | `Recipe` | `name`, `image` |
-| `SoftwareApplication`, `MobileApplication`, `WebApplication` | `name`, `offers` with `price` (`0` for free apps), and `aggregateRating` or `review` |
+| `SoftwareApplication`, `MobileApplication`, `WebApplication` | `name`, `offers` with `price` (`0` for free apps; an `AggregateOffer` has `lowPrice` and `priceCurrency`), and `aggregateRating` or `review`, checked as for `Product` |
 | `WebSite` | `name`, `url` |
 
 `Article`, `NewsArticle`, `BlogPosting`, `Organization` and `Person` have no required properties, so they are never flagged. Other types are not checked. Google stopped showing FAQ rich results on 7 May 2026. It still reads `FAQPage` markup, so the check still uses Google's last documented FAQ requirements.

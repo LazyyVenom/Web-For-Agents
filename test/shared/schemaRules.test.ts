@@ -73,7 +73,8 @@ describe("schemaRules", () => {
 
   it("Product: name, one of offers/aggregateRating/review, offer price", () => {
     expect(missing({ "@type": "Product" })).toEqual(["Product name", "Product offers (or aggregateRating, review)"]);
-    expect(missing({ "@type": "Product", name: "P", review: { "@type": "Review" } })).toEqual([]);
+    const review = { "@type": "Review", author: { "@type": "Person", name: "Ann" }, reviewRating: { "@type": "Rating", ratingValue: 5 } };
+    expect(missing({ "@type": "Product", name: "P", review })).toEqual([]);
     expect(missing({ "@type": "Product", name: "P", offers: { "@type": "Offer", priceCurrency: "USD" } })).toEqual([
       "Product offers.price (or priceSpecification.price)",
     ]);
@@ -91,12 +92,50 @@ describe("schemaRules", () => {
     expect(missing(schema.product({ name: "P", review: { author: "Ann", reviewRating: { ratingValue: 5 } } }))).toEqual([]);
   });
 
+  it("Product and SoftwareApplication: aggregateRating needs ratingValue and a count, review an author name and a rating", () => {
+    for (const type of ["Product", "SoftwareApplication"]) {
+      const base = type === "Product" ? { name: "P" } : { name: "P", offers: { "@type": "Offer", price: 0 } };
+      expect(missing({ "@type": type, ...base, aggregateRating: { "@type": "AggregateRating", ratingValue: 4 } })).toEqual([
+        `${type} aggregateRating.ratingCount (or reviewCount)`,
+      ]);
+      expect(missing({ "@type": type, ...base, aggregateRating: { reviewCount: 3 } })).toEqual([`${type} aggregateRating.ratingValue`]);
+      expect(missing({ "@type": type, ...base, aggregateRating: { ratingValue: 4, reviewCount: 3 } })).toEqual([]);
+      expect(
+        missing({
+          "@type": type,
+          ...base,
+          review: [
+            { "@type": "Review", author: { "@type": "Person", name: "" } },
+            { "@type": "Review", reviewRating: { "@type": "Rating" } },
+            { "@type": "Review", author: "Ann", reviewRating: { ratingValue: 5 } },
+          ],
+        }),
+      ).toEqual([
+        `${type} review[0].reviewRating`,
+        `${type} review[0].author.name`,
+        `${type} review[1].author`,
+        `${type} review[1].reviewRating.ratingValue`,
+      ]);
+    }
+    // References are followed; an unresolved one is left unchecked.
+    const graph = {
+      "@graph": [
+        { "@type": "Product", name: "P", aggregateRating: { "@id": "#r" }, review: [{ "@id": "#rev" }, { "@id": "#elsewhere" }] },
+        { "@type": "AggregateRating", "@id": "#r", ratingValue: 4 },
+        { "@type": "Review", "@id": "#rev", author: { "@id": "#me" }, reviewRating: { ratingValue: 5 } },
+      ],
+    };
+    expect(missing(graph)).toEqual(["Product aggregateRating.ratingCount (or reviewCount)"]);
+    // A builder review missing its rating (a JS caller, or a cast) is reported.
+    expect(missing(schema.product({ name: "P", review: { author: "Ann" } as any }))).toEqual(["Product review.reviewRating"]);
+  });
+
   it("SoftwareApplication and subtypes: name, offers.price, aggregateRating or review", () => {
     expect(missing({ "@type": "SoftwareApplication", name: "App" })).toEqual([
       "SoftwareApplication offers",
       "SoftwareApplication aggregateRating (or review)",
     ]);
-    const app = { name: "App", offers: { "@type": "Offer", price: 0 }, aggregateRating: { ratingValue: 4.5 } };
+    const app = { name: "App", offers: { "@type": "Offer", price: 0 }, aggregateRating: { ratingValue: 4.5, ratingCount: 10 } };
     expect(missing({ "@type": "WebApplication", ...app })).toEqual([]);
     expect(missing({ "@type": ["SoftwareApplication", "MobileApplication"], ...app, offers: {} })).toEqual([
       "SoftwareApplication offers.price",

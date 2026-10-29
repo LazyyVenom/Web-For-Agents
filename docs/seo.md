@@ -29,7 +29,10 @@ Nested `Seo`/`useSeo` calls merge, with the deeper one winning per tag.
 | `description` | Default description. |
 | `image` | Default Open Graph and Twitter image. |
 | `twitterSite` | `twitter:site` handle. |
-| `locale` | `og:locale`. |
+| `locale` | `og:locale`, such as `"en_US"`. |
+| `alternateLocales` | Other locales of the site, written as `og:locale:alternate`. |
+| `lang` | `<html lang>` for every page, such as `"en"`. Also sets `dir`. See [Languages](#languages). |
+| `dir` | `<html dir>`: `"ltr"`, `"rtl"` or `"auto"`. Defaults to the direction of `lang`. |
 
 `Seo` / `useSeo`:
 
@@ -42,6 +45,39 @@ Nested `Seo`/`useSeo` calls merge, with the deeper one winning per tag.
 | `type` | `og:type`: `"website"` (default), `"article"` or `"product"`. |
 | `noindex` | Emits `robots: noindex, nofollow`; prerendered but left out of the sitemap and `llms.txt`. |
 | `meta` | Extra `{ name, content }` or `{ property, content }` tags. |
+| `lang` | `<html lang>` for this page, overriding `defaults.lang`. Also sets `dir`. |
+| `dir` | `<html dir>`, overriding the direction of `lang`. |
+| `locale` | `og:locale` for this page, overriding `defaults.locale`. |
+| `alternateLocales` | `og:locale:alternate` tags for this page, overriding `defaults.alternateLocales`. |
+| `alternates` | Translations of this page as `{ hrefLang, href }[]`, written as `<link rel="alternate" hreflang>`. |
+
+### Languages
+
+`lang` sets `<html lang>` on the client, and the prerender captures it, so each static page ships its own language. It also sets `<html dir>`: `"rtl"` for right-to-left languages and scripts (Arabic, Hebrew, Persian, Urdu, Pashto, Sindhi, Uyghur, Yiddish, Dhivehi, Sorani, Syriac, and tags such as `pa-Arab`), and `"ltr"` for the rest. Pass `dir` to choose it yourself. Set a default `lang` on `SeoProvider`: a page without one then gets the default, and a page's own `lang` brings its own direction, so an Arabic default does not make an English page `rtl`. Without any `lang`, `<html>` keeps the attributes from your `index.html` and is restored to them when the last `<Seo>` unmounts.
+
+`alternates` lists the same page in other languages. A path in `href` resolves under `defaults.siteUrl` like `canonical`, so the links are absolute. List the page itself too, and add `{ hrefLang: "x-default", href }` for the page to show when no language matches:
+
+```tsx
+<SeoProvider defaults={{ siteUrl: "https://example.com", lang: "en", locale: "en_US" }}>
+  ...
+</SeoProvider>
+
+// On /de/preise
+<Seo
+  title="Preise"
+  lang="de"
+  locale="de_DE"
+  alternateLocales={["en_US", "ar_EG"]}
+  alternates={[
+    { hrefLang: "en", href: "/en/pricing" },
+    { hrefLang: "de", href: "/de/preise" },
+    { hrefLang: "ar", href: "/ar/pricing" },
+    { hrefLang: "x-default", href: "/en/pricing" },
+  ]}
+/>
+```
+
+The provider's `lang`, `dir`, `locale` and `alternateLocales` are the lowest layer, like the default canonical: a language set by a layout `<Seo>` survives a deeper `<Seo>` that sets none. As with other tags, the deepest `<Seo>` that sets one wins. Each hreflang link and `og:locale:alternate` tag belongs to the `<Seo>` that wrote it, so client-side navigation to a page with other alternates, or none, removes the old ones. The page's own `locale` is never also listed as an alternate.
 
 ### Canonical URL
 
@@ -55,7 +91,7 @@ The default is the lowest-priority layer, so an explicit `canonical` on any `<Se
 
 ## Length warnings
 
-Search engines truncate long titles and descriptions, and very short descriptions waste the snippet. In development, `<Seo>` and `useSeo` log a `[web-for-agents]` `console.warn` when a title is over 60 characters or a description is under 50 or over 160. The check measures what the head actually gets: the title after `titleTemplate`, and the description from props or the `SeoProvider` defaults. These are the same values the build and the CLI audit measure. Each distinct value warns once. The check sits behind `process.env.NODE_ENV !== "production"`, so bundlers remove it from production builds.
+Search engines truncate long titles and descriptions, and very short descriptions waste the snippet. In development, `<Seo>` and `useSeo` log a `[web-for-agents]` `console.warn` when a title is over 60 characters or a description is under 50 or over 160. East Asian wide characters (Chinese, Japanese and Korean characters, CJK punctuation and fullwidth forms) count as 2, since a snippet fits about half as many of them: a 40-character Japanese description counts as 80 and passes, while a 40-character English one is too short. The build warnings and the CLI audit count the same way. The check measures what the head actually gets: the title after `titleTemplate`, and the description from props or the `SeoProvider` defaults. These are the same values the build and the CLI audit measure. Each distinct value warns once. The check sits behind `process.env.NODE_ENV !== "production"`, so bundlers remove it from production builds.
 
 ## Schema builders
 
@@ -63,34 +99,34 @@ Search engines truncate long titles and descriptions, and very short description
 
 - `schema.article`: `headline`, `description`, `image` (a URL or an array), `datePublished`, `dateModified`, `author` (`{ name, url }`, a node or a ref, or an array of them), `url`
 - `schema.product`: `name`, `description`, `image` (a URL or an array), `sku`, `brand` (a name, written as a `Brand`, or a node or a ref), `offers`, `aggregateRating`, `review`. Google requires one of `offers`, `aggregateRating` or `review`, and the [audit](cli.md) warns when all are missing.
-  - `offers`: one offer or an array. An `Offer` has `price`, `priceCurrency`, `availability`, `url`, `priceValidUntil`, `itemCondition` and `seller` (an organization name, or a node or a ref). An offer with `lowPrice` (and optionally `highPrice` and `offerCount`) is written as an `AggregateOffer`, for a price range across sellers or variants.
+  - `offers`: one offer or an array. An `Offer` has `price`, `priceCurrency`, `availability`, `url`, `priceValidUntil`, `itemCondition` and `seller` (an organization name, or a node or a ref). An offer with a `lowPrice` or `highPrice` value (and optionally `offerCount`) is written as an `AggregateOffer`, for a price range across sellers or variants. An offer can also be a node or a ref, kept as it is, for fields the input does not type, such as `priceSpecification`.
   - `availability`: a schema.org `ItemAvailability` name, written as `https://schema.org/<name>`: `"InStock"`, `"OutOfStock"`, `"PreOrder"`, `"BackOrder"`, `"Discontinued"`, `"InStoreOnly"`, `"LimitedAvailability"`, `"OnlineOnly"`, `"SoldOut"`, `"PreSale"`, `"MadeToOrder"` or `"Reserved"`.
   - `itemCondition`: `"New"`, `"Used"`, `"Refurbished"` or `"Damaged"`, written as `https://schema.org/NewCondition` and so on.
-  - `aggregateRating`: `ratingValue`, `reviewCount`, `ratingCount`, `bestRating`, `worstRating`; written as an `AggregateRating`. Also a node or a ref.
-  - `review`: one review or an array, each with `author` (a person's name, `{ name, url }`, a node or a ref), `reviewRating` (`ratingValue`, `bestRating`, `worstRating`; written as a `Rating`), `reviewBody`, `datePublished` and `name`. Also a node or a ref.
+  - `aggregateRating`: `ratingValue`, `reviewCount`, `ratingCount`, `bestRating`, `worstRating`; written as an `AggregateRating`. Google requires `ratingValue` and one of `ratingCount` or `reviewCount`, so the type requires at least one count. Also a node or a ref.
+  - `review`: one review or an array, each with `author` (a person's name, `{ name, url }`, a node or a ref), `reviewRating` (`ratingValue`, `bestRating`, `worstRating`; written as a `Rating`), `reviewBody`, `datePublished` and `name`. Google requires an author with a name and `reviewRating.ratingValue`, so `author` and `reviewRating` are required. Also a node or a ref.
 - `schema.aggregateRating` and `schema.review`: the same fields as a standalone `AggregateRating` or `Review` node, plus `itemReviewed` (a node or a ref). Give one an `id` and point a product at it with `schema.ref`.
 - `schema.faqPage(items, options?)`: `items` is `{ question, answer }[]`, written as `mainEntity` questions, each with an `acceptedAnswer`. `options` takes the page options below, except `mainEntity`.
 - `schema.breadcrumbList(items, options?)`: `items` is `{ name, url }[]`, written as `itemListElement` with positions from 1.
 - `schema.organization`: `name`, `url`, `logo` (a URL, a node or a ref), `sameAs` (an array of URLs)
 - `schema.webSite`: `name`, `url`, `searchUrlTemplate` (written as a `SearchAction`; use `{search_term_string}` in the URL, as in `"https://example.com/search?q={search_term_string}"`), `publisher` (a node or a ref)
 - `schema.person`: `name`, `url`, `image`, `jobTitle`, `description`, `email`, `sameAs`, `worksFor` (a name, `{ name, url }`, a node or a ref), `address` (text or a `PostalAddress` node), `knowsAbout` (text, nodes or a mix)
-- `schema.softwareApplication`: `name`, `description`, `applicationCategory`, `operatingSystem`, `url`, `image`, `offers` (one `Offer`, as in `schema.product`), `aggregateRating` (as in `schema.product`), `author`. For rich results Google requires `name`, `offers.price` (`0` for a free app) and one of `aggregateRating` or `review`; the [audit](cli.md) warns when one is missing.
+- `schema.softwareApplication`: `name`, `description`, `applicationCategory`, `operatingSystem`, `url`, `image`, `offers` (as in `schema.product`: one offer, an array such as pricing tiers, an `AggregateOffer`, or nodes and refs), `aggregateRating` (as in `schema.product`), `author`. For rich results Google requires `name`, `offers.price` (`0` for a free app) and one of `aggregateRating` or `review`; the [audit](cli.md) warns when one is missing, and checks ratings and reviews as for `Product`.
 - `schema.profilePage`: the page options, with `mainEntity` the person or organization node, or a ref (Google requires it for the rich result), plus `dateCreated`
 - `schema.creativeWork`: `name`, `description`, `url`, `image`, `author`, `dateCreated`, `keywords` (a string or array, written comma-separated), `genre` (a string or array)
 - `schema.webPage`: the page options; `name` and `url` are required
 - `schema.graph(nodes)`: combines nodes into one `@graph` document with a single `@context`; nested nodes lose their own `@context`. `null`, `undefined` and `false` entries are skipped, so `cond && node` works.
 - `schema.ref(id)`: `{ "@id": id }`, a pointer to a node defined elsewhere. A missing or empty `id` throws a `TypeError`.
 
-Page options, shared by `webPage`, `profilePage` and `faqPage` (the `PageOptions` type), so the same object works for each and gives the same fields: `name`, `description`, `url`, `breadcrumb` (a `schema.breadcrumbList` node, its `{ name, url }[]` items, or a ref), `mainEntity` (a node or a ref), `isPartOf` (usually a ref to the `WebSite`), `datePublished`, `dateModified`, `inLanguage`, `image` (a URL, an array or a node), `primaryImageOfPage` (a URL, written as an `ImageObject`, or a node or a ref).
+Page options, shared by `webPage`, `profilePage` and `faqPage` (the `PageOptions` type), so the same object works for each and gives the same fields: `name`, `description`, `url`, `breadcrumb` (a `schema.breadcrumbList` node, its `{ name, url }[]` items, or a ref; an empty array writes no breadcrumb), `mainEntity` (a node or a ref), `isPartOf` (usually a ref to the `WebSite`), `datePublished`, `dateModified`, `inLanguage`, `image` (a URL, an array or a node), `primaryImageOfPage` (a URL, written as an `ImageObject`, or a node or a ref).
 
-Required fields: `headline` for `article`; `name` and `url` for `organization`, `webSite` and `webPage`; `name` for `product`, `person`, `softwareApplication` and `creativeWork`; `ratingValue` for `aggregateRating`; `author` for `review`; none for `profilePage`.
+Required fields: `headline` for `article`; `name` and `url` for `organization`, `webSite` and `webPage`; `name` for `product`, `person`, `softwareApplication` and `creativeWork`; `ratingValue` and `ratingCount` or `reviewCount` for `aggregateRating`; `author` and `reviewRating` for `review`; none for `profilePage`.
 
 Fields left `undefined` or `null` are omitted from every builder, including nested ones: `schema.profilePage({ mainEntity: undefined })` gives a `ProfilePage` without `mainEntity` rather than throwing. `author`, `brand`, `worksFor`, `mainEntity`, `breadcrumb`, `isPartOf`, `publisher`, `logo`, `seller`, `aggregateRating`, `review` and `itemReviewed` also take a node or a ref. Wherever a node is nested, its own `@context` is dropped.
 
 Every builder takes two more options (in its input object; `faqPage` and `breadcrumbList` take them as a second argument):
 
 - `id`: written as `"@id"`, so other nodes can point at this one with `schema.ref(id)`. When `id` is given, `extra["@id"]` is ignored. An empty or non-string `id` throws a `TypeError`, as in `schema.ref`.
-- `extra`: any other schema.org properties, merged in last, so they override the typed fields. `@type` and `@context` cannot be overridden (the `JsonLdExtra` type rejects them; untyped data is filtered at runtime), and a `__proto__` key is ignored. Values can be nodes, refs, arrays or plain objects; a node nested anywhere in them loses its own `@context`.
+- `extra`: any other schema.org properties, merged in last, so they override the typed fields. `@type` and `@context` cannot be overridden (the `JsonLdExtra` type rejects them; untyped data is filtered at runtime). A `__proto__` key is dropped here and anywhere in the input, such as in parsed JSON, so it never changes a prototype. Values can be nodes, refs, arrays or plain objects; a node nested anywhere in them loses its own `@context`.
 
 A product page on a store, with the organization and site defined once and linked by `@id`:
 

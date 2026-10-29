@@ -383,4 +383,12 @@ describe("checks", () => {
     expect(t(61).message).toBe("Title is 61 characters (over 60)");
     expect(t(61).fix).toBe('Set a page title with <Seo title="..." /> (at most 60 characters).');
   });
+
+  it("title and description lengths count East Asian wide characters as 2", () => {
+    const desc = (d: string) => byId(inputs({ src: pageHtml({ head: `<title>t</title><meta name="description" content="${d}">` }) }), "description");
+    expect(desc("静かな湖畔の宿で季節ごとに変わる景色と地元の料理をゆっくり楽しめます。富士山の麓").status).toBe("pass");
+    expect(desc("d".repeat(40)).status).toBe("warn");
+    const title = byId(inputs({ src: pageHtml({ head: `<title>${"山".repeat(31)}</title>` }) }), "title");
+    expect(title.message).toBe("Title is 62 characters (over 60)");
+  });
 });
