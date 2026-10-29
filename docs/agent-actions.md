@@ -19,6 +19,8 @@ import { AgentForm, agentParam } from "@anubhav-choubey/web-for-agents";
 </AgentForm>
 ```
 
+`AgentForm` takes every `<form>` prop (`ComponentPropsWithoutRef<"form">`), so `onSubmit` is React's form submit handler: it receives the submit event, `React.SubmitEvent<HTMLFormElement>` with `@types/react` 19.3 or later (`React.FormEvent<HTMLFormElement>` with earlier versions), for a user's submit and the form fallback alike. Call `event.preventDefault()` in it to handle the submit in JavaScript instead of navigating; read the fields with `new FormData(event.currentTarget)`.
+
 The derived schema uses each field's `name`, type (`email`, `url`, `number`, `checkbox`, ...), `required`, `min`/`max`, `minlength`/`maxlength` and `pattern`; `<select>` options and radio groups become an `enum`. Some fields are never exposed: they do not appear in the schema or in `agents.json`, and an agent cannot fill them, even through another field with the same name. These are:
 
 - disabled and `readonly` fields, and fields inside a `<fieldset disabled>` (except in its first `<legend>`);

@@ -202,6 +202,8 @@ npx @anubhav-choubey/web-for-agents audit localhost:4173/products/
 
 Use a server that answers `/dir` and `/dir/` with `dir/index.html` and `/page` with `page.html` (directly or through a redirect, which the audit follows), as `serve` does. `vite preview` also works for `/`, but it is a single-page-app server: for a sub-route without a trailing slash, such as `/products`, it can answer with `dist/index.html`, the home page. The audit then scores the home page's HTML, canonical and all, and does not say so. With `vite preview`, audit sub-routes with a trailing slash (`/products/`).
 
+A static server without a single-page-app fallback, such as `serve dist` without `-s`, answers 404 for any path the build did not write: a route that was not prerendered, or a file the audit looks for that your build does not generate. That is expected, not a server problem; the audit reports it as a missing page or file, and in production your host's fallback (`200.html`) serves unknown routes.
+
 The build writes absolute URLs from `siteUrl` into the canonical link, the sitemap, the markdown alternate link and the `Sitemap:` line in `robots.txt`. If `siteUrl` is your production origin, those URLs point away from the preview. The audit does not fetch them, so a local run never calls production. Instead it warns and names the other origin. For example:
 
 ```

@@ -23,9 +23,12 @@
 - The skill has a Routing section (client routers, crawled routes and `routes`, `<Seo noindex />` on not-found views, the `200.html` host fallback), says how to see each failing check's Fix text, and warns against `schema.softwareApplication` without real ratings or reviews. `docs/prerendering.md` covers client routers and not-found views, and `docs/agent-actions.md` imports `agentLinkProps` from `/link` in the link example.
 - `schema.recipe` builds a `Recipe` from Google's Recipe fields: `name` and `image` (a URL, an array or an `ImageObject`) are required; `author`, `datePublished`, `description`, `recipeIngredient`, `recipeInstructions` (strings written as `HowToStep`s, or `HowToStep` and `HowToSection` nodes), `prepTime`, `cookTime` and `totalTime` (ISO 8601 durations; anything else throws a `TypeError`), `recipeYield`, `recipeCategory`, `recipeCuisine`, `keywords`, `nutrition` (written as `NutritionInformation`), `aggregateRating` and `review` (as on `product`), `video` and `inLanguage`. The `RecipeInput` and `NutritionInput` types ship from the root and `/schema`. The audit checks a recipe's ratings and reviews as it does a product's. See [schema builders](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/seo.md#schema-builders).
 - `schema.article` and `schema.creativeWork` take `inLanguage`.
+- The skill says that `og:image` (`SeoProvider` `defaults.image`) can be a branded share card or logo image, 1200x630 recommended, so every page has one, while JSON-LD `image` on products, recipes and articles must be photos of the item; lists "no default share image" as a common mistake; names `schema.recipe`; and notes that `agentLinkProps` also works on a router `<Link>`.
+- `docs/agent-actions.md` gives the type of the event `AgentForm`'s `onSubmit` receives. `docs/cli.md` notes that a local static server without a single-page-app fallback answers 404 for paths the build did not write, which is expected during an audit.
 
 ### Fixed
 
+- The audit's Open Graph Fix text names only the missing tags, such as `Pass image to <Seo> (og:image is missing).`, instead of always asking for title, description and image.
 - `/link` and `/schema` are each built as one file, with no static import of a chunk shared with `/form` and the root entry, so a page that imports only `/link` (a footer) no longer loads, or preloads, an extra file.
 
 ## 0.5.0 (2026-10-29)
