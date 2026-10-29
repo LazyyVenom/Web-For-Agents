@@ -1,6 +1,6 @@
 # @anubhav-choubey/web-for-agents
 
-[![CI](https://github.com/LazyyVenom/Web-For-Agents/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/LazyyVenom/Web-For-Agents/actions/workflows/ci.yml)
+[![CI](https://github.com/LazyyVenom/Web-For-Agents/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/LazyyVenom/Web-For-Agents/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/@anubhav-choubey/web-for-agents)](https://www.npmjs.com/package/@anubhav-choubey/web-for-agents) [![license](https://img.shields.io/npm/l/@anubhav-choubey/web-for-agents)](https://github.com/LazyyVenom/Web-For-Agents/blob/master/LICENSE)
 
 SEO and LLM-readiness helpers for React + Vite. At runtime it manages `<head>` metadata (title, description, canonical, Open Graph, Twitter) and emits typed JSON-LD. At build time a Vite plugin prerenders every route to static HTML and writes a markdown version of each page, `llms.txt`, `llms-full.txt`, an `agents.json` map of the actions agents can take, a `sitemap.xml`, and a `robots.txt` with an explicit AI-crawler policy, so you decide which bots may train on your content and which may use it for search.
 
@@ -10,7 +10,7 @@ SEO and LLM-readiness helpers for React + Vite. At runtime it manages `<head>` m
 npm i @anubhav-choubey/web-for-agents
 ```
 
-Requires Node 20.19 or later; Node 22.13 or later is recommended for builds, because prerendering is better isolated there (see [Security](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/security.md)). The runtime needs `react >=18` and `react-dom >=18`, and the Vite plugin needs `vite >=5` (tested on Vite 5 to 8). All three are optional peers, so the CLI works without them.
+Requires Node 20.19 or later; Node 22.13 or later is recommended for builds, because prerendering is better isolated there (see [Security](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/security.md)). The runtime needs `react >=18` and `react-dom >=18`, and the Vite plugin needs `vite >=5` (tested on Vite 5 to 8). All three are optional peers, so the CLI works without them. Installing the package also installs happy-dom and turndown (about 30 MB) for the build-time plugin and CLI; `/schema` and `/link` don't load them at runtime.
 
 If Vite shows stale exports after upgrading, restart the dev server or run `vite --force` ([Troubleshooting](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/development.md#troubleshooting)).
 

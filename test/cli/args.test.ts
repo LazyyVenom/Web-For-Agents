@@ -78,6 +78,36 @@ describe("parseCliArgs", () => {
     expect(normalizeInputUrl("https://localhost/")).toBe("https://localhost/");
   });
 
+  it("parses --sitemap with --max-pages and --concurrency", () => {
+    expect(parseCliArgs(["audit", "a.com", "--sitemap"])).toEqual({
+      command: "audit",
+      url: "https://a.com/",
+      json: false,
+      timeoutMs: 10000,
+      sitemap: { maxPages: 50, concurrency: 4 },
+    });
+    expect(parseCliArgs(["audit", "a.com", "--sitemap", "--max-pages", "500", "--concurrency", "1"]).sitemap).toEqual({
+      maxPages: 500,
+      concurrency: 1,
+    });
+    expect(parseCliArgs(["audit", "a.com"]).sitemap).toBeUndefined();
+  });
+
+  it("rejects bad --max-pages and --concurrency, and both without --sitemap", () => {
+    for (const [argv, msg] of [
+      [["audit", "a.com", "--sitemap", "--max-pages", "501"], "--max-pages must be an integer from 1 to 500"],
+      [["audit", "a.com", "--sitemap", "--max-pages", "0"], "--max-pages must be an integer from 1 to 500"],
+      [["audit", "a.com", "--sitemap", "--max-pages", "2.5"], "--max-pages must be an integer from 1 to 500"],
+      [["audit", "a.com", "--sitemap", "--concurrency", "0"], "--concurrency must be an integer from 1 to 16"],
+      [["audit", "a.com", "--sitemap", "--concurrency", "17"], "--concurrency must be an integer from 1 to 16"],
+      [["audit", "a.com", "--max-pages", "5"], "--max-pages requires --sitemap"],
+      [["audit", "a.com", "--concurrency", "2"], "--concurrency requires --sitemap"],
+      [["generate", "out", "--sitemap"], "--sitemap is not an option of generate"],
+    ] as const) {
+      expect(() => parseCliArgs([...argv]), argv.join(" ")).toThrow(msg);
+    }
+  });
+
   it("parses --agent-map", () => {
     expect(parseCliArgs(["audit", "a.com", "--agent-map", "map.json"]).agentMap).toBe("map.json");
     expect(parseCliArgs(["audit", "a.com", "--agent-map", "/x/agents.json"]).agentMap).toBe("/x/agents.json");

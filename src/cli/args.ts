@@ -30,7 +30,21 @@ export interface CliArgs {
   blockPrivateRedirects?: boolean;
   /** --site-url: the siteUrl the site was built for (only its origin is used); its URLs are audited on the audited origin. */
   siteUrl?: string;
+  /** --sitemap: audit every page the sitemap lists. */
+  sitemap?: SitemapArgs;
 }
+
+export interface SitemapArgs {
+  /** --max-pages: at most this many pages are audited. */
+  maxPages: number;
+  /** --concurrency: pages audited at the same time. */
+  concurrency: number;
+}
+
+export const DEFAULT_MAX_PAGES = 50;
+export const MAX_PAGES_LIMIT = 500;
+export const DEFAULT_CONCURRENCY = 4;
+export const MAX_CONCURRENCY = 16;
 
 const fail = (msg: string): never => {
   throw new Error(withPrefix(msg));
@@ -61,6 +75,7 @@ export function normalizeInputUrl(input: string): string {
 }
 
 export const USAGE = `Usage: web-for-agents audit <url> [options]
+       web-for-agents audit <url> --sitemap [options]
        web-for-agents generate <outDir> --site-url <url> [options]
 
 audit: check how readable a page is for AI agents and crawlers.
@@ -68,7 +83,12 @@ audit: check how readable a page is for AI agents and crawlers.
 Options:
   --json               print the report as JSON (page data is not sanitized; control
                        and bidi characters are written as \\u escapes)
-  --min-score <0-100>  exit with code 1 if the score is lower
+  --min-score <0-100>  exit with code 1 if the score is lower (with --sitemap: if any
+                       page's score is lower)
+  --sitemap            audit every page listed in the site's sitemap (found through
+                       robots.txt, else /sitemap.xml) on <url>'s origin, and print one table
+  --max-pages <n>      with --sitemap: audit at most n pages (default ${DEFAULT_MAX_PAGES}, at most ${MAX_PAGES_LIMIT})
+  --concurrency <n>    with --sitemap: pages audited at once (default ${DEFAULT_CONCURRENCY}, at most ${MAX_CONCURRENCY})
   --timeout <ms>       per-request timeout (default ${DEFAULT_TIMEOUT_MS})
   --agent-map <path>   agent map file name (probed like agents.json), or a /path or URL
   --site-url <url>     the siteUrl the site was built with (for example your production
@@ -95,8 +115,16 @@ Options:
                        llms-full.txt or agents.json that differs
   --json               print the result as JSON
 
-Exit codes: 0 ok, 1 score below --min-score, 2 usage error or fatal error
+Exit codes: 0 ok, 1 score below --min-score (with --sitemap: any page below it or
+            failing to load), 2 usage error or fatal error
 `;
+
+/** A whole number from 1 to `max`, written as plain digits. */
+function boundedInt(flag: string, value: string, max: number): number {
+  const n = Number(value);
+  if (!/^\d+$/.test(value) || n < 1 || n > max) return fail(`--${flag} must be an integer from 1 to ${max}, got "${value}"`);
+  return n;
+}
 
 export function parseCliArgs(argv: string[]): CliArgs {
   let parsed;
@@ -111,6 +139,9 @@ export function parseCliArgs(argv: string[]): CliArgs {
         "agent-map": { type: "string" },
         "no-private-redirects": { type: "boolean" },
         "site-url": { type: "string" },
+        sitemap: { type: "boolean" },
+        "max-pages": { type: "string" },
+        concurrency: { type: "string" },
         "ai-training": { type: "string" },
         "ai-search": { type: "string" },
         config: { type: "string" },
@@ -126,7 +157,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
   if (values.help || positionals.length === 0) return { command: "help", json: false, timeoutMs: DEFAULT_TIMEOUT_MS };
   const [command, input, ...rest] = positionals;
   const GENERATE_FLAGS = ["ai-training", "ai-search", "config", "no-link-markdown", "overwrite"] as const;
-  const AUDIT_FLAGS = ["min-score", "timeout", "agent-map", "no-private-redirects"] as const;
+  const AUDIT_FLAGS = ["min-score", "timeout", "agent-map", "no-private-redirects", "sitemap", "max-pages", "concurrency"] as const;
   if (command === "generate") {
     if (input === undefined) return fail("generate requires an output directory");
     if (rest.length > 0) return fail(`unexpected argument "${rest[0]}"`);
@@ -195,6 +226,16 @@ export function parseCliArgs(argv: string[]): CliArgs {
     }
     if (!ok) return fail(`--agent-map must be a file name, a /path or an http(s) URL, got "${values["agent-map"]}"`);
     args.agentMap = v;
+  }
+  if (values.sitemap === true) {
+    args.sitemap = {
+      maxPages: values["max-pages"] === undefined ? DEFAULT_MAX_PAGES : boundedInt("max-pages", values["max-pages"], MAX_PAGES_LIMIT),
+      concurrency:
+        values.concurrency === undefined ? DEFAULT_CONCURRENCY : boundedInt("concurrency", values.concurrency, MAX_CONCURRENCY),
+    };
+  } else {
+    const orphan = (["max-pages", "concurrency"] as const).find((f) => values[f] !== undefined);
+    if (orphan) return fail(`--${orphan} requires --sitemap`);
   }
   return args;
 }

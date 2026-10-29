@@ -2,8 +2,9 @@ name: Release
 
 # Publishes to npm when a version tag (v1.2.3, v1.2.3-beta.1) is pushed.
 # Uses npm trusted publishing (OIDC): there is no NPM_TOKEN. Provenance is generated automatically.
-# Two jobs: `verify` runs all dependency code with no publish rights; `publish` holds id-token: write
-# but installs nothing and only publishes the tarball built by `verify`.
+# Three jobs: `verify` runs all dependency code with no publish rights; `publish` holds id-token: write
+# but installs nothing and only publishes the tarball built by `verify`; `github-release` has
+# contents: write only and creates the GitHub Release from the CHANGELOG section.
 # A tag on a commit whose message contains "[skip ci]" does not trigger the push event;
 # release it with "Run workflow" on the tag (gh workflow run release.yml --ref v1.2.3).
 on:
@@ -89,3 +90,32 @@ jobs:
           files=("$RUNNER_TEMP"/package/*.tgz)
           [ "${#files[@]}" -eq 1 ] || { echo "Expected exactly one tarball" >&2; exit 1; }
           npm stage publish "${files[0]}" --provenance --access public --tag "$tag" --ignore-scripts
+
+  # The npm version is only staged at this point and goes live after `npm stage approve`;
+  # the GitHub Release is created now so the changelog notes are published with the tag.
+  github-release:
+    needs: publish
+    if: github.repository == 'LazyyVenom/Web-For-Agents'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Extract the changelog section
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            $1 == "##" { if (found) exit; if ($2 == v) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          [ -s notes.md ] || { echo "No CHANGELOG.md section for $version" >&2; exit 1; }
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag "${flags[@]}"

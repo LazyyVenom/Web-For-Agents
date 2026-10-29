@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { audit } from "../../src/cli/index";
-import { auditWithHooks, parseSiteOrigin } from "../../src/cli/audit";
+import { auditWithHooks, parseSiteOrigin, siteUrlMapper } from "../../src/cli/audit";
 import { parseCliArgs } from "../../src/cli/args";
 import { wellFormedPage } from "../helpers/page";
 import { useTestServers } from "../helpers/server";
@@ -114,5 +114,15 @@ describe("siteUrl mapping safety", () => {
     );
     expect(report.checks.find((c) => c.id === "markdown")!.status).toBe("fail");
     expect(report.warnings?.[0]).toContain("blocked a redirect");
+  });
+});
+
+describe("siteUrlMapper", () => {
+  it("maps an http entry origin to the https origin it redirected to, and nothing else", () => {
+    const map = siteUrlMapper("http://example.com", "https://example.com");
+    expect(map("http://example.com/a?x=1#h")).toBe("https://example.com/a?x=1#h");
+    expect(map("https://example.com/a")).toBe("https://example.com/a");
+    expect(map("http://www.example.com/a")).toBe("http://www.example.com/a");
+    expect(map("http://example.com:8080/a")).toBe("http://example.com:8080/a");
   });
 });
