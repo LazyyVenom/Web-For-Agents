@@ -191,6 +191,12 @@ describe("import boundaries", () => {
     for (const f of engine) expect(lazy.has(sourceFile(f)), relative(SRC, f)).toBe(true);
   });
 
+  it("the root entry reaches the agent engine only through core's import()", () => {
+    const engine = ["registry", "formAutomation", "formSchema", "dom"].map((n) => join(SRC, "runtime", "agent", n));
+    const files = [...runtimeGraph(join(SRC, "index.ts"), false).files].map(stripExt);
+    for (const f of engine) expect(files, relative(SRC, f)).not.toContain(f);
+  });
+
   it("the React API reaches the agent engine only through core's import()", () => {
     expect([...runtimeGraph(join(SRC, "runtime", "agent", "react.tsx"), false).files].map(stripExt)).not.toContain(
       join(SRC, "runtime", "agent", "registry"),

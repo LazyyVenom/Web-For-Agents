@@ -4,7 +4,13 @@ import { AGENT_GLOBAL, PROBE_GLOBAL } from "../../shared/conventions";
 import { errorMessage, withPrefix } from "../../shared/errors";
 import { compareStrings } from "../../shared/sort";
 import { holdPrerender } from "../prerender";
-import type { AgentActionDescriptor, AgentActionSpec, JsonSchema, RefreshAgentActionsOptions } from "./types";
+import type {
+  AgentActionDescriptor,
+  AgentActionResult,
+  AgentActionSpec,
+  JsonSchema,
+  RefreshAgentActionsOptions,
+} from "./types";
 import { hasModelContext } from "./webmcp";
 
 /*
@@ -12,7 +18,7 @@ import { hasModelContext } from "./webmcp";
  * registrations and the window global. The engine (registry.ts: form schemas, validation, form
  * automation, the confirm dialog and WebMCP registration) is imported once, on the first sync that
  * needs it: when WebMCP is present or a prerender is capturing the page. listAgentActions and
- * executeAgentAction (imported statically from registry.ts) work whether or not it is installed.
+ * executeAgentAction work whether or not it is installed; executeAgentAction loads it first.
  */
 
 export interface Entry {
@@ -26,6 +32,8 @@ export interface Engine {
   sync(force: boolean): void;
   /** The complete action list (form schemas included). */
   list(): AgentActionDescriptor[];
+  /** Runs an exposed action. Never throws. */
+  execute(name: string, input: unknown, signal?: AbortSignal): Promise<AgentActionResult>;
 }
 
 /** Insertion order = mount order. */
@@ -35,7 +43,7 @@ let nextId = 1;
 let syncScheduled = false;
 let forceScheduled = false;
 let engine: Engine | null = null;
-let loading = false;
+let loading: Promise<Engine> | null = null;
 
 /** First-mounted entry per name, in mount order. */
 export function activeEntries(): Map<string, [number, Entry]> {
@@ -115,27 +123,58 @@ export function installEngine(e: Engine): void {
   if (globals()?.[AGENT_GLOBAL]?.actions === listBeforeLoad) installGlobal();
 }
 
-const prerendering = (): boolean => typeof window !== "undefined" && PROBE_GLOBAL in window;
+/**
+ * True while the prerenderer captures the page. Checks the probe's own shape, not just the name: an
+ * element with id="__WFA_PROBE__" (an HTMLCollection for several) also shows up on window.
+ */
+function prerendering(): boolean {
+  if (typeof window === "undefined") return false;
+  const p = (window as unknown as Record<string, unknown>)[PROBE_GLOBAL] as { errors?: unknown } | null | undefined;
+  return typeof p === "object" && p !== null && Array.isArray(p.errors) && !(typeof Node !== "undefined" && p instanceof Node);
+}
 
-/** Imports the engine once. While prerendering, holds the capture until it has loaded. */
-function load(): void {
-  if (engine || loading || typeof window === "undefined") return;
-  loading = true;
+/** Imports the engine once (a failed import is retried on the next call). While prerendering, holds the capture until it has loaded. */
+function loadEngine(): Promise<Engine> {
+  if (engine) return Promise.resolve(engine);
+  if (loading) return loading;
   const release = prerendering() ? holdPrerender() : () => {};
-  import("./registry").then(
+  loading = import("./registry").then(
     (m) => {
-      loading = false;
+      loading = null;
       installEngine(m.engine);
       scheduleSync();
       release();
+      return m.engine;
     },
     (err: unknown) => {
-      // Retried on the next sync (a mount, unmount or refreshAgentActions).
-      loading = false;
-      console.warn(withPrefix(`could not load the agent runtime: ${errorMessage(err)}`));
+      loading = null;
       release();
+      throw err;
     },
   );
+  return loading;
+}
+
+/** Starts loading the engine in the browser; a failure is retried on the next sync (a mount, unmount or refreshAgentActions). */
+function load(): void {
+  if (engine || loading || typeof window === "undefined") return;
+  loadEngine().catch((err: unknown) => console.warn(withPrefix(`could not load the agent runtime: ${errorMessage(err)}`)));
+}
+
+/** The actions currently exposed on the page, sorted by name. Before the engine has loaded, form actions list no fields. */
+export function listAgentActions(): AgentActionDescriptor[] {
+  return engine ? engine.list() : listBeforeLoad();
+}
+
+/** Runs an exposed action with `input`, loading the agent engine first if needed. Never throws; failures are reported in the result. */
+export async function executeAgentAction(name: string, input: unknown, signal?: AbortSignal): Promise<AgentActionResult> {
+  let e: Engine;
+  try {
+    e = await loadEngine();
+  } catch (err) {
+    return { status: "error", message: `could not load the agent runtime: ${errorMessage(err)}` };
+  }
+  return e.execute(name, input, signal);
 }
 
 export function registerAgentAction(spec: () => AgentActionSpec, target?: () => Element | null): () => void {

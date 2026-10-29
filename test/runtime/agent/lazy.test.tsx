@@ -184,6 +184,47 @@ describe("lazy agent runtime", () => {
     expect(contact.inputSchema.required).toEqual(["email"]);
   });
 
+  it("the root listAgentActions gives the pre-load list without importing the engine, then the engine's list", async () => {
+    const root = await import("../../../src/index");
+    await render(<Contact />);
+    await settle();
+    expect(engine.state.imports).toBe(0);
+    engine.close();
+    const before = root.listAgentActions();
+    expect(before.map((a) => [a.name, a.kind])).toEqual([["contact", "form"], ["search", "handler"]]);
+    expect(before[0]!.inputSchema).toEqual({ type: "object" });
+    await load();
+    expect(root.listAgentActions()[0]!.inputSchema.required).toEqual(["email"]);
+    expect(engine.state.imports).toBe(1);
+  });
+
+  it("the root executeAgentAction loads the engine and runs the action", async () => {
+    const root = await import("../../../src/index");
+    await render(<Contact />);
+    await settle();
+    expect(engine.state.imports).toBe(0);
+    expect(await root.executeAgentAction("search", {})).toEqual({ status: "ok", result: 1 });
+    expect(engine.state.imports).toBe(1);
+    expect(await root.executeAgentAction("nope", {})).toEqual({ status: "error", message: 'unknown action "nope"' });
+    expect(engine.state.imports).toBe(1);
+  });
+
+  it("an element with the probe's id on a normal page does not count as a prerender", async () => {
+    const el = document.createElement("div");
+    el.id = "__WFA_PROBE__";
+    document.body.appendChild(el);
+    // Browsers expose elements with an id as window properties (happy-dom does not, so set it the same way).
+    w.__WFA_PROBE__ = el;
+    try {
+      await render(<Contact />);
+      await settle();
+      expect(engine.state.imports).toBe(0);
+      expect(w.__WFA_READY__).toBeUndefined();
+    } finally {
+      el.remove();
+    }
+  });
+
   it("the window global lists actions before the engine loads", async () => {
     await render(<Contact />);
     await settle();
