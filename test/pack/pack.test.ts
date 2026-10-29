@@ -260,6 +260,21 @@ describe("packed package without vite", () => {
     expect(out.link["data-agent-kind"]).toBe("link");
   });
 
+  it("the /schema and /link entries load with require() from CommonJS", async () => {
+    const script = path.join(bare, "require-script.cjs");
+    writeFileSync(
+      script,
+      [
+        'const { schema, serializeJsonLd } = require("@anubhav-choubey/web-for-agents/schema");',
+        'const { agentLinkProps } = require("@anubhav-choubey/web-for-agents/link");',
+        'console.log(JSON.stringify({ ld: serializeJsonLd(schema.person({ name: "A" })), link: agentLinkProps({ name: "email", description: "Email" }) }));',
+      ].join("\n"),
+    );
+    const out = JSON.parse(await sh(process.execPath, [script], bare)) as { ld: string; link: Record<string, string> };
+    expect(JSON.parse(out.ld)).toEqual({ "@context": "https://schema.org", "@type": "Person", name: "A" });
+    expect(out.link["data-agent-kind"]).toBe("link");
+  });
+
   it("a footer using only agentLinkProps from /link bundles to under 1 KB gzip, with no imports left", async () => {
     const entry = path.join(bare, "footer.mjs");
     writeFileSync(
