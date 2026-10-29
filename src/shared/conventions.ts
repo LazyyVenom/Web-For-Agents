@@ -25,6 +25,11 @@ export const HIDDEN_SELECTOR = '[hidden], [aria-hidden="true"]';
 /** Marks head tags managed by <Seo>; the value is the tag key. */
 export const HEAD_OWNED_ATTR = "data-wfa";
 /**
+ * On `<html>`: the values (JSON, null for absent) its attributes had before <Seo> first set them, so a
+ * prerendered page, served with its own `lang`, still restores the shell's on client-side navigation.
+ */
+export const HTML_ORIGINAL_ATTR = "data-wfa-html";
+/**
  * HEAD_OWNED_ATTR value on the markdown alternate link that `generate` inserts, so later runs update
  * only that link and never a page's own. Has no ":", so the runtime head manager never removes it.
  */

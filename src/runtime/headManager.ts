@@ -1,4 +1,4 @@
-import { HEAD_OWNED_ATTR } from "../shared/conventions";
+import { HEAD_OWNED_ATTR, HTML_ORIGINAL_ATTR } from "../shared/conventions";
 import type { HeadTag } from "./types";
 
 function esc(value: string): string {
@@ -26,17 +26,37 @@ function defaultDoc(): Document | undefined {
   return typeof document === "undefined" ? undefined : document;
 }
 
-/** The page's own `<html>` attribute values from before we first set them (null when absent), restored on removal. */
-const htmlOriginals = new WeakMap<Document, Map<string, string | null>>();
+/**
+ * The page's own `<html>` attribute values from before we first set them (null when absent), restored
+ * on removal. Kept on `<html>` itself, so a prerendered page carries the shell's values, not its own.
+ */
+function htmlOriginals(root: Element): Record<string, string | null> {
+  try {
+    const parsed: unknown = JSON.parse(root.getAttribute(HTML_ORIGINAL_ATTR) ?? "{}");
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, string | null>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Rewritten last, so `lang` and `dir` come first in a prerendered `<html>` tag. */
+function saveHtmlOriginals(root: Element, originals: Record<string, string | null>): void {
+  root.removeAttribute(HTML_ORIGINAL_ATTR);
+  if (Object.keys(originals).length > 0) root.setAttribute(HTML_ORIGINAL_ATTR, JSON.stringify(originals));
+}
 
 function setHtmlAttrs(tag: HeadTag & { kind: "html" }, doc: Document): void {
   const root = doc.documentElement;
-  let originals = htmlOriginals.get(doc);
-  if (!originals) htmlOriginals.set(doc, (originals = new Map()));
+  const originals = htmlOriginals(root);
+  let captured = false;
   for (const [name, value] of Object.entries(tag.attrs)) {
-    if (!originals.has(name)) originals.set(name, root.getAttribute(name));
+    if (!Object.hasOwn(originals, name)) {
+      originals[name] = root.getAttribute(name);
+      captured = true;
+    }
     if (root.getAttribute(name) !== value) root.setAttribute(name, value);
   }
+  if (captured) saveHtmlOriginals(root, originals);
 }
 
 export function applyHeadTags(tags: HeadTag[], doc: Document | undefined = defaultDoc()): void {
@@ -68,12 +88,14 @@ export function removeHeadTag(key: string, doc: Document | undefined = defaultDo
   if (!doc || key === "title") return;
   if (key.startsWith("html:")) {
     const name = key.slice("html:".length);
-    const originals = htmlOriginals.get(doc);
-    if (!originals?.has(name)) return;
-    const original = originals.get(name);
-    originals.delete(name);
-    if (original === null || original === undefined) doc.documentElement.removeAttribute(name);
-    else doc.documentElement.setAttribute(name, original);
+    const root = doc.documentElement;
+    const originals = htmlOriginals(root);
+    if (!Object.hasOwn(originals, name)) return;
+    const original = originals[name];
+    delete originals[name];
+    saveHtmlOriginals(root, originals);
+    if (typeof original === "string") root.setAttribute(name, original);
+    else root.removeAttribute(name);
     return;
   }
   const selector = selectorFor(key);

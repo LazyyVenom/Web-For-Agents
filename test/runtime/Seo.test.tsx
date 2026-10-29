@@ -258,6 +258,51 @@ describe("Seo languages", () => {
     expect([root.getAttribute("lang"), root.getAttribute("dir")]).toEqual(["en", "ltr"]);
   });
 
+  it("without a provider lang, a page that sets none restores the document's original lang and dir", () => {
+    const tree = (lang: "de" | "ar" | "none") => (
+      <SeoProvider defaults={{ siteUrl: "https://a.com" }}>
+        <Seo title="Layout" />
+        <Page key={lang} lang={lang} />
+      </SeoProvider>
+    );
+    const { rerender } = render(tree("ar"));
+    expect([root.getAttribute("lang"), root.getAttribute("dir")]).toEqual(["ar", "rtl"]);
+    rerender(tree("none"));
+    expect([root.getAttribute("lang"), root.hasAttribute("dir")]).toEqual(["en", false]);
+    rerender(tree("de"));
+    rerender(tree("ar"));
+    rerender(tree("none"));
+    expect([root.getAttribute("lang"), root.hasAttribute("dir")]).toEqual(["en", false]);
+  });
+
+  it("the original is captured once: a page mounting before the previous one unmounts does not adopt its lang", () => {
+    const { rerender } = render(<Page lang="ar" />);
+    // The next page mounts while the previous one is still there (a transition), then the previous one goes.
+    rerender(
+      <>
+        <Page lang="ar" />
+        <Page lang="de" />
+      </>,
+    );
+    rerender(<Page lang="de" />);
+    rerender(<Page lang="none" />);
+    expect([root.getAttribute("lang"), root.hasAttribute("dir")]).toEqual(["en", false]);
+  });
+
+  it("on a prerendered page, navigating to a page without lang restores the shell's lang, not the prerendered page's", () => {
+    // The prerender renders the page and serializes <html> with whatever attributes it then has.
+    const { unmount } = render(<Page key="ar" lang="ar" />);
+    const served = [...root.attributes].map((a) => [a.name, a.value] as const);
+    unmount();
+    for (const a of [...root.attributes]) root.removeAttribute(a.name);
+    for (const [name, value] of served) root.setAttribute(name, value);
+    expect([root.getAttribute("lang"), root.getAttribute("dir")]).toEqual(["ar", "rtl"]);
+    // The browser loads that HTML, the app hydrates the same page, then navigates.
+    const { rerender } = render(<Page key="ar" lang="ar" />);
+    rerender(<Page key="none" lang="none" />);
+    expect([root.getAttribute("lang"), root.hasAttribute("dir")]).toEqual(["en", false]);
+  });
+
   it("unmounting everything restores the document's own lang and dir", () => {
     const { unmount } = render(<Page lang="ar" />);
     expect(root.getAttribute("dir")).toBe("rtl");
