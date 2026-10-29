@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Window } from "happy-dom";
-import { AGENT_GLOBAL } from "../../src/shared/conventions";
+import { AGENT_GLOBAL, AGENT_MAP_SCHEMA_URL } from "../../src/shared/conventions";
 import { markupDefinitions } from "../../src/shared/markupActions";
 import { inPageExpression } from "../../src/vite/prerender/extensions";
 import {
@@ -115,7 +115,7 @@ describe("buildAgentMap", () => {
     expect(map.pages[1].markdown).toBe("https://a.com/contact.md");
     expect(map.pages[1].actions.map((x: any) => x.name)).toEqual(["a", "b"]);
     expect(map.pages[1].actions[0].description).toBe(desc.description);
-    expect(Object.keys(map)).toEqual(["version", "generator", "site", "llms", "webmcp", "pages"]);
+    expect(Object.keys(map)).toEqual(["$schema", "version", "generator", "site", "llms", "webmcp", "pages"]);
     expect(Object.keys(map.pages[1])).toEqual(["path", "url", "title", "description", "markdown", "actions"]);
   });
 
@@ -295,6 +295,7 @@ describe("site actions across kinds of sites", () => {
       pages: [{ route: "/a", actions: [footer] }, { route: "/", title: "Home", actions: [{ ...desc, name: "own" }, footer] }],
     });
     const expected = {
+      $schema: AGENT_MAP_SCHEMA_URL,
       version: 2,
       generator: "@anubhav-choubey/web-for-agents",
       site: { url: "https://a.com" },

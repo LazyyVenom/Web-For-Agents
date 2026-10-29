@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cdn.jsdelivr.net/npm/@anubhav-choubey/web-for-agents@0/schemas/agents.v2.schema.json",
+  "title": "agents.json, version 2",
+  "description": "The agent map written by @anubhav-choubey/web-for-agents: the site's pages and the agent actions available on each. Version 2 added site.actions; a version 1 map is a version 2 map without it.",
+  "type": "object",
+  "required": ["version", "generator", "site", "webmcp", "pages"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "description": "This schema's URL.",
+      "type": "string",
+      "format": "uri"
+    },
+    "version": {
+      "description": "The format version.",
+      "const": 2
+    },
+    "generator": {
+      "description": "The tool that wrote the map.",
+      "type": "string"
+    },
+    "site": {
+      "type": "object",
+      "required": ["url"],
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "description": "The site's absolute URL, without a trailing slash.",
+          "type": "string",
+          "format": "uri"
+        },
+        "name": {
+          "type": "string"
+        },
+        "actions": {
+          "description": "Actions found with the same definition on every listed page, listed here once and left out of each page's own list. Absent when there are none.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/action" }
+        }
+      }
+    },
+    "llms": {
+      "description": "The absolute URL of llms.txt. Absent when it is not written.",
+      "type": "string",
+      "format": "uri"
+    },
+    "webmcp": {
+      "description": "Where the same actions are exposed in the browser as WebMCP tools.",
+      "type": "object",
+      "required": ["api", "spec"],
+      "additionalProperties": false,
+      "properties": {
+        "api": { "type": "string" },
+        "spec": { "type": "string", "format": "uri" }
+      }
+    },
+    "pages": {
+      "description": "The listed (indexable) pages, sorted by path.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/page" }
+    }
+  },
+  "$defs": {
+    "page": {
+      "type": "object",
+      "required": ["path", "url", "actions"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "The route, starting with \"/\".",
+          "type": "string",
+          "pattern": "^/"
+        },
+        "url": { "type": "string", "format": "uri" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "markdown": {
+          "description": "The absolute URL of the page's markdown copy.",
+          "type": "string",
+          "format": "uri"
+        },
+        "actions": {
+          "description": "The page's own actions, sorted by name, one per name. Site actions are not repeated here.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/action" }
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "required": ["name", "description", "inputSchema", "destructive", "readOnly", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "Unique on its page; also the WebMCP tool name.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]{1,128}$"
+        },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "inputSchema": { "$ref": "#/$defs/inputSchema" },
+        "destructive": {
+          "description": "The action changes or deletes something and asks the user to confirm.",
+          "type": "boolean"
+        },
+        "readOnly": {
+          "description": "The action only reads.",
+          "type": "boolean"
+        },
+        "kind": {
+          "description": "handler: runs code; form: fills and submits a form; click: clicks an element; link: a plain link to open, no JavaScript needed.",
+          "enum": ["handler", "form", "click", "link"]
+        },
+        "href": {
+          "description": "Link actions only: the absolute http(s), mailto: or tel: URL.",
+          "type": "string",
+          "format": "uri",
+          "pattern": "^(https?|mailto|tel):"
+        },
+        "method": {
+          "description": "Link actions with an http(s) href only: open it with a GET request.",
+          "const": "GET"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "link" } } },
+          "then": { "required": ["href"] },
+          "else": { "not": { "anyOf": [{ "required": ["href"] }, { "required": ["method"] }] } }
+        },
+        {
+          "if": { "required": ["method"] },
+          "then": { "properties": { "href": { "type": "string", "pattern": "^https?:" } } }
+        }
+      ]
+    },
+    "inputSchema": {
+      "description": "The JSON Schema of the action's input. These keywords are the ones generated from forms; schemas written in code may use others.",
+      "type": "object",
+      "properties": {
+        "type": { "enum": ["string", "number", "integer", "boolean", "array", "object"] },
+        "description": { "type": "string" },
+        "enum": { "type": "array", "items": { "type": ["string", "number"] } },
+        "format": { "type": "string" },
+        "minimum": { "type": "number" },
+        "maximum": { "type": "number" },
+        "minLength": { "type": "integer", "minimum": 0 },
+        "maxLength": { "type": "integer", "minimum": 0 },
+        "pattern": { "type": "string" },
+        "items": { "$ref": "#/$defs/inputSchema" },
+        "properties": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/inputSchema" }
+        },
+        "required": { "type": "array", "items": { "type": "string" } },
+        "additionalProperties": { "type": "boolean" }
+      }
+    }
+  }
+}

@@ -8,6 +8,7 @@ import { generateAgentFiles } from "../../src/vite/generate";
 import type { WebForAgentsOptions } from "../../src/vite/options";
 import type { AgentMap, AgentMapPage } from "../../src/shared/agent";
 import { copyFixture, distFiles, jsBundle, removeFixtureCopies } from "./helpers";
+import { validateAgentMap } from "../helpers/agentMapSchema";
 
 afterAll(removeFixtureCopies);
 
@@ -63,6 +64,11 @@ describe("agent map build", () => {
       description: "Get in touch",
       markdown: "https://example.com/contact.md",
     });
+  });
+
+  it("matches the agents.json JSON Schema named by its $schema", () => {
+    expect(Object.keys(map)[0]).toBe("$schema");
+    expect(validateAgentMap(map)).toEqual([]);
   });
 
   it("keeps only the first mounted action of a duplicate name", () => {

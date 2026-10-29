@@ -60,3 +60,13 @@ export const LINK_ACTION_SELECTOR = `a[href][${ACTION_ATTR}]`;
  * "handler" | "form" | "click" | "link".
  */
 export const ACTION_KIND_ATTR = "data-agent-kind";
+
+/**
+ * The `$schema` of agents.json: the JSON Schema of format version 2 (AGENT_MAP_VERSION), shipped in
+ * the package's schemas/ directory. Pinned to the package's major version ("@0"): jsDelivr serves the
+ * newest 0.x release, so the URL survives every minor and patch release, and a new format version
+ * ships as a new file (agents.v3.schema.json) next to this one instead of replacing it. Update the
+ * major with the package's.
+ */
+export const AGENT_MAP_SCHEMA_URL =
+  "https://cdn.jsdelivr.net/npm/@anubhav-choubey/web-for-agents@0/schemas/agents.v2.schema.json";

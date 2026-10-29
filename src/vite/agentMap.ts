@@ -5,6 +5,7 @@ import {
   ACTION_KIND_ATTR,
   ACTION_READONLY_ATTR,
   AGENT_GLOBAL,
+  AGENT_MAP_SCHEMA_URL,
   LINK_ACTION_SELECTOR,
 } from "../shared/conventions";
 import {
@@ -198,6 +199,7 @@ function agentMapOf(input: AgentMapInput): AgentMap {
   const hoisted = input.siteActions === false ? { actions: [], pages: all } : hoistSiteActions(all);
   if (hoisted.actions.length > 0) site.actions = hoisted.actions;
   return {
+    $schema: AGENT_MAP_SCHEMA_URL,
     version: AGENT_MAP_VERSION,
     generator: AGENT_MAP_GENERATOR,
     site,

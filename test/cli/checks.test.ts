@@ -283,6 +283,19 @@ describe("checks", () => {
     expect(at({ version: 2, pages: [{ actions: [a("x")] }] }).message).toBe("Agent map found at http://h/agents.json (1 page, 1 action)");
   });
 
+  it("agent map accepts and ignores $schema, whatever it points at", () => {
+    const at = (map: unknown) =>
+      byId(inputs({ agentMap: ok(JSON.stringify(map), "application/json", "http://h/agents.json") }), "agent-map");
+    const base = { version: 2, site: { url: "http://h" }, pages: [{ actions: [{ name: "buy", kind: "link" }] }] };
+    const plain = at(base);
+    for (const $schema of ["https://cdn.jsdelivr.net/npm/@anubhav-choubey/web-for-agents@0/schemas/agents.v2.schema.json", "https://other.example/s.json", 42, null]) {
+      const r = at({ $schema, ...base });
+      expect(r.status, String($schema)).toBe("pass");
+      expect(r.message).toBe(plain.message);
+    }
+    expect(at({ $schema: "x", version: 3, pages: [] }).message).toBe("http://h/agents.json has version 3; expected 1 or 2");
+  });
+
   it("json-ld with only non-string @type warns", () => {
     const ld = '<script type="application/ld+json">{"@type":1}</script>';
     expect(byId(inputs({ src: pageHtml({ head: ld }) }), "json-ld").status).toBe("warn");
