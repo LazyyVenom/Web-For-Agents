@@ -34,7 +34,8 @@
   "type": "module",
   "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "bin": {
     "web-for-agents": "dist/bin.js"
