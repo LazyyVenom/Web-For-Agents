@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/LazyyVenom/Web-For-Agents/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/LazyyVenom/Web-For-Agents/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/@anubhav-choubey/web-for-agents)](https://www.npmjs.com/package/@anubhav-choubey/web-for-agents) [![license](https://img.shields.io/npm/l/@anubhav-choubey/web-for-agents)](https://github.com/LazyyVenom/Web-For-Agents/blob/master/LICENSE)
 
-SEO and LLM-readiness helpers for React + Vite. At runtime it manages `<head>` metadata (title, description, canonical, Open Graph, Twitter, `<html lang>` and hreflang `alternates`) and emits typed JSON-LD. At build time a Vite plugin prerenders every route to static HTML and writes a markdown version of each page, `llms.txt`, `llms-full.txt`, an `agents.json` map of the actions agents can take, a `sitemap.xml`, and a `robots.txt` with an explicit AI-crawler policy, so you decide which bots may train on your content and which may use it for search.
+SEO and LLM-readiness helpers for React + Vite. At runtime it manages `<head>` metadata (title, description, canonical, Open Graph, Twitter, [`<html lang>` and hreflang `alternates`](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/seo.md#languages)) and emits typed JSON-LD. At build time a Vite plugin prerenders every route to static HTML and writes a markdown version of each page, `llms.txt`, `llms-full.txt`, an `agents.json` map of the actions agents can take, a `sitemap.xml`, and a `robots.txt` with an explicit AI-crawler policy, so you decide which bots may train on your content and which may use it for search.
 
 ## Install
 
@@ -57,7 +57,7 @@ export function Post() {
 
 Builders also cover `product`, `organization`, `webSite`, `webPage`, `breadcrumbList`, `faqPage`, `softwareApplication`, `person`, `profilePage`, `creativeWork` and `graph` (several nodes in one `@graph`); see [Schema builders](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/seo.md#schema-builders). In a Node script, import them from `@anubhav-choubey/web-for-agents/schema` (no React needed; see [Without React](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/seo.md#without-react)). Every builder takes `id`, `extra` fields and nested nodes, and `schema.ref(id)` links to another node by `@id`.
 
-`robots.ai` is required: the plugin throws if you do not state a policy for both `training` and `search`. Use one `SeoProvider` per document. `<Seo lang alternates>` sets `<html lang>` and `dir` and writes hreflang links per page ([Languages](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/seo.md#languages)). More in [Head tags and JSON-LD](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/seo.md).
+`robots.ai` is required: the plugin throws if you do not state a policy for both `training` and `search`. Use one `SeoProvider` per document. More in [Head tags and JSON-LD](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/seo.md).
 
 ## What the build produces
 
