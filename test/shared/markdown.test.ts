@@ -50,6 +50,23 @@ describe("htmlToMarkdown: adjacent inline elements", () => {
     expect(htmlToMarkdown('<nav><a href="/a">One</a><a href="/b">Two</a></nav>')).toBe("[One](/a) [Two](/b)\n");
   });
 
+  it("does not split words in running prose", () => {
+    expect(htmlToMarkdown("<p><span>Java</span><span>Script</span> is fun</p>")).toBe("JavaScript is fun\n");
+    expect(htmlToMarkdown("<p>un<span>believ</span><span>able</span></p>")).toBe("unbelievable\n");
+    // Whitespace-only text between items does not make the parent prose.
+    expect(htmlToMarkdown('<div class="flex">\n  <span>Name</span><span>Email</span>\n</div>')).toBe("Name Email\n");
+    expect(htmlToMarkdown('<div class="flex"><span>Name</span><span>Email</span></div>')).toBe("Name Email\n");
+  });
+
+  it("treats custom elements as inline", () => {
+    expect(htmlToMarkdown("<div><x-label>Name</x-label><span>Value</span></div>")).toBe("Name Value\n");
+    expect(htmlToMarkdown("<div><span>Mail</span><x-icon></x-icon><span>Me</span></div>")).toBe("Mail Me\n");
+  });
+
+  it("separates two spans alone in a parent (the logo limit)", () => {
+    expect(htmlToMarkdown("<div><span>Web</span><span>ForAgents</span></div>")).toBe("Web ForAgents\n");
+  });
+
   it("looks past icons, form fields and empty elements", () => {
     expect(htmlToMarkdown('<p><span>Mail</span><svg></svg><i class="icon"></i><span>Me</span></p>')).toBe("Mail Me\n");
     expect(htmlToMarkdown('<form><label>Name<input name="n"></label><input type="hidden"><button>Send</button></form>')).toBe("Name Send\n");

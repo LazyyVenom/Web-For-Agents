@@ -24,7 +24,7 @@ export function escapeLinkTarget(url: string): string {
   return url.replace(/\(/g, "%28").replace(/\)/g, "%29").replace(/\s/g, "%20");
 }
 
-/** Inline elements whose adjacent siblings may be separated by a space (see needsSeparator). */
+/** Inline elements whose adjacent siblings may be separated by a space (see needsSeparator). Custom elements count too (isInline). */
 const INLINE_ELEMENTS = new Set([
   "A", "ABBR", "B", "BDI", "BDO", "BUTTON", "CITE", "CODE", "DATA", "DEL", "DFN", "EM", "I", "INS", "KBD",
   "LABEL", "MARK", "OUTPUT", "Q", "S", "SAMP", "SMALL", "SPAN", "STRONG", "SUB", "SUP", "TIME", "U", "VAR",
@@ -38,6 +38,18 @@ const FORMATTING_ELEMENTS = new Set([
 const OPENS = /[([{$#@/\u2018\u201c]$/;
 const CLOSES = /^[.,;:!?%)\]}\u2019\u201d\u2026]/;
 
+/** Whether a node is an inline element: a listed one, or a custom element (a tag name with "-"). */
+function isInline(node: Node): boolean {
+  return node.nodeType === 1 && (INLINE_ELEMENTS.has(node.nodeName.toUpperCase()) || node.nodeName.includes("-"));
+}
+
+/** Whether a node has a direct text child with non-whitespace text: running prose, not a row of items. */
+function hasDirectText(node: Node | null): boolean {
+  if (!node) return false;
+  for (let c = node.firstChild; c; c = c.nextSibling) if (c.nodeType === 3 && c.nodeValue?.trim()) return true;
+  return false;
+}
+
 /** Elements that add no text to the markdown when they have none: icons, form fields, empty spans. */
 const TEXTLESS_ELEMENTS = new Set(["CANVAS", "INPUT", "SVG", "TEXTAREA"]);
 
@@ -46,7 +58,7 @@ function rendersNothing(node: Node): boolean {
   if (node.nodeType === 8) return true;
   if (node.nodeType === 3) return !node.nodeValue;
   const name = node.nodeName.toUpperCase();
-  return node.nodeType === 1 && !node.textContent && (INLINE_ELEMENTS.has(name) || TEXTLESS_ELEMENTS.has(name));
+  return node.nodeType === 1 && !node.textContent && (isInline(node) || TEXTLESS_ELEMENTS.has(name));
 }
 
 /** The previous sibling that puts something in the markdown (React leaves comments between elements). */
@@ -62,19 +74,25 @@ function previousContentSibling(node: Node): Node | null {
  * whitespace between the elements, so the page shows two words while plain text would read
  * "Slot 01Featured". The rule: a space goes between two adjacent sibling elements (with only
  * comments, icons, form fields or empty inline elements between them) when both are inline
- * elements with text, the boundary has no whitespace, and none of these holds, since each marks
- * glue that is meant:
+ * elements (custom elements included) with text, the boundary has no whitespace, and none of
+ * these holds, since each marks glue that is meant:
+ * - the parent has a direct text node that is not just whitespace: it is running prose
+ *   (`<p><span>Java</span><span>Script</span> is fun</p>`, `un<span>believ</span><span>able</span>`),
+ *   not a row of items;
  * - both are text-formatting elements (`<b>Java</b><i>Script</i>`);
  * - either side's text is a single character (letter-by-letter animations, drop caps);
  * - the left text ends with an opening character ( `( [ { $ # @ /` or an opening quote) or the
  *   right text starts with closing punctuation (`. , ; : ! ? % ) ] }`, a closing quote, an ellipsis);
  * - they are inside `<pre>` or `<code>`.
  * An element next to a text node (`<b>Java</b>Script`, `H<sub>2</sub>O`) is never separated.
+ * The limit: two elements alone in a parent, such as a logo `<span>Web</span><span>ForAgents</span>`,
+ * look like a row and get a space ("Web ForAgents"); put such a word in one element.
  */
 function needsSeparator(node: Node): boolean {
-  if (node.nodeType !== 1 || !INLINE_ELEMENTS.has(node.nodeName)) return false;
+  if (!isInline(node)) return false;
   const prev = previousContentSibling(node);
-  if (!prev || prev.nodeType !== 1 || !INLINE_ELEMENTS.has(prev.nodeName)) return false;
+  if (!prev || !isInline(prev)) return false;
+  if (hasDirectText(node.parentNode)) return false;
   if (FORMATTING_ELEMENTS.has(node.nodeName) && FORMATTING_ELEMENTS.has(prev.nodeName)) return false;
   const left = prev.textContent ?? "";
   const right = node.textContent ?? "";

@@ -135,15 +135,16 @@ import { ContentRegion, ExcludeFromContent } from "@anubhav-choubey/web-for-agen
 
 Both accept `as` (default `div`) and pass other props to the element. If a page has neither a `ContentRegion` nor a match for `contentSelector`, the content is taken from `<body>` minus `header`, `nav`, `footer` and `aside`, and the build logs a warning naming those routes.
 
-Layouts often place inline elements side by side with no whitespace between them, such as `<span>Slot 01</span><span>Featured</span>` in a flex row. The page shows two words, so the markdown gets a space between them: `Slot 01 Featured`, not `Slot 01Featured`. The space goes between two adjacent sibling inline elements that both have text, with nothing but comments, icons, form fields or empty elements between them. Glue that looks intended is kept:
+Layouts often place inline elements side by side with no whitespace between them, such as `<span>Slot 01</span><span>Featured</span>` in a flex row. The page shows two words, so the markdown gets a space between them: `Slot 01 Featured`, not `Slot 01Featured`. The space goes between two adjacent sibling inline elements (custom elements such as `<x-badge>` count as inline) that both have text, with nothing but comments, icons, form fields or empty elements between them. Glue that looks intended is kept:
 
+- elements whose parent also holds text of its own (not just whitespace), since that parent is running prose, not a row of items: `<p><span>Java</span><span>Script</span> is fun</p>` gives `JavaScript is fun`, and `un<span>believ</span><span>able</span>` stays `unbelievable`;
 - an element next to plain text (`<b>Java</b>Script`, `H<sub>2</sub>O`);
 - two text-formatting elements (`<b>`, `<i>`, `<em>`, `<strong>`, `<code>`, `<sub>`, `<sup>`, `<mark>` and similar), as in `<b>Java</b><i>Script</i>`;
 - a side whose text is a single character (letter-by-letter animations, drop caps);
 - text ending in an opening character (`(`, `[`, `{`, `$`, `#`, `@`, `/`, an opening quote) or followed by closing punctuation (`.`, `,`, `;`, `:`, `!`, `?`, `%`, `)`, `]`, `}`, a closing quote, `…`);
 - anything inside `<pre>` or `<code>`.
 
-To join two words on purpose in any other case, put them in one element.
+Two elements alone in a parent look like a row of items, so a logo such as `<span>Web</span><span>ForAgents</span>` comes out as `Web ForAgents`. To join two words on purpose in this or any other case, put them in one element.
 
 ## Markdown URLs
 
