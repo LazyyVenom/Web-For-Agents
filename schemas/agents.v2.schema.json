@@ -114,9 +114,8 @@
           "enum": ["handler", "form", "click", "link"]
         },
         "href": {
-          "description": "Link actions only: the absolute http(s), mailto: or tel: URL.",
+          "description": "Link actions only: the absolute http(s), mailto: or tel: URL, as the browser resolves the link's href. mailto: and tel: URLs may contain spaces and display names, so it is not checked as an RFC 3986 URI.",
           "type": "string",
-          "format": "uri",
           "pattern": "^(https?|mailto|tel):"
         },
         "method": {
@@ -126,13 +125,20 @@
       },
       "allOf": [
         {
-          "if": { "properties": { "kind": { "const": "link" } } },
-          "then": { "required": ["href"] },
-          "else": { "not": { "anyOf": [{ "required": ["href"] }, { "required": ["method"] }] } }
+          "if": { "type": "object", "properties": { "kind": { "const": "link" } }, "required": ["kind"] },
+          "then": { "type": "object", "properties": { "href": { "type": "string" } }, "required": ["href"] },
+          "else": {
+            "not": {
+              "anyOf": [
+                { "type": "object", "properties": { "href": { "type": "string" } }, "required": ["href"] },
+                { "type": "object", "properties": { "method": { "type": "string" } }, "required": ["method"] }
+              ]
+            }
+          }
         },
         {
-          "if": { "required": ["method"] },
-          "then": { "properties": { "href": { "type": "string", "pattern": "^https?:" } } }
+          "if": { "type": "object", "properties": { "method": { "type": "string" } }, "required": ["method"] },
+          "then": { "type": "object", "properties": { "href": { "type": "string", "pattern": "^https?:" } } }
         }
       ]
     },
@@ -142,7 +148,7 @@
       "properties": {
         "type": { "enum": ["string", "number", "integer", "boolean", "array", "object"] },
         "description": { "type": "string" },
-        "enum": { "type": "array", "items": { "type": ["string", "number"] } },
+        "enum": { "type": "array", "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] } },
         "format": { "type": "string" },
         "minimum": { "type": "number" },
         "maximum": { "type": "number" },

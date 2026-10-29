@@ -56,6 +56,17 @@ const SITES: Record<string, Record<string, string>> = {
     "index.html": html("Blog", "<h1>Blog</h1><p>Posts.</p>"),
     "post.html": html("Post", "<h1>Post</h1><p>Text.</p>"),
   },
+  "links of every kind": {
+    "index.html": html(
+      "Links",
+      "<h1>Links</h1>" +
+        '<a href="tel:+1 555 0100" data-agent-action="call_us" data-agent-kind="link">Call</a>' +
+        '<a href="mailto:Jane Doe <jane@example.org>" data-agent-action="email_jane" data-agent-kind="link">Jane</a>' +
+        '<a href="https://status.example.com" data-agent-action="open_status" data-agent-kind="link">Status</a>' +
+        footer,
+    ),
+    "about.html": html("About", "<h1>About</h1>" + footer),
+  },
   "one page, japanese": {
     "index.html": html("ホーム", "<h1>ようこそ</h1>" + form.replace("Send a message", "メッセージを送る")),
   },
@@ -149,6 +160,14 @@ describe("agents.json JSON Schema", () => {
     expect(plugin.pages.find((p: any) => p.path === "/").actions.map((a: any) => a.name)).toContain("track_order");
   });
 
+  it("accepts link hrefs as agents.json writes them: tel: and mailto: with spaces, external https, and site actions", async () => {
+    const map = (await generated(SITES["links of every kind"]!)) as any;
+    const hrefs = map.pages.find((p: any) => p.path === "/").actions.map((a: any) => a.href);
+    expect(hrefs).toEqual(["tel:+1 555 0100", "mailto:Jane Doe <jane@example.org>", "https://status.example.com/"]);
+    expect(map.site.actions.map((a: any) => a.name)).toEqual(["email", "terms"]);
+    expect(validateAgentMap(map)).toEqual([]);
+  });
+
   it("rejects maps that break the format", () => {
     const ok = JSON.parse(buildAgentMap({ siteUrl: "https://a.com", pages: [{ route: "/", actions: [handlerAction] }] }));
     expect(validateAgentMap(ok)).toEqual([]);
@@ -156,6 +175,14 @@ describe("agents.json JSON Schema", () => {
     expect(validateAgentMap({ ...ok, pages: [{ ...ok.pages[0], actions: [{ ...handlerAction, kind: "teleport" }] }] })).not.toEqual([]);
     expect(validateAgentMap({ ...ok, pages: [{ ...ok.pages[0], actions: [{ ...handlerAction, kind: "link" }] }] })).not.toEqual([]);
     expect(validateAgentMap({ ...ok, pages: [{ ...ok.pages[0], actions: [{ ...handlerAction, name: "a b" }] }] })).not.toEqual([]);
+    const withAction = (a: object) => ({ ...ok, pages: [{ ...ok.pages[0], actions: [a] }] });
+    const link = { ...handlerAction, kind: "link", inputSchema: { type: "object" } };
+    expect(validateAgentMap(withAction({ ...link, href: "mailto:a@b.c" }))).toEqual([]);
+    expect(validateAgentMap(withAction({ ...link, href: "https://a.com/", method: "GET" }))).toEqual([]);
+    expect(validateAgentMap(withAction({ ...link, href: "mailto:a@b.c", method: "GET" }))).not.toEqual([]);
+    expect(validateAgentMap(withAction({ ...link, href: "javascript:alert(1)" }))).not.toEqual([]);
+    expect(validateAgentMap(withAction({ ...handlerAction, href: "https://a.com/" }))).not.toEqual([]);
+    expect(validateAgentMap(withAction({ ...handlerAction, method: "GET" }))).not.toEqual([]);
     const { site: _site, ...noSite } = ok;
     expect(validateAgentMap(noSite)).not.toEqual([]);
   });

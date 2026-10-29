@@ -5,7 +5,8 @@ import addFormats from "ajv-formats";
 import { AGENT_MAP_VERSION } from "../../src/shared/agent";
 
 const file = path.resolve(__dirname, `../../schemas/agents.v${AGENT_MAP_VERSION}.schema.json`);
-const ajv = new Ajv2020({ strict: true, strictRequired: false, allowUnionTypes: true, allErrors: true });
+// Strict mode in full (strictRequired and strictTypes included), as a consumer validating with `strict: true` would.
+const ajv = new Ajv2020({ strict: true, allErrors: true });
 addFormats(ajv);
 const validate = ajv.compile(JSON.parse(readFileSync(file, "utf8")));
 
