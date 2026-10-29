@@ -100,8 +100,14 @@ beforeAll(async () => {
     throw new Error('dist/ is missing: run "npm run build" first (npm run test:pack does this)');
   }
   work = mkdtempSync(path.join(tmpdir(), "wfa-pack-"));
-  // dist/ is already built; --ignore-scripts skips the `prepare` build, whose output would corrupt the JSON.
-  const packed = JSON.parse(await sh("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", work], repo)) as Array<{
+  // Pack a staged copy the way the release job does: `prepare` (the build for git installs) is
+  // deleted first, so the published package.json has no install script for npm to warn about.
+  const stage = path.join(work, "stage");
+  mkdirSync(stage);
+  for (const f of ["package.json", "README.md", "LICENSE", "dist"]) cpSync(path.join(repo, f), path.join(stage, f), { recursive: true });
+  await sh("npm", ["pkg", "delete", "scripts.prepare"], stage);
+  // dist/ is already built; --ignore-scripts keeps any other lifecycle output out of the JSON.
+  const packed = JSON.parse(await sh("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", work], stage)) as Array<{
     filename: string;
     files: Array<{ path: string }>;
   }>;
@@ -150,6 +156,12 @@ describe(`packed package in a Vite ${viteMajor} app`, () => {
     expect(packedFiles).toContain("dist/link.d.ts");
     expect(packedFiles).toContain("package.json");
     expect(packedFiles.filter((f) => f.startsWith("src/") || f.startsWith("test/"))).toEqual([]);
+  });
+
+  it("the packed package.json has no prepare script; the repo's still does (git installs build)", () => {
+    const installed = JSON.parse(readFileSync(path.join(app, "node_modules/@anubhav-choubey/web-for-agents/package.json"), "utf8"));
+    expect(installed.scripts?.prepare).toBeUndefined();
+    expect(JSON.parse(readFileSync(path.join(repo, "package.json"), "utf8")).scripts.prepare).toBe("npm run build");
   });
 
   it("installs the consumer's requested Vite", () => {

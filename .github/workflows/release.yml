@@ -41,8 +41,12 @@ jobs:
             echo "Tag $GITHUB_REF_NAME does not match package.json version $pkg" >&2
             exit 1
           fi
+      # prepare builds git installs; the registry package does not need it, and npm 11 warns about
+      # install scripts on every install. dist/ is already built above.
       - name: Pack
-        run: npm pack --pack-destination "$RUNNER_TEMP/package"
+        run: |
+          npm pkg delete scripts.prepare
+          npm pack --pack-destination "$RUNNER_TEMP/package"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: package
