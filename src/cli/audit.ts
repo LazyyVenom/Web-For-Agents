@@ -13,6 +13,7 @@ import { DEFAULT_TIMEOUT_MS, fetchText, isOk, looksLikeHtml, notFetched, type Fe
 import { extractHtmlFacts, markdownAlternate } from "./html";
 import { isPrivateHost } from "./privateAddress";
 import { parseRobots } from "./robots";
+import { mapSitemapLocs } from "./sitemap";
 
 export interface AuditOptions {
   /** Per-request timeout in milliseconds. Default 10000. */
@@ -113,14 +114,6 @@ async function probe(get: (u: string) => Promise<FetchResult>, urls: string[]): 
   const results = await Promise.all(urls.map((u) => get(u)));
   const found = results.filter((r) => !isMissing(r)).pop();
   return { result: found ?? results[0]!, tried: urls };
-}
-
-/** Rewrites each `<loc>` URL of sitemap XML through `map` (entities decoded, re-escaped when changed). */
-function mapSitemapLocs(body: string, map: (u: string) => string): string {
-  return body.replace(/<loc>(\s*)([^<]*?)(\s*)<\/loc>/gi, (all, pre: string, loc: string, post: string) => {
-    const mapped = map(loc.replace(/&amp;/g, "&"));
-    return mapped === loc.replace(/&amp;/g, "&") ? all : `<loc>${pre}${mapped.replace(/&/g, "&amp;")}${post}</loc>`;
-  });
 }
 
 const sameOrigin = (a: string, b: string): boolean => new URL(a).origin === new URL(b).origin;

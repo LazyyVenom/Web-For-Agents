@@ -10,6 +10,7 @@ import { hasScheme, trimTrailingSlash, tryResolveUrl } from "../shared/url";
 import { isOk, looksLikeHtml, MAX_BODY_BYTES, type FetchResult } from "./fetch";
 import { getLinks, getMeta, type HtmlFacts } from "./html";
 import { isAllowed, parseRobots, type ParsedRobots } from "./robots";
+import { sitemapLocs } from "./sitemap";
 
 export type CheckId =
   | "content"
@@ -297,8 +298,7 @@ function checkSitemap({ page, sitemap }: AuditInputs): Outcome {
   const want = trimTrailingSlash(page.finalUrl);
   const wantPath = trimTrailingSlash(pathAndQuery(page.finalUrl));
   let elsewhere: string | undefined;
-  for (const m of body.matchAll(/<loc>\s*([^<]*?)\s*<\/loc>/gi)) {
-    const loc = m[1]!.replace(/&amp;/g, "&");
+  for (const loc of sitemapLocs(body)) {
     if (trimTrailingSlash(loc) === want) return pass(`Sitemap ${at} lists this page`);
     if (
       elsewhere === undefined &&

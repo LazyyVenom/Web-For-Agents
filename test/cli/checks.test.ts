@@ -151,6 +151,15 @@ describe("checks", () => {
     );
   });
 
+  it("sitemap <loc> matching is linear: an unclosed <loc> of 200k spaces does not hang", () => {
+    const hostile = ok(`<urlset><url><loc>${" ".repeat(200_000)}</url></urlset>`, "application/xml");
+    const t = performance.now();
+    expect(byId(inputs({ sitemap: hostile }), "sitemap").status).toBe("warn");
+    expect(performance.now() - t).toBeLessThan(200);
+    const padded = ok("<urlset><url><loc>\n  http://h/x  \n</loc></url></urlset>", "application/xml");
+    expect(byId(inputs({ sitemap: padded }), "sitemap").status).toBe("pass");
+  });
+
   it("canonical on another origin names it and gives the preview fix", () => {
     const html = pageHtml({ head: '<link rel="canonical" href="https://prod.example/x">' });
     const c = byId(inputs({ src: html }), "canonical");

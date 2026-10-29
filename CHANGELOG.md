@@ -17,6 +17,8 @@
 
 - Schema builders no longer crash when a nested field is missing, such as `profilePage` without `mainEntity` (now optional).
 - Markdown no longer glues the words of adjacent inline elements that have no whitespace between them: `<span>Slot 01</span><span>Featured</span>` gives `Slot 01 Featured`, not `Slot 01Featured`. Glue that looks intended is kept: an element next to plain text (`<b>Java</b>Script`), two text-formatting elements, single characters, opening or closing punctuation, and anything in `<pre>` or `<code>`. Known limit: `<strong>26K+</strong>YouTube subs`, an element next to bare text, stays joined. See [Content for agents](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/prerendering.md#content-for-agents).
+- Markdown does not split words inside running prose: when the parent also holds its own text, adjacent elements stay joined (`<p><span>Java</span><span>Script</span> is fun</p>` gives `JavaScript is fun`). Custom elements count as inline.
+- `audit` no longer hangs on a sitemap with a long unclosed `<loc>`: the `<loc>` match is now linear.
 - In prerendered `agents.json`, an `<a href>` marked `data-agent-kind="handler"` or `"click"` is no longer listed as a link action.
 
 ### Changed
