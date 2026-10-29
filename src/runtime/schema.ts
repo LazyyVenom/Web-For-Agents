@@ -28,7 +28,7 @@ export function serializeJsonLd(data: JsonLdNode | JsonLdNode[] | JsonLdGraph): 
 
 /** Options every builder accepts. */
 export interface JsonLdNodeOptions {
-  /** Written as `"@id"`, so other nodes can point at this one with `schema.ref(id)`. */
+  /** Written as `"@id"`, so other nodes can point at this one with `schema.ref(id)`. An empty or non-string id throws a TypeError. */
   id?: string;
   /**
    * Extra schema.org properties merged in last (they override the typed fields). `@type` and
@@ -65,7 +65,8 @@ const isPlainObject = (v: unknown): v is Record<string, unknown> => {
 
 /**
  * Any value placed inside a node: nested nodes and refs lose their `@context` at any depth (inside
- * arrays and plain objects too); a null value becomes undefined, and nulls are dropped from arrays.
+ * arrays and plain objects too); a null value becomes undefined, and null and undefined values are
+ * dropped from arrays and plain objects.
  */
 function embed(v: unknown): unknown {
   if (v === null) return undefined;
@@ -75,7 +76,8 @@ function embed(v: unknown): unknown {
   return Object.fromEntries(
     Object.entries(v)
       .filter(([k]) => !(isNode && k === "@context"))
-      .map(([k, x]) => [k, x === null ? null : embed(x)]),
+      .map(([k, x]) => [k, embed(x)])
+      .filter(([, x]) => x !== undefined),
   );
 }
 
@@ -83,9 +85,15 @@ function definedOnly(o: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
 }
 
+/** Returns `id` when it is a non-empty string, else throws a TypeError naming `label`. */
+function requireId(id: unknown, label: string): string {
+  if (typeof id !== "string" || id.trim() === "") throw new TypeError(`${label} must be a non-empty string`);
+  return id;
+}
+
 function node(type: string, fields: Record<string, unknown>, options: JsonLdNodeOptions = {}): JsonLdNode {
   const out: JsonLdNode = { "@context": "https://schema.org", "@type": type };
-  if (options.id !== undefined) out["@id"] = options.id;
+  if (options.id !== undefined) out["@id"] = requireId(options.id, `schema: the id of a ${type}`);
   for (const [k, v] of Object.entries(fields)) {
     const e = embed(v);
     if (e !== undefined) out[k] = e;
@@ -140,8 +148,7 @@ function split<T extends JsonLdNodeOptions>(i: T): [Omit<T, "id" | "extra">, Jso
 export const schema = {
   /** `{ "@id": id }`: points at a node defined elsewhere, for example in the same `schema.graph`. */
   ref(id: string): JsonLdRef {
-    if (typeof id !== "string" || id.trim() === "") throw new TypeError("schema.ref: id must be a non-empty string");
-    return { "@id": id };
+    return { "@id": requireId(id, "schema.ref: id") };
   },
   article(
     i: {

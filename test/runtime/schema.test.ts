@@ -323,6 +323,20 @@ describe("0.4: @id, refs and extra fields", () => {
     expect(schema.ref("#me")).toEqual({ "@id": "#me" });
   });
 
+  it("the id option throws a TypeError on an empty, blank or non-string id, as ref does", () => {
+    expect(() => schema.person({ name: "A", id: "" })).toThrow(TypeError);
+    expect(() => schema.person({ name: "A", id: "   " })).toThrow(TypeError);
+    expect(() => schema.webPage({ name: "P", url: "u", id: 42 as unknown as string })).toThrow(TypeError);
+    expect(() => schema.faqPage([], { id: null as unknown as string })).toThrow(TypeError);
+    expect(schema.person({ name: "A", id: undefined })["@id"]).toBeUndefined();
+  });
+
+  it("drops null and undefined values inside nested plain objects too", () => {
+    const n = schema.webPage({ name: "P", url: "u", extra: { about: { a: null, b: undefined, c: 1, deep: { d: null, e: "x" } } } });
+    expect(n.about).toEqual({ c: 1, deep: { e: "x" } });
+    expect(serializeJsonLd(n)).not.toContain("null");
+  });
+
   it("the extra type rejects @type and @context keys", () => {
     // @ts-expect-error @context is not allowed in extra
     schema.person({ name: "A", extra: { "@context": "x" } });

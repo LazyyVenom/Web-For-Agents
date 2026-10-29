@@ -21,7 +21,7 @@
 - `audit` no longer hangs on a sitemap with a long unclosed `<loc>`: the `<loc>` match is now linear.
 - Every entry point loads with `require()` too (Node 20.19+ runs the ESM build): `exports` use the `default` condition instead of `import`.
 - `generate` warns, once per action, about an unknown `data-agent-kind` value and infers the kind from the element. A `<form>` marked `"handler"` keeps its fields as the input schema.
-- Schema builders: an explicit `id` wins over `extra["@id"]`, `schema.ref` throws a `TypeError` on a missing or empty id, and the `extra` type rejects `@type` and `@context`.
+- Schema builders: an explicit `id` wins over `extra["@id"]`, `schema.ref` and the `id` option throw a `TypeError` on a missing, empty or non-string id, and the `extra` type rejects `@type` and `@context`.
 - The build summary mentions the sitemap and `llms.txt` only when they are written.
 - The published package.json has no `prepare` script, so npm no longer warns about an install script.
 - In prerendered `agents.json`, an `<a href>` marked `data-agent-kind="handler"` or `"click"` is no longer listed as a link action.
@@ -30,6 +30,7 @@
 
 - `sitemap` `lastmod` dates from `"file"`, the build date or a function returning a `Date` are formatted in `sitemap.timeZone`. Outside UTC a late-night build can get a different date than in 0.3.0; set `timeZone` to your local zone to match your clock.
 - A `sitemap` value that is not a boolean or `{ lastmod, timeZone }` now fails with a new error message.
+- Schema builders omit `null` fields at any depth, including inside nested plain objects, instead of writing them as `null`.
 
 ### Troubleshooting
 
