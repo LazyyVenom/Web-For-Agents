@@ -244,6 +244,71 @@ function review(i: ReviewInput & StandaloneOptions): JsonLdNode {
 /** Builds each review that is not already a node or a ref. */
 const reviews = (v: ReviewsInput | null | undefined) => each(v, (r) => build(r, review));
 
+/** Nutrition facts, written as a `NutritionInformation`. Values are text with a unit, such as "240 calories" or "12 g". */
+export type NutritionInput = {
+  calories?: string;
+  carbohydrateContent?: string;
+  cholesterolContent?: string;
+  fatContent?: string;
+  fiberContent?: string;
+  proteinContent?: string;
+  saturatedFatContent?: string;
+  servingSize?: string;
+  sodiumContent?: string;
+  sugarContent?: string;
+  transFatContent?: string;
+  unsaturatedFatContent?: string;
+};
+
+/** A recipe, per Google's Recipe structured data; `name` and `image` are required. */
+export type RecipeInput = {
+  name: string;
+  /** A URL, several (Google recommends 16x9, 4x3 and 1x1 photos of the dish), or an `ImageObject` node or a ref. */
+  image: string | string[] | JsonLdEmbeddable;
+  /** A person's name, `{ name, url }`, a node or a ref, or an array of them. */
+  author?: string | AuthorInput | Array<string | AuthorInput>;
+  datePublished?: string;
+  description?: string;
+  url?: string;
+  /** One ingredient per entry, such as "1 cup red lentils". */
+  recipeIngredient?: string[];
+  /** One step per entry: text, written as a `HowToStep`, or a `HowToStep` or `HowToSection` node or a ref. */
+  recipeInstructions?: Array<string | JsonLdEmbeddable>;
+  /** ISO 8601 durations, such as "PT30M" or "PT1H15M", written unchanged. Anything else throws a TypeError. */
+  prepTime?: string;
+  cookTime?: string;
+  totalTime?: string;
+  /** Servings or amount, such as 4 or "1 loaf". */
+  recipeYield?: string | number | Array<string | number>;
+  /** Such as "Dinner" or "Dessert". */
+  recipeCategory?: string;
+  /** Such as "Indian" or "Italian". */
+  recipeCuisine?: string;
+  /** A string or an array, written comma-separated. */
+  keywords?: string | string[];
+  nutrition?: NutritionInput | JsonLdEmbeddable;
+  aggregateRating?: AggregateRatingInput | JsonLdEmbeddable;
+  review?: ReviewsInput;
+  /** A `VideoObject` node or a ref. */
+  video?: JsonLdEmbeddable | JsonLdEmbeddable[];
+  /** A BCP 47 language code, such as "en" or "hi". */
+  inLanguage?: string;
+} & JsonLdNodeOptions;
+
+/** An ISO 8601 duration, checked loosely: `P`, then numbers with designators (`Y M W D`, and `H M S` after `T`). */
+const DURATION = /^P(?=.*\d)[\d.,YMWD]*(T[\d.,HMS]+)?$/i;
+
+function duration(field: string, v: string | null | undefined): string | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "string" || !DURATION.test(v)) {
+    throw new TypeError(`schema.recipe: ${field} must be an ISO 8601 duration such as "PT30M" (got ${JSON.stringify(v)})`);
+  }
+  return v;
+}
+
+/** A list as a comma-separated string, as schema.org `keywords` expects. */
+const commaList = (v: string | string[] | null | undefined) => (Array.isArray(v) ? v.join(", ") : v);
+
 /** Splits the common options off a builder's input. */
 function split<T extends JsonLdNodeOptions>(i: T): [Omit<T, "id" | "extra">, JsonLdNodeOptions] {
   const { id, extra, ...rest } = i;
@@ -320,10 +385,36 @@ export const schema = {
       dateModified?: string;
       author?: AuthorInput | AuthorInput[];
       url?: string;
+      /** A BCP 47 language code, such as "en" or "fr". */
+      inLanguage?: string;
     } & JsonLdNodeOptions,
   ): JsonLdNode {
     const [{ author, ...rest }, options] = split(i);
     return node("Article", { ...rest, author: authors(author) }, options);
+  },
+  /**
+   * A `Recipe`. Text steps are written as `HowToStep`s, `nutrition` as a `NutritionInformation`,
+   * ratings and reviews as for `product`. Durations must be ISO 8601 (`PT30M`).
+   */
+  recipe(i: RecipeInput): JsonLdNode {
+    const [{ author, recipeInstructions, prepTime, cookTime, totalTime, keywords, nutrition, aggregateRating: rating, review: r, ...rest }, options] =
+      split(i);
+    return node(
+      "Recipe",
+      {
+        ...rest,
+        author: each(author, (a) => (typeof a === "string" ? named("Person", a) : person(a))),
+        recipeInstructions: each(recipeInstructions, (s) => (typeof s === "string" ? { "@type": "HowToStep", text: s } : s)),
+        prepTime: duration("prepTime", prepTime),
+        cookTime: duration("cookTime", cookTime),
+        totalTime: duration("totalTime", totalTime),
+        keywords: commaList(keywords),
+        nutrition: build(nutrition, (n) => ({ "@type": "NutritionInformation", ...n })),
+        aggregateRating: build(rating, aggregateRating),
+        review: reviews(r),
+      },
+      options,
+    );
   },
   product(
     i: {
@@ -460,12 +551,14 @@ export const schema = {
       dateCreated?: string;
       keywords?: string | string[];
       genre?: string | string[];
+      /** A BCP 47 language code, such as "en" or "fr". */
+      inLanguage?: string;
     } & JsonLdNodeOptions,
   ): JsonLdNode {
     const [{ author, keywords, ...rest }, options] = split(i);
     return node(
       "CreativeWork",
-      { ...rest, author: person(author), keywords: Array.isArray(keywords) ? keywords.join(", ") : keywords },
+      { ...rest, author: person(author), keywords: commaList(keywords) },
       options,
     );
   },

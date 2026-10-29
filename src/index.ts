@@ -18,6 +18,8 @@ export type {
   AuthorInput,
   BreadcrumbItem,
   PageOptions,
+  RecipeInput,
+  NutritionInput,
 } from "./runtime/schema";
 export { ContentRegion, ExcludeFromContent } from "./runtime/content";
 export { holdPrerender } from "./runtime/prerender";

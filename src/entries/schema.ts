@@ -15,4 +15,6 @@ export type {
   AuthorInput,
   BreadcrumbItem,
   PageOptions,
+  RecipeInput,
+  NutritionInput,
 } from "../runtime/schema";

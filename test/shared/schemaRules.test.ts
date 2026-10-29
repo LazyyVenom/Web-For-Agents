@@ -155,6 +155,31 @@ describe("schemaRules", () => {
     expect(missing({ "@type": "ProfilePage", mainEntity: { "@type": "Person", alternateName: "jd" } })).toEqual([]);
   });
 
+  it("Recipe from schema.recipe: a minimal one passes, one without an image is flagged, ratings are checked as for Product", () => {
+    expect(missing(schema.recipe({ name: "Dal", image: "https://a.com/dal.jpg" }))).toEqual([]);
+    expect(
+      missing(
+        schema.recipe({
+          name: "Dal",
+          image: { "@type": "ImageObject", url: "https://a.com/dal.jpg" },
+          author: "Asha",
+          recipeInstructions: ["Rinse.", "Boil."],
+          aggregateRating: { ratingValue: 4.8, ratingCount: 31 },
+          review: { author: "Ann", reviewRating: { ratingValue: 5 } },
+        }),
+      ),
+    ).toEqual([]);
+    expect(missing(schema.recipe({ name: "Dal", image: undefined as any }))).toEqual(["Recipe image"]);
+    expect(missing(schema.recipe({ name: "Dal", image: [] }))).toEqual(["Recipe image"]);
+    expect(missing(schema.recipe({ name: "Dal", image: "i", review: { author: "Ann" } as any }))).toEqual(["Recipe review.reviewRating"]);
+    expect(missing(schema.recipe({ name: "Dal", image: "i", aggregateRating: { ratingValue: 4 } as any }))).toEqual([
+      "Recipe aggregateRating.ratingCount (or reviewCount)",
+    ]);
+    for (const p of ["recipeIngredient", "recipeInstructions", "totalTime", "prepTime", "cookTime", "nutrition.calories", "video"]) {
+      expect(SCHEMA_RULES.Recipe!.recommended, p).toContain(p);
+    }
+  });
+
   it("types without required fields and unknown types report nothing", () => {
     for (const t of ["Article", "NewsArticle", "BlogPosting", "Organization", "Person", "Thing", "MadeUpType"]) {
       expect(missing({ "@type": t }), t).toEqual([]);

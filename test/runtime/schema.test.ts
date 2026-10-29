@@ -756,3 +756,119 @@ describe("graph input types", () => {
     schema.graph([true]);
   });
 });
+
+describe("schema.recipe", () => {
+  it("writes the typed fields: instructions as HowToStep, nutrition as NutritionInformation, keywords comma-separated", () => {
+    const n = schema.recipe({
+      name: "Dal",
+      image: ["https://a.com/1x1.jpg", "https://a.com/16x9.jpg"],
+      author: "Asha",
+      datePublished: "2026-10-01",
+      description: "Yellow lentils.",
+      recipeIngredient: ["1 cup lentils", "2 cups water"],
+      recipeInstructions: ["Rinse the lentils.", schema.ref("#step2"), { "@type": "HowToSection", name: "Temper", itemListElement: [] }],
+      prepTime: "PT10M",
+      cookTime: "PT30M",
+      totalTime: "PT40M",
+      recipeYield: "4 servings",
+      recipeCategory: "Dinner",
+      recipeCuisine: "Indian",
+      keywords: ["lentils", "vegan"],
+      nutrition: { calories: "240 calories", proteinContent: "12 g" },
+      inLanguage: "hi",
+      url: "https://a.com/dal",
+    });
+    expect(n).toEqual({
+      "@context": "https://schema.org",
+      "@type": "Recipe",
+      name: "Dal",
+      image: ["https://a.com/1x1.jpg", "https://a.com/16x9.jpg"],
+      author: { "@type": "Person", name: "Asha" },
+      datePublished: "2026-10-01",
+      description: "Yellow lentils.",
+      recipeIngredient: ["1 cup lentils", "2 cups water"],
+      recipeInstructions: [
+        { "@type": "HowToStep", text: "Rinse the lentils." },
+        { "@id": "#step2" },
+        { "@type": "HowToSection", name: "Temper", itemListElement: [] },
+      ],
+      prepTime: "PT10M",
+      cookTime: "PT30M",
+      totalTime: "PT40M",
+      recipeYield: "4 servings",
+      recipeCategory: "Dinner",
+      recipeCuisine: "Indian",
+      keywords: "lentils, vegan",
+      nutrition: { "@type": "NutritionInformation", calories: "240 calories", proteinContent: "12 g" },
+      inLanguage: "hi",
+      url: "https://a.com/dal",
+    });
+  });
+
+  it("takes an ImageObject, an author node or ref, ratings and reviews as product does, a video node, id and extra", () => {
+    const video = { "@context": "https://schema.org" as const, "@type": "VideoObject", name: "How to", contentUrl: "https://a.com/v.mp4" };
+    const rating = { ratingValue: 4.8, ratingCount: 31 };
+    const review = { author: "Ann", reviewRating: { ratingValue: 5 } };
+    const n = schema.recipe({
+      name: "Dal",
+      image: { "@type": "ImageObject", url: "https://a.com/d.jpg" },
+      author: schema.ref("#me"),
+      aggregateRating: rating,
+      review: [review, schema.ref("#rev2")],
+      video,
+      id: "#recipe",
+      extra: { suitableForDiet: "https://schema.org/VeganDiet" },
+    });
+    expect(n["@id"]).toBe("#recipe");
+    expect(n.image).toEqual({ "@type": "ImageObject", url: "https://a.com/d.jpg" });
+    expect(n.author).toEqual({ "@id": "#me" });
+    expect(n.aggregateRating).toEqual(schema.product({ name: "p", aggregateRating: rating }).aggregateRating);
+    expect(n.review).toEqual(schema.product({ name: "p", review: [review, schema.ref("#rev2")] }).review);
+    expect(n.video).toEqual({ "@type": "VideoObject", name: "How to", contentUrl: "https://a.com/v.mp4" });
+    expect(n.suitableForDiet).toBe("https://schema.org/VeganDiet");
+    expect(schema.recipe({ name: "D", image: "i", author: { name: "Asha", url: "https://a.com/asha" } }).author).toEqual({
+      "@type": "Person",
+      name: "Asha",
+      url: "https://a.com/asha",
+    });
+    expect(schema.recipe({ name: "D", image: "i", nutrition: schema.ref("#n") }).nutrition).toEqual({ "@id": "#n" });
+  });
+
+  it("omits missing fields and keeps a minimal recipe minimal", () => {
+    const missing = undefined as any;
+    expect(
+      schema.recipe({ name: "D", image: "i", author: missing, recipeInstructions: missing, nutrition: null as any, totalTime: missing }),
+    ).toEqual({ "@context": "https://schema.org", "@type": "Recipe", name: "D", image: "i" });
+  });
+
+  it("checks durations loosely as ISO 8601 and writes them unchanged", () => {
+    for (const d of ["PT1H30M", "P1D", "PT45M", "pt20m", "PT0.5H", "P1DT2H"]) {
+      expect(schema.recipe({ name: "D", image: "i", cookTime: d }).cookTime).toBe(d);
+    }
+    for (const [field, d] of [
+      ["prepTime", "30 minutes"],
+      ["cookTime", "PT"],
+      ["totalTime", "P"],
+      ["totalTime", "1H"],
+      ["prepTime", ""],
+    ] as const) {
+      expect(() => schema.recipe({ name: "D", image: "i", [field]: d }), `${field} ${d}`).toThrow(
+        new TypeError(`schema.recipe: ${field} must be an ISO 8601 duration such as "PT30M" (got ${JSON.stringify(d)})`),
+      );
+    }
+  });
+
+  it("requires name and image in the type", () => {
+    // @ts-expect-error image is required
+    schema.recipe({ name: "D" });
+    // @ts-expect-error name is required
+    schema.recipe({ image: "i" });
+  });
+});
+
+describe("inLanguage on content builders", () => {
+  it("article and creativeWork write inLanguage", () => {
+    expect(schema.article({ headline: "h", inLanguage: "fr" }).inLanguage).toBe("fr");
+    expect(schema.creativeWork({ name: "w", inLanguage: "es" }).inLanguage).toBe("es");
+  });
+});
