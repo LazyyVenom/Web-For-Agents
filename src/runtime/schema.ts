@@ -57,6 +57,9 @@ function nested(n: Embeddable | null | undefined): Embeddable | undefined {
   return rest as Embeddable;
 }
 
+/** "__proto__" in input data (JSON.parse keeps it as an own key) would replace a prototype instead of adding a property: never copied. */
+const safeKey = (k: string) => k !== "__proto__";
+
 const isPlainObject = (v: unknown): v is Record<string, unknown> => {
   if (!isObject(v)) return false;
   const proto = Object.getPrototypeOf(v);
@@ -75,7 +78,7 @@ function embed(v: unknown): unknown {
   const isNode = isEmbeddable(v);
   return Object.fromEntries(
     Object.entries(v)
-      .filter(([k]) => !(isNode && k === "@context"))
+      .filter(([k]) => safeKey(k) && !(isNode && k === "@context"))
       .map(([k, x]) => [k, embed(x)])
       .filter(([, x]) => x !== undefined),
   );
@@ -95,13 +98,13 @@ function node(type: string, fields: Record<string, unknown>, options: JsonLdNode
   const out: JsonLdNode = { "@context": "https://schema.org", "@type": type };
   if (options.id !== undefined) out["@id"] = requireId(options.id, `schema: the id of a ${type}`);
   for (const [k, v] of Object.entries(fields)) {
+    if (!safeKey(k)) continue;
     const e = embed(v);
     if (e !== undefined) out[k] = e;
   }
   for (const [k, v] of Object.entries(options.extra ?? {})) {
-    // "__proto__" would replace the node's prototype instead of adding a property.
     // An explicit `id` option wins over extra["@id"].
-    if (k === "@type" || k === "@context" || k === "__proto__" || (k === "@id" && options.id !== undefined)) continue;
+    if (k === "@type" || k === "@context" || !safeKey(k) || (k === "@id" && options.id !== undefined)) continue;
     const e = embed(v);
     if (e === undefined) delete out[k];
     else out[k] = e;
@@ -166,11 +169,15 @@ export type OfferInput = OfferCommon & { price: number | string };
 /** A price range over several offers, written as an `AggregateOffer`. */
 export type AggregateOfferInput = OfferCommon & { lowPrice: number | string; highPrice?: number | string; offerCount?: number };
 
-function offer(o: OfferInput | AggregateOfferInput | null | undefined) {
-  if (o === undefined || o === null) return undefined;
+/** One offer, several, or an `AggregateOffer` (`lowPrice`, `highPrice`, `offerCount`); each may also be a node or a ref. */
+export type OffersInput = OfferInput | AggregateOfferInput | Embeddable | Array<OfferInput | AggregateOfferInput | Embeddable>;
+
+const given = (v: unknown) => v !== undefined && v !== null;
+
+function offer(o: OfferInput | AggregateOfferInput): JsonLdNode {
   const all = o as Partial<OfferInput & AggregateOfferInput>;
   return definedOnly({
-    "@type": "lowPrice" in o ? "AggregateOffer" : "Offer",
+    "@type": given(all.lowPrice) || given(all.highPrice) ? "AggregateOffer" : "Offer",
     price: all.price,
     lowPrice: all.lowPrice,
     highPrice: all.highPrice,
@@ -181,8 +188,11 @@ function offer(o: OfferInput | AggregateOfferInput | null | undefined) {
     priceValidUntil: o.priceValidUntil,
     itemCondition: o.itemCondition && `https://schema.org/${o.itemCondition}Condition`,
     seller: named("Organization", o.seller),
-  });
+  }) as JsonLdNode;
 }
+
+/** Builds each offer that is not already a node or a ref. */
+const offers = (v: OffersInput | null | undefined) => each(v, (o) => build(o, offer));
 
 type RatingInput = { ratingValue: number | string; bestRating?: number | string; worstRating?: number | string };
 
@@ -244,7 +254,7 @@ export type PageOptions = {
   name?: string;
   description?: string;
   url?: string;
-  /** A `schema.breadcrumbList` node, its `{ name, url }` items, or a ref. */
+  /** A `schema.breadcrumbList` node, its `{ name, url }` items, or a ref. No items write no breadcrumb. */
   breadcrumb?: Embeddable | Crumb[];
   /** What the page is about: a node or a ref. */
   mainEntity?: Embeddable;
@@ -266,7 +276,11 @@ function page<T extends PageOptions>(type: string, i: T, fields: Record<string, 
     type,
     {
       ...rest,
-      breadcrumb: Array.isArray(rest.breadcrumb) ? breadcrumbList(rest.breadcrumb) : rest.breadcrumb,
+      breadcrumb: Array.isArray(rest.breadcrumb)
+        ? rest.breadcrumb.some(given)
+          ? breadcrumbList(rest.breadcrumb)
+          : undefined
+        : rest.breadcrumb,
       primaryImageOfPage:
         typeof rest.primaryImageOfPage === "string" ? { "@type": "ImageObject", url: rest.primaryImageOfPage } : rest.primaryImageOfPage,
       ...fields,
@@ -302,19 +316,18 @@ export const schema = {
       image?: string | string[];
       sku?: string;
       brand?: string | Embeddable;
-      /** One offer, several, or an `AggregateOffer` (`lowPrice`, `highPrice`, `offerCount`). */
-      offers?: OfferInput | AggregateOfferInput | Array<OfferInput | AggregateOfferInput>;
+      offers?: OffersInput;
       aggregateRating?: AggregateRatingInput | Embeddable;
       review?: ReviewInput | Embeddable | Array<ReviewInput | Embeddable>;
     } & JsonLdNodeOptions,
   ): JsonLdNode {
-    const [{ brand, offers, aggregateRating: rating, review: reviews, ...rest }, options] = split(i);
+    const [{ brand, offers: o, aggregateRating: rating, review: reviews, ...rest }, options] = split(i);
     return node(
       "Product",
       {
         ...rest,
         brand: named("Brand", brand),
-        offers: each(offers, offer),
+        offers: offers(o),
         aggregateRating: build(rating, aggregateRating),
         review: each(reviews, (r) => build(r, review)),
       },
@@ -398,17 +411,17 @@ export const schema = {
       operatingSystem?: string;
       url?: string;
       image?: string | string[];
-      offers?: OfferInput;
+      offers?: OffersInput;
       aggregateRating?: AggregateRatingInput;
       author?: Author;
     } & JsonLdNodeOptions,
   ): JsonLdNode {
-    const [{ offers, aggregateRating: rating, author, ...rest }, options] = split(i);
+    const [{ offers: o, aggregateRating: rating, author, ...rest }, options] = split(i);
     return node(
       "SoftwareApplication",
       {
         ...rest,
-        offers: offer(offers),
+        offers: offers(o),
         aggregateRating: build(rating, aggregateRating),
         author: person(author),
       },

@@ -603,3 +603,77 @@ describe("0.5: one option set for every page builder", () => {
     expect(schema.profilePage({ dateCreated: "2025-01-01" }).dateCreated).toBe("2025-01-01");
   });
 });
+
+describe("0.5: offers, breadcrumbs and unsafe keys", () => {
+  const C = "https://schema.org";
+  const priced = {
+    "@type": "Offer",
+    priceCurrency: "EUR",
+    priceSpecification: { "@type": "UnitPriceSpecification", price: 9, priceCurrency: "EUR", referenceQuantity: 1 },
+  };
+
+  it("product and softwareApplication offers keep a node or a ref as given", () => {
+    for (const build of [schema.product, schema.softwareApplication]) {
+      expect(build({ name: "p", offers: priced }).offers).toEqual(priced);
+      expect(build({ name: "p", offers: [priced, schema.ref("#offer")] }).offers).toEqual([priced, { "@id": "#offer" }]);
+      expect(build({ name: "p", offers: { ...priced, "@context": C } }).offers).toEqual(priced);
+    }
+  });
+
+  it("softwareApplication takes an offers array and an AggregateOffer like product", () => {
+    const tiers = [
+      { price: 0, priceCurrency: "EUR" },
+      { price: 49, priceCurrency: "EUR" },
+    ];
+    expect(schema.softwareApplication({ name: "S", offers: tiers }).offers).toEqual([
+      { "@type": "Offer", price: 0, priceCurrency: "EUR" },
+      { "@type": "Offer", price: 49, priceCurrency: "EUR" },
+    ]);
+    expect(schema.softwareApplication({ name: "S", offers: { lowPrice: 0, highPrice: 49, priceCurrency: "EUR" } }).offers).toEqual({
+      "@type": "AggregateOffer",
+      lowPrice: 0,
+      highPrice: 49,
+      priceCurrency: "EUR",
+    });
+  });
+
+  it("an offer is an AggregateOffer only when lowPrice or highPrice has a value", () => {
+    const o = { price: 5, priceCurrency: "USD", lowPrice: undefined, highPrice: null } as any;
+    expect(schema.product({ name: "p", offers: o }).offers).toEqual({ "@type": "Offer", price: 5, priceCurrency: "USD" });
+    expect((schema.product({ name: "p", offers: { highPrice: 9, priceCurrency: "USD" } as any }).offers as any)["@type"]).toBe(
+      "AggregateOffer",
+    );
+  });
+
+  it("an empty breadcrumb array writes no breadcrumb", () => {
+    expect(schema.webPage({ name: "P", url: "u", breadcrumb: [] })).not.toHaveProperty("breadcrumb");
+    expect(schema.profilePage({ breadcrumb: [null as any] })).not.toHaveProperty("breadcrumb");
+  });
+
+  it("a __proto__ key in input data is dropped and never changes a prototype", () => {
+    const evil = (json: string) => JSON.parse(json);
+    const nodes = [
+      schema.product({ name: "p", ...evil('{"__proto__":{"polluted":1}}'), extra: evil('{"x":{"__proto__":{"polluted":1}}}') }),
+      schema.product({
+        name: "p",
+        offers: evil('{"price":1,"priceCurrency":"USD","seller":{"@type":"Organization","__proto__":{"polluted":1}}}'),
+      }),
+      schema.review(evil('{"author":"Ann","reviewRating":{"ratingValue":5,"__proto__":{"polluted":1}},"__proto__":{"polluted":1}}')),
+      schema.webPage({ name: "P", url: "u", ...evil('{"__proto__":{"polluted":1},"mainEntity":{"@type":"Thing","__proto__":{"polluted":1}}}') }),
+    ];
+    const walk = (v: unknown): void => {
+      if (v === null || typeof v !== "object") return;
+      if (!Array.isArray(v)) {
+        expect(Object.getPrototypeOf(v)).toBe(Object.prototype);
+        expect(Object.hasOwn(v, "__proto__")).toBe(false);
+      }
+      Object.values(v).forEach(walk);
+    };
+    for (const n of nodes) {
+      walk(n);
+      expect((n as any).polluted).toBeUndefined();
+      expect(serializeJsonLd(n)).not.toMatch(/__proto__|polluted/);
+    }
+    expect(({} as any).polluted).toBeUndefined();
+  });
+});
