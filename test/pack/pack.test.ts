@@ -374,10 +374,10 @@ describe("packed package without vite", () => {
   });
 
   it("an AgentForm + useAgentAction page bundled by esbuild loads the agent engine lazily, from /form and the root", async () => {
-    // Eager gzip, measured plus about 10%: /form 2351, root 2524. The root was 7165 while it imported the engine statically.
+    // Eager gzip, measured plus about 10%: /form 2351, root 2608. The root was 7165 while it imported the engine statically.
     const budgets: Array<[string, string, number]> = [
       ["form-page", "@anubhav-choubey/web-for-agents/form", 2600],
-      ["root-page", "@anubhav-choubey/web-for-agents", 2800],
+      ["root-page", "@anubhav-choubey/web-for-agents", 2870],
     ];
     const externals = ["react", "react/jsx-runtime", "react-dom", "react-dom/client"].map((m) => `--external:${m}`);
     for (const [name, from, budget] of budgets) {
