@@ -81,7 +81,7 @@ Fields left `undefined` or `null` are omitted from every builder, including nest
 
 Every builder takes two more options (in its input object; `faqPage` and `breadcrumbList` take them as a second argument):
 
-- `id`: written as `"@id"`, so other nodes can point at this one with `schema.ref(id)`. When `id` is given, `extra["@id"]` is ignored.
+- `id`: written as `"@id"`, so other nodes can point at this one with `schema.ref(id)`. When `id` is given, `extra["@id"]` is ignored. An empty or non-string `id` throws a `TypeError`, as in `schema.ref`.
 - `extra`: any other schema.org properties, merged in last, so they override the typed fields. `@type` and `@context` cannot be overridden (the `JsonLdExtra` type rejects them; untyped data is filtered at runtime), and a `__proto__` key is ignored. Values can be nodes, refs, arrays or plain objects; a node nested anywhere in them loses its own `@context`.
 
 A product page on a store, with the organization and site defined once and linked by `@id`:
