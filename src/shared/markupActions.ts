@@ -9,7 +9,7 @@ import {
   WEBMCP_TOOLDESCRIPTION_ATTR,
   WEBMCP_TOOLNAME_ATTR,
 } from "./conventions";
-import { safeSnippet } from "./text";
+import { safeText } from "./text";
 import { tryResolveUrl } from "./url";
 
 export interface MarkupAction {
@@ -183,7 +183,7 @@ const MAX_SHOWN_VALUES = 4;
 function shownValue(v: string | boolean | null | undefined): string {
   if (v === true) return "true";
   if (v === false || v === null || v === undefined || v === "") return "unset";
-  const s = safeSnippet(v, MAX_SHOWN_VALUE);
+  const s = safeText(v, MAX_SHOWN_VALUE);
   return /^[\w.…-]+$/.test(s) ? s : JSON.stringify(s);
 }
 

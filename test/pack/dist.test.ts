@@ -38,6 +38,10 @@ describe("dist", () => {
     expect(dynamicImports(read("schema.js"))).toEqual([]);
   });
 
+  it("/link and its link tools carry no sanitizer (safeText is tree-shaken out)", () => {
+    for (const file of ["link.js", "link-tools.js"]) expect(read(file), file).not.toMatch(/u2066|\u2066/);
+  });
+
   it("/link imports the link tools only lazily, and they share the engine loader with /form", () => {
     expect(dynamicImports(read("link.js"))).toEqual(["./link-tools.js"]);
     const loaders = engineLoaders("link-tools.js");
