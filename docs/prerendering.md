@@ -135,6 +135,19 @@ import { ContentRegion, ExcludeFromContent } from "@anubhav-choubey/web-for-agen
 
 Both accept `as` (default `div`) and pass other props to the element. If a page has neither a `ContentRegion` nor a match for `contentSelector`, the content is taken from `<body>` minus `header`, `nav`, `footer` and `aside`, and the build logs a warning naming those routes.
 
+Layouts often place inline elements side by side with no whitespace between them, such as `<span>New</span><span>Organic</span>` badges in a flex row. The page shows two words, so the markdown gets a space between them: `New Organic`, not `NewOrganic`. The space goes between two adjacent sibling inline elements (custom elements such as `<x-badge>` count as inline) that both have text, with nothing but comments, icons, form fields or empty elements between them. Glue that looks intended is kept:
+
+- elements whose parent also holds text of its own (not just whitespace), since that parent is running prose, not a row of items: `<p><span>Java</span><span>Script</span> is fun</p>` gives `JavaScript is fun`, and `un<span>believ</span><span>able</span>` stays `unbelievable`;
+- an element next to plain text (`<b>Java</b>Script`, `H<sub>2</sub>O`);
+- two text-formatting elements (`<b>`, `<i>`, `<em>`, `<strong>`, `<code>`, `<sub>`, `<sup>`, `<mark>` and similar), as in `<b>Java</b><i>Script</i>`;
+- a side whose text is a single letter (letter-by-letter animations, a one-letter drop cap such as `T` + `he`); a single digit is spaced as usual, so `Step` + `1` gives `Step 1`;
+- text ending in an opening character (`(`, `[`, `{`, `#`, `@`, `/`, a currency symbol such as `$` or `¥`, an opening quote) or followed by closing punctuation or a slash (`.`, `,`, `;`, `:`, `!`, `?`, `%`, `)`, `]`, `}`, `/`, a closing quote, `…`), so `$29` + `/mo` gives `$29/mo`;
+- text made only of ASCII operators or sigils, on either side (`**` + `kwargs` and `object` + `=` + `False` in a Sphinx signature);
+- a boundary character in Chinese or Japanese script (Han, Hiragana, Katakana), CJK punctuation or a fullwidth form such as `（`, since those scripts put no spaces between words (Korean does, so Hangul is separated as usual);
+- anything inside `<pre>` or `<code>`.
+
+Two elements alone in a parent look like a row of items, so a logo such as `<span>Web</span><span>ForAgents</span>` comes out as `Web ForAgents`. Short words are not told apart from drop caps (`No` + `thanks` gives `No thanks`, so a two-letter drop cap `Wh` + `en` gives `Wh en`), and numbers side by side are spaced (`2023` + `2024`, or a counter split into `12` + `34`). To join two words on purpose in this or any other case, put them in one element.
+
 ## Markdown URLs
 
 Every prerendered page gets a markdown twin: `/about` is served as `/about.md` and `/` as `/index.md`. The HTML advertises it with `<link rel="alternate" type="text/markdown" href="https://example.com/about.md">`. Links in the markdown are absolute.
@@ -147,46 +160,51 @@ When a page has no `<h1>`, its markdown starts with a `# title` heading. That he
 
 ### Custom sections
 
-`llms.intro` and `llms.sections` add your own text and links at the top of `llms.txt` (before `## Pages`) and of `llms-full.txt` (before the first page). Use them for an "About me" summary, key links and featured work:
+`llms.intro` and `llms.sections` add your own text and links at the top of `llms.txt` (before `## Pages`) and of `llms-full.txt` (before the first page). Use them for a short overview, key links and featured pages. For a docs site:
 
 ```ts
 llms: {
-  intro: "I am a full-stack developer who builds tools for small teams.",
+  title: "Acme Docs",
+  intro: "Acme is a hosted job queue. These docs cover setup, the HTTP API and the SDKs.",
   sections: [
     {
       title: "Key links",
       links: [
-        { title: "Resume", url: "/resume.pdf", description: "PDF, one page" },
-        { title: "GitHub", url: "https://github.com/me" },
-        { title: "Email", url: "mailto:me@example.com" },
+        { title: "Pricing", url: "/pricing", description: "Plans and limits" },
+        { title: "API reference", url: "/docs/api" },
+        { title: "Status page", url: "https://status.example.com" },
+        { title: "Support", url: "mailto:support@example.com" },
       ],
     },
-    { title: "Featured projects", text: "Things I built recently.", links: [{ title: "Tool", url: "https://github.com/me/tool" }] },
+    { title: "Guides", text: "Start here if you are new to Acme.", links: [{ title: "Quick start", url: "/docs/quick-start" }] },
   ],
 },
 ```
 
 ```md
-# Me
+# Acme Docs
 
 > The summary from llms.description or the root page
 
-I am a full-stack developer who builds tools for small teams.
+Acme is a hosted job queue. These docs cover setup, the HTTP API and the SDKs.
 
 ## Key links
 
-- [Resume](https://example.com/resume.pdf): PDF, one page
-- [GitHub](https://github.com/me)
-- [Email](mailto:me@example.com)
+- [Pricing](https://example.com/pricing): Plans and limits
+- [API reference](https://example.com/docs/api)
+- [Status page](https://status.example.com)
+- [Support](mailto:support@example.com)
 
-## Featured projects
+## Guides
 
 ...
 
 ## Pages
 ```
 
-A link `url` must be http(s) or `mailto:`; a relative URL such as `/resume.pdf` is resolved against `siteUrl`. Each section needs `text` or at least one link. `intro` and `text` are plain text: blank lines separate paragraphs, and they are escaped like titles, with a leading `#`, `>`, `-` or `1.` escaped too, so they cannot add headings, lists or links. Bad values fail the build with an error naming the field, such as `llms.sections[0].links[1].url`. Both work with `generate`, including from a JSON `--config` file.
+A store might list shipping, returns and its contact page instead, and a personal site its resume (`/resume.pdf`), GitHub profile and email.
+
+A link `url` must be http(s) or `mailto:`; a relative URL such as `/pricing` is resolved against `siteUrl`. Each section needs `text` or at least one link. `intro` and `text` are plain text: blank lines separate paragraphs, and they are escaped like titles, with a leading `#`, `>`, `-` or `1.` escaped too, so they cannot add headings, lists or links. Bad values fail the build with an error naming the field, such as `llms.sections[0].links[1].url`. Both work with `generate`, including from a JSON `--config` file.
 
 ## Sitemap lastmod
 
@@ -195,10 +213,19 @@ A link `url` must be http(s) or `mailto:`; a relative URL such as `/resume.pdf` 
 - `"file"`: with `generate`, the modification time of each page's HTML file, so the date your own prerender last wrote it (adding the markdown link keeps the file's time). With the plugin, every page is rendered by the build, so it is the build date.
 - A function `(route) => string | Date | undefined`, sync or async, for dates you track yourself (a CMS field, `git log`). Return `"YYYY-MM-DD"`, a W3C datetime with a time zone (`"2026-01-31T09:00:00Z"`), a `Date`, or `undefined` for no `<lastmod>` on that route. Anything else, or an error thrown by the function, fails the build with the route named.
 
-Dates from `"file"` and `Date` values are written as `YYYY-MM-DD` in UTC. A function can only be set from code or a `.js` / `.mjs` config file; `"file"` also works in JSON.
+Dates from `"file"` and `Date` values are written as `YYYY-MM-DD` in `sitemap.timeZone`, an IANA time zone that defaults to `"UTC"`. Set it to where you build, or a build at 00:30 in India gets the previous day's date. An unknown time zone fails the build. Strings returned by a function are written as returned. A function can only be set from code or a `.js` / `.mjs` config file; `"file"` and `timeZone` also work in JSON.
 
 ```ts
-sitemap: { lastmod: "file" },
+sitemap: { lastmod: "file", timeZone: "Asia/Kolkata" },
+```
+
+## robots.txt Sitemap line
+
+robots.txt ends with `Sitemap: <siteUrl>/sitemap.xml` while `sitemap` is on. `robots.sitemapUrl` sets that line yourself: an absolute http(s) URL, or a path resolved against `siteUrl` like an llms link (`"/sitemap-index.xml"`). It is written even with `sitemap: false`, so a sitemap you publish yourself stays linked. `robots: { sitemapUrl: false, ... }` leaves the line out.
+
+```ts
+sitemap: false,
+robots: { ai: { training: "block", search: "allow" }, sitemapUrl: "/sitemap-index.xml" },
 ```
 
 ## Blocked AI crawlers

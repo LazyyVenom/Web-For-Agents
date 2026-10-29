@@ -205,7 +205,7 @@ describe("audit e2e", () => {
       "/robots.txt": { headers: text(), body: `User-agent: *\nAllow: /\nSitemap: ${p}/sitemap.xml\n` },
     });
     const { out } = await run(["audit", s.url + "/", "--json"]);
-    const fix = `Audit the deployed site, or build with siteUrl set to ${s.url} to audit this preview.`;
+    const fix = `Audit the deployed site, or build with siteUrl set to ${s.url} to audit this preview. Auditing a preview? Pass --site-url ${p}.`;
     const why = `points to ${p} (different origin than the audited page)`;
     expect(checkOf(out, "canonical")).toMatchObject({ status: "warn", message: `Canonical ${p}/ ${why}`, fix });
     expect(checkOf(out, "sitemap")).toMatchObject({ status: "warn", message: `Sitemap ${p}/sitemap.xml ${why}`, fix });

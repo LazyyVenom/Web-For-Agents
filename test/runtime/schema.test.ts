@@ -173,3 +173,194 @@ describe("0.3 builders", () => {
     expect(out).not.toContain("</script");
   });
 });
+
+describe("0.4: omitted nested nodes", () => {
+  const C = "https://schema.org";
+  it("every builder that nests tolerates an omitted (undefined or null) nested field", () => {
+    const u = undefined as any;
+    const n = null as any;
+    for (const missing of [u, n]) {
+      expect(schema.profilePage({ mainEntity: missing, breadcrumb: missing, name: "P" })).toEqual({
+        "@context": C,
+        "@type": "ProfilePage",
+        name: "P",
+      });
+      expect(schema.profilePage({ name: "P" } as any)).toEqual({ "@context": C, "@type": "ProfilePage", name: "P" });
+      expect(schema.webPage({ name: "P", url: "u", breadcrumb: missing, isPartOf: missing })).toEqual({
+        "@context": C,
+        "@type": "WebPage",
+        name: "P",
+        url: "u",
+      });
+      expect(schema.article({ headline: "h", author: missing })).toEqual({ "@context": C, "@type": "Article", headline: "h" });
+      expect(schema.article({ headline: "h", author: [missing, { name: "A" }] })).toEqual({
+        "@context": C,
+        "@type": "Article",
+        headline: "h",
+        author: [{ "@type": "Person", name: "A" }],
+      });
+      expect(schema.product({ name: "p", brand: missing, offers: missing })).toEqual({ "@context": C, "@type": "Product", name: "p" });
+      expect(schema.person({ name: "A", worksFor: missing, address: missing, knowsAbout: missing })).toEqual({
+        "@context": C,
+        "@type": "Person",
+        name: "A",
+      });
+      expect(schema.softwareApplication({ name: "x", offers: missing, aggregateRating: missing, author: missing })).toEqual({
+        "@context": C,
+        "@type": "SoftwareApplication",
+        name: "x",
+      });
+      expect(schema.creativeWork({ name: "W", author: missing })).toEqual({ "@context": C, "@type": "CreativeWork", name: "W" });
+      expect(schema.webSite({ name: "W", url: "u", publisher: missing })).toEqual({ "@context": C, "@type": "WebSite", name: "W", url: "u" });
+      expect(schema.organization({ name: "O", url: "u", logo: missing })).toEqual({ "@context": C, "@type": "Organization", name: "O", url: "u" });
+      expect(schema.faqPage(missing)).toEqual({ "@context": C, "@type": "FAQPage", mainEntity: [] });
+      expect(schema.breadcrumbList([missing, { name: "A", url: "/a" }])).toEqual({
+        "@context": C,
+        "@type": "BreadcrumbList",
+        itemListElement: [{ "@type": "ListItem", position: 1, name: "A", item: "/a" }],
+      });
+      expect(schema.graph([missing, false, schema.person({ name: "A" })])).toEqual({ "@context": C, "@graph": [{ "@type": "Person", name: "A" }] });
+    }
+  });
+});
+
+describe("0.4: @id, refs and extra fields", () => {
+  const C = "https://schema.org";
+  it("every builder accepts id and writes @id", () => {
+    const id = "https://a.com/#x";
+    const nodes = [
+      schema.article({ headline: "h", id }),
+      schema.product({ name: "p", id }),
+      schema.faqPage([], { id }),
+      schema.breadcrumbList([], { id }),
+      schema.organization({ name: "o", url: "u", id }),
+      schema.webSite({ name: "w", url: "u", id }),
+      schema.person({ name: "a", id }),
+      schema.softwareApplication({ name: "s", id }),
+      schema.profilePage({ id }),
+      schema.creativeWork({ name: "c", id }),
+      schema.webPage({ name: "w", url: "u", id }),
+    ];
+    for (const n of nodes) {
+      expect(n["@id"], n["@type"]).toBe(id);
+      expect(n).not.toHaveProperty("id");
+      expect(n).not.toHaveProperty("extra");
+    }
+  });
+
+  it("ref builds an @id reference usable anywhere a node goes", () => {
+    expect(schema.ref("#me")).toEqual({ "@id": "#me" });
+    const g = schema.graph([
+      schema.person({ name: "A", id: "#me", worksFor: schema.ref("#org") }),
+      schema.organization({ name: "O", url: "https://a.com", id: "#org" }),
+      schema.webSite({ name: "W", url: "https://a.com", id: "#site", publisher: schema.ref("#org") }),
+      schema.webPage({ name: "P", url: "https://a.com/p", isPartOf: schema.ref("#site"), breadcrumb: schema.ref("#crumbs") }),
+      schema.profilePage({ mainEntity: schema.ref("#me"), breadcrumb: schema.ref("#crumbs") }),
+      schema.article({ headline: "h", author: [schema.ref("#me"), { name: "B" }] }),
+      schema.creativeWork({ name: "W", author: schema.ref("#me"), genre: ["Essay", "Travel"] }),
+      schema.product({ name: "p", brand: schema.ref("#org") }),
+      schema.softwareApplication({ name: "s", author: schema.ref("#me") }),
+    ]);
+    const [person, , site, page, profile, article, work, product, app] = g["@graph"] as any[];
+    expect(person.worksFor).toEqual({ "@id": "#org" });
+    expect(site.publisher).toEqual({ "@id": "#org" });
+    expect(page.isPartOf).toEqual({ "@id": "#site" });
+    expect(page.breadcrumb).toEqual({ "@id": "#crumbs" });
+    expect(profile.mainEntity).toEqual({ "@id": "#me" });
+    expect(profile.breadcrumb).toEqual({ "@id": "#crumbs" });
+    expect(article.author).toEqual([{ "@id": "#me" }, { "@type": "Person", name: "B" }]);
+    expect(work.author).toEqual({ "@id": "#me" });
+    expect(work.genre).toEqual(["Essay", "Travel"]);
+    expect(product.brand).toEqual({ "@id": "#org" });
+    expect(app.author).toEqual({ "@id": "#me" });
+  });
+
+  it("nested nodes lose their @context wherever they are placed", () => {
+    const address = { "@context": C, "@type": "PostalAddress", addressLocality: "Pune" } as const;
+    const p = schema.person({
+      name: "A",
+      address,
+      knowsAbout: ["TypeScript", { "@context": C, "@type": "Thing", name: "SEO" }],
+      worksFor: schema.organization({ name: "O", url: "https://o.com" }),
+      extra: { alumniOf: [schema.organization({ name: "U", url: "https://u.edu" })], homeLocation: address },
+    });
+    expect(p).toEqual({
+      "@context": C,
+      "@type": "Person",
+      name: "A",
+      address: { "@type": "PostalAddress", addressLocality: "Pune" },
+      knowsAbout: ["TypeScript", { "@type": "Thing", name: "SEO" }],
+      worksFor: { "@type": "Organization", name: "O", url: "https://o.com" },
+      alumniOf: [{ "@type": "Organization", name: "U", url: "https://u.edu" }],
+      homeLocation: { "@type": "PostalAddress", addressLocality: "Pune" },
+    });
+    expect(serializeJsonLd(p).match(/@context/g)).toHaveLength(1);
+  });
+
+  it("extra is merged last but cannot override @type or @context", () => {
+    const n = schema.webPage({
+      name: "P",
+      url: "u",
+      id: "#p",
+      // Untyped (CMS) data can still carry them at runtime; the type rejects them (see below).
+      extra: JSON.parse('{"@type":"Hack","@context":"x","name":"Q","inLanguage":"en","primaryImageOfPage":null}') as Record<string, unknown>,
+    });
+    expect(n).toEqual({ "@context": C, "@type": "WebPage", "@id": "#p", name: "Q", url: "u", inLanguage: "en" });
+    // @ts-expect-error extra cannot set @type
+    expect(schema.faqPage([], { extra: { "@type": "X", about: "y" } })).toEqual({ "@context": C, "@type": "FAQPage", mainEntity: [], about: "y" });
+    expect(schema.profilePage({ name: "N", extra: { name: undefined } })).toEqual({ "@context": C, "@type": "ProfilePage" });
+  });
+
+  it("extra cannot override an explicit id; without id, extra @id is used", () => {
+    expect(schema.person({ name: "A", id: "#a", extra: { "@id": "#b" } })["@id"]).toBe("#a");
+    expect(schema.person({ name: "A", extra: { "@id": "#b" } })["@id"]).toBe("#b");
+  });
+
+  it("ref throws a TypeError on a missing or empty id", () => {
+    expect(() => schema.ref("")).toThrow(TypeError);
+    expect(() => schema.ref(undefined as unknown as string)).toThrow(TypeError);
+    expect(() => schema.ref("   ")).toThrow(TypeError);
+    expect(schema.ref("#me")).toEqual({ "@id": "#me" });
+  });
+
+  it("the id option throws a TypeError on an empty, blank or non-string id, as ref does", () => {
+    expect(() => schema.person({ name: "A", id: "" })).toThrow(TypeError);
+    expect(() => schema.person({ name: "A", id: "   " })).toThrow(TypeError);
+    expect(() => schema.webPage({ name: "P", url: "u", id: 42 as unknown as string })).toThrow(TypeError);
+    expect(() => schema.faqPage([], { id: null as unknown as string })).toThrow(TypeError);
+    expect(schema.person({ name: "A", id: undefined })["@id"]).toBeUndefined();
+  });
+
+  it("drops null and undefined values inside nested plain objects too", () => {
+    const n = schema.webPage({ name: "P", url: "u", extra: { about: { a: null, b: undefined, c: 1, deep: { d: null, e: "x" } } } });
+    expect(n.about).toEqual({ c: 1, deep: { e: "x" } });
+    expect(serializeJsonLd(n)).not.toContain("null");
+  });
+
+  it("the extra type rejects @type and @context keys", () => {
+    // @ts-expect-error @context is not allowed in extra
+    schema.person({ name: "A", extra: { "@context": "x" } });
+    const ok: Record<string, unknown> = { knowsAbout: ["x"] };
+    expect(schema.person({ name: "A", extra: ok }).knowsAbout).toEqual(["x"]);
+  });
+
+  it("extra skips __proto__, so the node keeps Object.prototype", () => {
+    const n = schema.webPage({ name: "P", url: "u", extra: JSON.parse('{"__proto__":{"polluted":1},"about":"y"}') });
+    expect(Object.getPrototypeOf(n)).toBe(Object.prototype);
+    expect("polluted" in n).toBe(false);
+    expect(n.about).toBe("y");
+  });
+
+  it("a node nested in a plain object in extra loses its @context", () => {
+    const org = schema.organization({ name: "U", url: "https://u.edu" });
+    const n = schema.webPage({ name: "P", url: "u", extra: { about: { deep: { org, list: [org] } } } });
+    expect(n.about).toEqual({ deep: { org: { "@type": "Organization", name: "U", url: "https://u.edu" }, list: [{ "@type": "Organization", name: "U", url: "https://u.edu" }] } });
+    expect(serializeJsonLd(n).match(/@context/g)).toHaveLength(1);
+  });
+
+  it("is importable from the React-free /schema entry", async () => {
+    const entry = await import("../../src/entries/schema");
+    expect(entry.schema).toBe(schema);
+    expect(entry.serializeJsonLd).toBe(serializeJsonLd);
+  });
+});

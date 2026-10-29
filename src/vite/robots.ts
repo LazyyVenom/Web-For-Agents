@@ -1,5 +1,4 @@
 import { AI_BOTS } from "../shared/bots";
-import { SITEMAP_PATH } from "../shared/conventions";
 import type { ResolvedOptions } from "./options";
 
 export { AI_BOTS };
@@ -28,7 +27,7 @@ export function buildRobots(opts: ResolvedOptions): string {
   if (blocked.length) {
     blocks.push([...blocked.map((b) => `User-agent: ${b}`), "Disallow: /"].join("\n"));
   }
-  if (opts.sitemap) blocks.push(`Sitemap: ${opts.siteUrl}${SITEMAP_PATH}`);
+  if (opts.robotsSitemapUrl) blocks.push(`Sitemap: ${opts.robotsSitemapUrl}`);
 
   return blocks.join("\n\n") + "\n";
 }

@@ -34,6 +34,14 @@ export function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** "YYYY-MM-DD" of `d` in the IANA time zone `timeZone` (validated by resolveOptions). */
+export function zonedDate(d: Date, timeZone: string): string {
+  if (timeZone === "UTC") return isoDate(d);
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(d);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("year").padStart(4, "0")}-${get("month")}-${get("day")}`;
+}
+
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 /** W3C datetime with a time: minutes required, seconds and fraction optional, a time zone required. */
 const DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
@@ -46,9 +54,9 @@ function validDate(s: string): boolean {
 }
 
 /** A `sitemap.lastmod` function's result as a `<lastmod>` value, or undefined for none. */
-function lastmodValue(v: unknown, route: string): string | undefined {
+function lastmodValue(v: unknown, route: string, timeZone: string): string | undefined {
   if (v === undefined) return undefined;
-  if (v instanceof Date && !Number.isNaN(v.getTime())) return isoDate(v);
+  if (v instanceof Date && !Number.isNaN(v.getTime())) return zonedDate(v, timeZone);
   if (typeof v === "string" && (DATE.test(v) || DATETIME.test(v)) && validDate(v)) return v;
   const got = v instanceof Date ? "an invalid Date" : JSON.stringify(v) ?? typeof v;
   throw new Error(
@@ -60,12 +68,14 @@ function lastmodValue(v: unknown, route: string): string | undefined {
 
 /**
  * `<lastmod>` per route. "file" uses `fileDate(route)` (generate: the HTML file's mtime; the plugin:
- * the build date). A function's errors are prefixed and name the route.
+ * the build date). A function's errors are prefixed and name the route. `Date` values (and so
+ * "file" dates) are written as "YYYY-MM-DD" in `timeZone` (sitemap.timeZone); strings as returned.
  */
 export async function sitemapLastmods(
   lastmod: ResolvedOptions["sitemapLastmod"],
   routes: string[],
   fileDate: (route: string) => Date | undefined,
+  timeZone = "UTC",
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   if (lastmod === "none") return out;
@@ -80,7 +90,7 @@ export async function sitemapLastmods(
         throw prefixed(e, `sitemap.lastmod failed for ${shortRoute(route)}`);
       }
     }
-    const value = lastmodValue(v, route);
+    const value = lastmodValue(v, route, timeZone);
     if (value !== undefined) out.set(route, value);
   }
   return out;

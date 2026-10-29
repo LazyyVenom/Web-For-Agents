@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { gzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 /**
@@ -99,7 +100,14 @@ beforeAll(async () => {
     throw new Error('dist/ is missing: run "npm run build" first (npm run test:pack does this)');
   }
   work = mkdtempSync(path.join(tmpdir(), "wfa-pack-"));
-  const packed = JSON.parse(await sh("npm", ["pack", "--json", "--pack-destination", work], repo)) as Array<{
+  // Pack a staged copy the way the release job does: `prepare` (the build for git installs) is
+  // deleted first, so the published package.json has no install script for npm to warn about.
+  const stage = path.join(work, "stage");
+  mkdirSync(stage);
+  for (const f of ["package.json", "README.md", "LICENSE", "dist"]) cpSync(path.join(repo, f), path.join(stage, f), { recursive: true });
+  await sh("npm", ["pkg", "delete", "scripts.prepare"], stage);
+  // dist/ is already built; --ignore-scripts keeps any other lifecycle output out of the JSON.
+  const packed = JSON.parse(await sh("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", work], stage)) as Array<{
     filename: string;
     files: Array<{ path: string }>;
   }>;
@@ -142,8 +150,18 @@ describe(`packed package in a Vite ${viteMajor} app`, () => {
   it("ships only dist and package metadata", () => {
     expect(packedFiles).toContain("dist/bin.js");
     expect(packedFiles).toContain("dist/vite.js");
+    expect(packedFiles).toContain("dist/schema.js");
+    expect(packedFiles).toContain("dist/schema.d.ts");
+    expect(packedFiles).toContain("dist/link.js");
+    expect(packedFiles).toContain("dist/link.d.ts");
     expect(packedFiles).toContain("package.json");
     expect(packedFiles.filter((f) => f.startsWith("src/") || f.startsWith("test/"))).toEqual([]);
+  });
+
+  it("the packed package.json has no prepare script; the repo's still does (git installs build)", () => {
+    const installed = JSON.parse(readFileSync(path.join(app, "node_modules/@anubhav-choubey/web-for-agents/package.json"), "utf8"));
+    expect(installed.scripts?.prepare).toBeUndefined();
+    expect(JSON.parse(readFileSync(path.join(repo, "package.json"), "utf8")).scripts.prepare).toBe("npm run build");
   });
 
   it("installs the consumer's requested Vite", () => {
@@ -210,11 +228,15 @@ describe(`packed package in a Vite ${viteMajor} app`, () => {
 });
 
 describe("packed package without vite", () => {
-  it("runs generate on plain HTML with only the package installed", async () => {
-    const bare = path.join(work, "bare");
+  let bare: string;
+  beforeAll(async () => {
+    bare = path.join(work, "bare");
     mkdirSync(bare, { recursive: true });
     writeFileSync(path.join(bare, "package.json"), JSON.stringify({ name: "bare", private: true, type: "module" }));
     await sh("npm", ["install", "--no-audit", "--no-fund", "--prefer-offline", tarball], bare);
+  });
+
+  it("runs generate on plain HTML with only the package installed", async () => {
     expect(existsSync(path.join(bare, "node_modules/vite")), "vite must not be installed").toBe(false);
 
     const site = path.join(bare, "site");
@@ -231,5 +253,50 @@ describe("packed package without vite", () => {
       expect(existsSync(path.join(site, f)), f).toBe(true);
     }
     expect(readFileSync(path.join(site, "about.html"), "utf8")).toContain('href="https://example.com/about.md"');
+  });
+
+  it("the /schema and /link entries run in Node without react or react-dom installed", async () => {
+    for (const dep of ["react", "react-dom"]) expect(existsSync(path.join(bare, "node_modules", dep)), `${dep} must not be installed`).toBe(false);
+    const script = path.join(bare, "schema-script.mjs");
+    writeFileSync(
+      script,
+      [
+        'import { schema, serializeJsonLd } from "@anubhav-choubey/web-for-agents/schema";',
+        'import { agentLinkProps } from "@anubhav-choubey/web-for-agents/link";',
+        'const g = schema.graph([schema.person({ name: "A", id: "#me" }), schema.profilePage({ mainEntity: schema.ref("#me") })]);',
+        'console.log(JSON.stringify({ ld: serializeJsonLd(g), link: agentLinkProps({ name: "email", description: "Email" }) }));',
+      ].join("\n"),
+    );
+    const out = JSON.parse(await sh(process.execPath, [script], bare)) as { ld: string; link: Record<string, string> };
+    expect(JSON.parse(out.ld)["@graph"][1]).toEqual({ "@type": "ProfilePage", mainEntity: { "@id": "#me" } });
+    expect(out.link["data-agent-kind"]).toBe("link");
+  });
+
+  it("the /schema and /link entries load with require() from CommonJS", async () => {
+    const script = path.join(bare, "require-script.cjs");
+    writeFileSync(
+      script,
+      [
+        'const { schema, serializeJsonLd } = require("@anubhav-choubey/web-for-agents/schema");',
+        'const { agentLinkProps } = require("@anubhav-choubey/web-for-agents/link");',
+        'console.log(JSON.stringify({ ld: serializeJsonLd(schema.person({ name: "A" })), link: agentLinkProps({ name: "email", description: "Email" }) }));',
+      ].join("\n"),
+    );
+    const out = JSON.parse(await sh(process.execPath, [script], bare)) as { ld: string; link: Record<string, string> };
+    expect(JSON.parse(out.ld)).toEqual({ "@context": "https://schema.org", "@type": "Person", name: "A" });
+    expect(out.link["data-agent-kind"]).toBe("link");
+  });
+
+  it("a footer using only agentLinkProps from /link bundles to under 1 KB gzip, with no imports left", async () => {
+    const entry = path.join(bare, "footer.mjs");
+    writeFileSync(
+      entry,
+      'import { agentLinkProps } from "@anubhav-choubey/web-for-agents/link";\nexport const footer = agentLinkProps({ name: "email", description: "Email me" });\n',
+    );
+    const outfile = path.join(bare, "footer.bundle.js");
+    await sh(path.join(repo, "node_modules/.bin/esbuild"), [entry, "--bundle", "--minify", "--format=esm", `--outfile=${outfile}`], bare);
+    const code = readFileSync(outfile);
+    expect(code.toString()).not.toMatch(/\bfrom\s*["']|\bimport\s*\(/);
+    expect(gzipSync(code).length).toBeLessThan(1024);
   });
 });

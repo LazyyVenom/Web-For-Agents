@@ -39,6 +39,98 @@ describe("htmlToMarkdown", () => {
   });
 });
 
+describe("htmlToMarkdown: adjacent inline elements", () => {
+  it("separates words the page shows apart", () => {
+    expect(htmlToMarkdown('<div class="flex"><span>Plan</span><span>Pro</span></div>')).toBe("Plan Pro\n");
+    expect(htmlToMarkdown("<div><strong>12K+</strong><span>Stars</span></div>")).toBe("**12K+** Stars\n");
+    expect(htmlToMarkdown('<p><span>Email</span><a href="mailto:hi@example.com">hi@example.com</a></p>')).toBe(
+      "Email [hi@example.com](mailto:hi@example.com)\n",
+    );
+    expect(htmlToMarkdown("<p><span>Step 2</span><!-- --><span>Active</span></p>")).toBe("Step 2 Active\n");
+    expect(htmlToMarkdown('<nav><a href="/a">One</a><a href="/b">Two</a></nav>')).toBe("[One](/a) [Two](/b)\n");
+  });
+
+  it("does not split words in running prose", () => {
+    expect(htmlToMarkdown("<p><span>Java</span><span>Script</span> is fun</p>")).toBe("JavaScript is fun\n");
+    expect(htmlToMarkdown("<p>un<span>believ</span><span>able</span></p>")).toBe("unbelievable\n");
+    // Whitespace-only text between items does not make the parent prose.
+    expect(htmlToMarkdown('<div class="flex">\n  <span>Name</span><span>Email</span>\n</div>')).toBe("Name Email\n");
+    expect(htmlToMarkdown('<div class="flex"><span>Name</span><span>Email</span></div>')).toBe("Name Email\n");
+  });
+
+  it("attaches a leading / to what comes before it", () => {
+    expect(htmlToMarkdown("<p><span>$29</span><span>/mo</span></p>")).toBe("$29/mo\n");
+    expect(htmlToMarkdown("<div><span>4.5</span><span>/5</span></div>")).toBe("4.5/5\n");
+    expect(htmlToMarkdown("<div><span>https://</span><span>example.com</span><span>/path</span></div>")).toBe("https://example.com/path\n");
+    expect(htmlToMarkdown("<div><span>$0.35</span><span>/each</span></div>")).toBe("$0.35/each\n");
+  });
+
+  it("attaches operator-only text such as ** to the next element (Sphinx signatures)", () => {
+    const sig = '<p>dict(<em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em>)</p>';
+    expect(htmlToMarkdown(sig)).toBe("dict(_\\*\\*kwargs_)\n");
+    expect(htmlToMarkdown("<div><span>&amp;&amp;</span><span>next</span></div>")).toBe("&&next\n");
+    // Operator-only text attaches to the element before it too: `bool(object=False)`.
+    const params = '<dt><span class="sig-name">bool</span><span class="sig-paren">(</span><em><span class="n">object</span><span class="o">=</span><span class="default_value">False</span></em><span class="sig-paren">)</span></dt>';
+    expect(htmlToMarkdown(params)).toBe("bool(_object\\=False_)\n");
+  });
+
+  it("does not separate at a CJK or fullwidth boundary; Hangul keeps its space", () => {
+    expect(htmlToMarkdown('<div class="flex"><span>カートに追加</span><span>¥</span><span>1,980</span><span>（税込）</span></div>')).toBe("カートに追加¥1,980（税込）\n");
+    expect(
+      htmlToMarkdown('<span class="ilh-all"><span class="ilh-page"><a href="/w/x">传动带机器</a></span><span class="ilh-comment"><span>（</span><span>英语</span></span></span>'),
+    ).toBe("[传动带机器](/w/x)（英语\n");
+    expect(htmlToMarkdown("<div><span>你好</span><span>世界</span></div>")).toBe("你好世界\n");
+    expect(htmlToMarkdown("<div><span>안녕하세요</span><span>세계</span></div>")).toBe("안녕하세요 세계\n");
+  });
+
+  it("separates short words, digits and digit groups", () => {
+    expect(htmlToMarkdown("<div><span>No</span><span>thanks</span></div>")).toBe("No thanks\n");
+    expect(htmlToMarkdown("<div><span>Hi</span><span>there</span></div>")).toBe("Hi there\n");
+    expect(htmlToMarkdown('<div><span>By</span><a href="/dan">dan</a></div>')).toBe("By [dan](/dan)\n");
+    expect(htmlToMarkdown("<div><span>We</span><span>are hiring</span></div>")).toBe("We are hiring\n");
+    // A two-letter drop cap is not told apart from a short word.
+    expect(htmlToMarkdown('<div><span class="dropcap">Wh</span><span>en I was young</span></div>')).toBe("Wh en I was young\n");
+    // A single digit is not a letter: it gets a space.
+    expect(htmlToMarkdown("<div><span>Step</span><span>1</span></div>")).toBe("Step 1\n");
+    expect(htmlToMarkdown("<div><span>Inbox</span><span>3</span></div>")).toBe("Inbox 3\n");
+    expect(htmlToMarkdown("<div><span>2023</span><span>2024</span></div>")).toBe("2023 2024\n");
+    expect(htmlToMarkdown("<div><span>Rate</span><span>limit</span></div>")).toBe("Rate limit\n");
+    expect(htmlToMarkdown("<div><span>Revenue</span><span>$12.4K</span></div>")).toBe("Revenue $12.4K\n");
+  });
+
+  it("treats custom elements as inline", () => {
+    expect(htmlToMarkdown("<div><x-label>Name</x-label><span>Value</span></div>")).toBe("Name Value\n");
+    expect(htmlToMarkdown("<div><span>Mail</span><x-icon></x-icon><span>Me</span></div>")).toBe("Mail Me\n");
+  });
+
+  it("separates two spans alone in a parent (the logo limit)", () => {
+    expect(htmlToMarkdown("<div><span>Web</span><span>ForAgents</span></div>")).toBe("Web ForAgents\n");
+  });
+
+  it("looks past icons, form fields and empty elements", () => {
+    expect(htmlToMarkdown('<p><span>Mail</span><svg></svg><i class="icon"></i><span>Me</span></p>')).toBe("Mail Me\n");
+    expect(htmlToMarkdown('<form><label>Name<input name="n"></label><input type="hidden"><button>Send</button></form>')).toBe("Name Send\n");
+  });
+
+  it("keeps glue that is meant", () => {
+    // Element next to text.
+    expect(htmlToMarkdown("<p><b>Java</b>Script, H<sub>2</sub>O</p>")).toBe("**Java**Script, H2O\n");
+    // Two formatting elements.
+    expect(htmlToMarkdown("<p><b>Java</b><i>Script</i></p>")).toBe("**Java**_Script_\n");
+    // Single letters (letter animations, one-letter drop caps).
+    expect(htmlToMarkdown("<h2><span>H</span><span>i</span></h2>")).toBe("## Hi\n");
+    expect(htmlToMarkdown('<div><span class="dropcap">T</span><span>he end</span></div>')).toBe("The end\n");
+    // Punctuation.
+    expect(htmlToMarkdown("<p><span>Total</span><span>, then</span><span>(</span><span>x</span></p>")).toBe("Total, then(x\n");
+    expect(htmlToMarkdown("<p><span>$</span><span>20</span><span>Price</span><span>(USD)</span></p>")).toBe("$20 Price (USD)\n");
+    // Existing whitespace, line breaks and code.
+    expect(htmlToMarkdown("<p><span>a </span><span>b</span></p>")).toBe("a b\n");
+    expect(htmlToMarkdown("<p><span>ab</span><br><span>cd</span></p>")).toBe("ab  \ncd\n");
+    expect(htmlToMarkdown("<pre><code><span>con</span><span>st</span></code></pre>")).toBe("```\nconst\n```\n");
+    expect(htmlToMarkdown("<p><code><span>con</span><span>st</span></code></p>")).toBe("`const`\n");
+  });
+});
+
 describe("buildPageMarkdown", () => {
   it("prepends the title unless an h1 exists", () => {
     expect(buildPageMarkdown("About", "<p>x</p>")).toBe("# About\n\nx\n");

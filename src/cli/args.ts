@@ -1,6 +1,7 @@
 import { parseArgs } from "node:util";
 import { errorMessage, withPrefix } from "../shared/errors";
 import { hasScheme } from "../shared/url";
+import { parseSiteOrigin } from "./audit";
 import { DEFAULT_TIMEOUT_MS } from "./fetch";
 
 export interface GenerateArgs {
@@ -27,6 +28,8 @@ export interface CliArgs {
   agentMap?: string;
   /** --no-private-redirects: refuse redirects from a public host to a private address. */
   blockPrivateRedirects?: boolean;
+  /** --site-url: the siteUrl the site was built for (only its origin is used); its URLs are audited on the audited origin. */
+  siteUrl?: string;
 }
 
 const fail = (msg: string): never => {
@@ -68,6 +71,9 @@ Options:
   --min-score <0-100>  exit with code 1 if the score is lower
   --timeout <ms>       per-request timeout (default ${DEFAULT_TIMEOUT_MS})
   --agent-map <path>   agent map file name (probed like agents.json), or a /path or URL
+  --site-url <url>     the siteUrl the site was built with (for example your production
+                       URL). URLs on its origin (canonical, sitemap, markdown) are audited
+                       on <url>'s origin instead; other origins are never fetched
   --no-private-redirects
                        refuse redirects from a public host to a private, loopback or
                        link-local address (default: follow them and print a warning)
@@ -119,7 +125,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
   const { values, positionals } = parsed;
   if (values.help || positionals.length === 0) return { command: "help", json: false, timeoutMs: DEFAULT_TIMEOUT_MS };
   const [command, input, ...rest] = positionals;
-  const GENERATE_FLAGS = ["site-url", "ai-training", "ai-search", "config", "no-link-markdown", "overwrite"] as const;
+  const GENERATE_FLAGS = ["ai-training", "ai-search", "config", "no-link-markdown", "overwrite"] as const;
   const AUDIT_FLAGS = ["min-score", "timeout", "agent-map", "no-private-redirects"] as const;
   if (command === "generate") {
     if (input === undefined) return fail("generate requires an output directory");
@@ -169,6 +175,14 @@ export function parseCliArgs(argv: string[]): CliArgs {
     if (!Number.isInteger(n) || n <= 0)
       return fail(`--timeout must be a positive integer (ms), got "${values.timeout}"`);
     args.timeoutMs = n;
+  }
+  if (values["site-url"] !== undefined) {
+    try {
+      parseSiteOrigin(values["site-url"]);
+    } catch (e) {
+      return fail(`--site-url: ${errorMessage(e)}`);
+    }
+    args.siteUrl = values["site-url"].trim();
   }
   if (values["agent-map"] !== undefined) {
     const v = values["agent-map"].trim();

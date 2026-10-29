@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.4.0 (2026-10-29)
+
+### New
+
+- React-free entry points `@anubhav-choubey/web-for-agents/schema` and `@anubhav-choubey/web-for-agents/link`. Use `/schema` in Node scripts: it needs no React or react-dom, while the root entry still does (`hydrateApp` is unchanged). A footer that imports only `agentLinkProps` from `/link` stays under 1 KB gzip. The root entry still exports everything.
+- Schema builders take `id` (written as `@id`) and `extra` fields (they cannot override `@type` or `@context`), accept nested nodes or refs anywhere, and `schema.ref(id)` makes a `{ "@id": id }` reference. `schema.graph` skips `null`, `undefined` and `false`, so `cond && node` works.
+- `data-agent-kind` (`"handler"`, `"form"`, `"click"` or `"link"`) is written on actions by `useAgentAction`, `AgentForm` and `agentLinkProps`, so static HTML, `agents.json` and `generate` report how an action really runs. `"click"` on a `<form>` is reported as `"form"`, as the runtime does. `generate` now lists handler actions as `"handler"`.
+- `audit --site-url <url>` maps URLs on your production origin to the audited one, so you can audit a preview or local build. Other origins are never fetched. The value can be your plugin `siteUrl` with its path; only the origin is mapped. Without it, cross-origin warnings suggest `--site-url`.
+- `robots.sitemapUrl` (a string, or `false` to omit the line) sets the `Sitemap:` line in `robots.txt`.
+- `sitemap.timeZone` (an IANA zone, default `"UTC"`) sets the zone for `lastmod` dates.
+- A `prepare` script, so `npm i github:LazyyVenom/Web-For-Agents` builds `dist`. This also means `npm pack` and `npm ci` in a checkout run the build.
+- A tag-triggered release workflow that publishes to npm with trusted publishing.
+
+### Fixed
+
+- Schema builders no longer crash when a nested field is missing, such as `profilePage` without `mainEntity` (now optional).
+- Markdown no longer glues the words of adjacent inline elements that have no whitespace between them: `<span>New</span><span>Organic</span>` gives `New Organic`, not `NewOrganic`. Glue that looks intended is kept: an element next to plain text (`<b>Java</b>Script`), two text-formatting elements, single letters (one-letter drop caps, letter animations), opening or closing punctuation, and anything in `<pre>` or `<code>`. Known limit: an element next to bare text stays joined, so `<strong>12K+</strong>customers` gives `**12K+**customers` (two sibling elements, `<span>12K+</span><span>customers</span>`, give `12K+ customers`). See [Content for agents](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/prerendering.md#content-for-agents).
+- Markdown does not split words inside running prose: when the parent also holds its own text, adjacent elements stay joined (`<p><span>Java</span><span>Script</span> is fun</p>` gives `JavaScript is fun`). Custom elements count as inline. A leading `/` (`$29/mo`), operator-only text (`**kwargs`, `object=False`), a trailing currency symbol (`¥1,980`), Chinese and Japanese text and fullwidth punctuation stay joined too. Two-letter words and numbers are spaced (`No thanks`, `Step 1`, `2023 2024`), so a two-letter drop cap gives `Wh en`; put text that must stay joined in one element.
+- `audit` no longer hangs on a sitemap with a long unclosed `<loc>`: the `<loc>` match is now linear.
+- Every entry point loads with `require()` too (Node 20.19+ runs the ESM build): `exports` use the `default` condition instead of `import`.
+- `generate` warns, once per action, about an unknown `data-agent-kind` value and infers the kind from the element. A `<form>` marked `"handler"` keeps its fields as the input schema.
+- Schema builders: an explicit `id` wins over `extra["@id"]`, `schema.ref` and the `id` option throw a `TypeError` on a missing, empty or non-string id, and the `extra` type rejects `@type` and `@context`.
+- The build summary mentions the sitemap and `llms.txt` only when they are written.
+- The published package.json has no `prepare` script, so npm no longer warns about an install script.
+- In prerendered `agents.json`, an `<a href>` marked `data-agent-kind="handler"` or `"click"` is no longer listed as a link action.
+
+### Changed
+
+- `sitemap` `lastmod` dates from `"file"`, the build date or a function returning a `Date` are formatted in `sitemap.timeZone`. Outside UTC a late-night build can get a different date than in 0.3.0; set `timeZone` to your local zone to match your clock.
+- A `sitemap` value that is not a boolean or `{ lastmod, timeZone }` now fails with a new error message.
+- Schema builders omit `null` fields at any depth, including inside nested plain objects, instead of writing them as `null`.
+
+### Troubleshooting
+
+- After upgrading, restart the Vite dev server or run `vite --force`. Vite caches optimized dependencies and can keep serving the old exports.
+
 ## 0.3.0 (2026-10-29)
 
 ### New

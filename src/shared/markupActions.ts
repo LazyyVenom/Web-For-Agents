@@ -1,8 +1,9 @@
-import { ACTION_NAME_RULE, isValidActionName, type AgentActionDescriptor } from "./agent";
+import { ACTION_NAME_RULE, isValidActionName, type ActionKind, type AgentActionDescriptor } from "./agent";
 import {
   ACTION_ATTR,
   ACTION_DESCRIPTION_ATTR,
   ACTION_DESTRUCTIVE_ATTR,
+  ACTION_KIND_ATTR,
   LINK_ACTION_SELECTOR,
   WEBMCP_TOOLDESCRIPTION_ATTR,
   WEBMCP_TOOLNAME_ATTR,
@@ -14,12 +15,50 @@ export interface MarkupAction {
   name: string;
   /** The description attribute, or null when absent or empty. */
   description: string | null;
-  /** "link" for an `<a href>` (LINK_ACTION_SELECTOR), "form" for a `<form>`, otherwise "click". */
-  kind: "form" | "click" | "link";
+  /** See markupKind. */
+  kind: ActionKind;
   destructive: boolean;
   source: "markup" | "webmcp-declarative";
   /** Link actions only: the raw href attribute, not yet checked (see resolveLinkHref). */
   href?: string;
+  /** A `data-agent-kind` value that is not one of KNOWN_KINDS (`kind` was then inferred). */
+  unknownKind?: string;
+}
+
+/** The `data-agent-kind` values markupKind understands. */
+export const KNOWN_KINDS: readonly ActionKind[] = ["handler", "form", "click", "link"];
+
+/** The trimmed `data-agent-kind` value when it is present, non-empty and not a known kind. */
+function unknownKindOf(el: Element): string | undefined {
+  const v = el.getAttribute(ACTION_KIND_ATTR)?.trim();
+  return v && !(KNOWN_KINDS as readonly string[]).includes(v) ? v : undefined;
+}
+
+/**
+ * The kind of a `data-agent-action` element. The `data-agent-kind` attribute (ACTION_KIND_ATTR,
+ * written by the runtime hint props) wins when the element can have that kind: "handler" on any
+ * element, "click" on any element but a `<form>` (where it means "form", as the runtime resolves a
+ * handler-less form action), "form" on a `<form>`, "link" on an `<a href>`. Otherwise (no attribute,
+ * an unknown value, or a kind the element cannot have) it is inferred as before: "form" for a
+ * `<form>`, "link" for an `<a href>` (LINK_ACTION_SELECTOR), else "click".
+ */
+export function markupKind(el: Element): ActionKind {
+  const isForm = el.tagName === "FORM";
+  const isLink = el.matches(LINK_ACTION_SELECTOR);
+  switch (el.getAttribute(ACTION_KIND_ATTR)?.trim()) {
+    case "handler":
+      return "handler";
+    case "click":
+      // hintProps write "click" for any handler-less action; on a <form> the runtime runs it as a form.
+      return isForm ? "form" : "click";
+    case "form":
+      if (isForm) return "form";
+      break;
+    case "link":
+      if (isLink) return "link";
+      break;
+  }
+  return isForm ? "form" : isLink ? "link" : "click";
 }
 
 /**
@@ -33,15 +72,18 @@ export function markupActions(doc: ParentNode): MarkupAction[] {
   doc.querySelectorAll(`[${ACTION_ATTR}]`).forEach((el) => {
     const name = el.getAttribute(ACTION_ATTR)?.trim();
     if (!name) return;
-    const link = el.matches(LINK_ACTION_SELECTOR);
+    const kind = markupKind(el);
+    const link = kind === "link";
+    const unknownKind = unknownKindOf(el);
     out.push({
       element: el,
       name,
       description: el.getAttribute(ACTION_DESCRIPTION_ATTR) || null,
-      kind: el.tagName === "FORM" ? "form" : link ? "link" : "click",
+      kind,
       destructive: el.getAttribute(ACTION_DESTRUCTIVE_ATTR) === "true",
       source: "markup",
       ...(link ? { href: el.getAttribute("href") ?? "" } : {}),
+      ...(unknownKind === undefined ? {} : { unknownKind }),
     });
   });
   doc.querySelectorAll(`form[${WEBMCP_TOOLNAME_ATTR}]`).forEach((el) => {

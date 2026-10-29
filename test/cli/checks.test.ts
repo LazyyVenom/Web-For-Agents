@@ -151,6 +151,15 @@ describe("checks", () => {
     );
   });
 
+  it("sitemap <loc> matching is linear: an unclosed <loc> of 200k spaces does not hang", () => {
+    const hostile = ok(`<urlset><url><loc>${" ".repeat(200_000)}</url></urlset>`, "application/xml");
+    const t = performance.now();
+    expect(byId(inputs({ sitemap: hostile }), "sitemap").status).toBe("warn");
+    expect(performance.now() - t).toBeLessThan(200);
+    const padded = ok("<urlset><url><loc>\n  http://h/x  \n</loc></url></urlset>", "application/xml");
+    expect(byId(inputs({ sitemap: padded }), "sitemap").status).toBe("pass");
+  });
+
   it("canonical on another origin names it and gives the preview fix", () => {
     const html = pageHtml({ head: '<link rel="canonical" href="https://prod.example/x">' });
     const c = byId(inputs({ src: html }), "canonical");
@@ -158,7 +167,17 @@ describe("checks", () => {
     expect(c.message).toBe(
       "Canonical https://prod.example/x points to https://prod.example (different origin than the audited page)",
     );
+    expect(c.fix).toBe("Audit the deployed site, or build with siteUrl set to http://h to audit this preview. Auditing a preview? Pass --site-url https://prod.example.");
+  });
+
+  it("with --site-url given, the preview hint is left out and the canonical shows what the page says", () => {
+    const html = pageHtml({ head: '<link rel="canonical" href="https://other.example/x">' });
+    const c = byId({ ...inputs({ src: html }), siteOrigin: "https://prod.example" }, "canonical");
     expect(c.fix).toBe("Audit the deployed site, or build with siteUrl set to http://h to audit this preview.");
+    const mapped = pageHtml({ head: '<link rel="canonical" href="https://prod.example/x">' });
+    const mapUrl = (u: string) => u.replace("https://prod.example", "http://h");
+    const m = byId({ ...inputs({ src: mapped }), siteOrigin: "https://prod.example", mapUrl }, "canonical");
+    expect(m).toMatchObject({ status: "pass", message: "Canonical is https://prod.example/x (mapped to http://h/x)" });
   });
 
   it("sitemap messages name the URL fetched", () => {
@@ -184,7 +203,7 @@ describe("checks", () => {
     expect(c.message).toBe(
       "Sitemap https://prod.example/sitemap.xml points to https://prod.example (different origin than the audited page)",
     );
-    expect(c.fix).toBe("Audit the deployed site, or build with siteUrl set to http://h to audit this preview.");
+    expect(c.fix).toBe("Audit the deployed site, or build with siteUrl set to http://h to audit this preview. Auditing a preview? Pass --site-url https://prod.example.");
   });
 
   it("sitemap listing this path on another origin says so", () => {
@@ -198,7 +217,7 @@ describe("checks", () => {
     expect(c.message).toBe(
       "Sitemap http://h/sitemap.xml lists https://prod.example/x, which points to https://prod.example (different origin than the audited page)",
     );
-    expect(c.fix).toBe("Audit the deployed site, or build with siteUrl set to http://h to audit this preview.");
+    expect(c.fix).toBe("Audit the deployed site, or build with siteUrl set to http://h to audit this preview. Auditing a preview? Pass --site-url https://prod.example.");
   });
 
   it("markdown alternate on another origin says so", () => {
@@ -207,7 +226,7 @@ describe("checks", () => {
     expect(c.message).toBe(
       "Markdown alternate https://prod.example/x.md points to https://prod.example (different origin than the audited page)",
     );
-    expect(c.fix).toBe("Audit the deployed site, or build with siteUrl set to http://h to audit this preview.");
+    expect(c.fix).toBe("Audit the deployed site, or build with siteUrl set to http://h to audit this preview. Auditing a preview? Pass --site-url https://prod.example.");
   });
 
   it("a non-http markdown alternate is an invalid link, never 'points to null'", () => {

@@ -31,7 +31,7 @@ describe("parseCliArgs", () => {
       [["generate", "a", "--ai-training", "yes"], '--ai-training must be "allow" or "block"'],
       [["generate", "a", "--min-score", "5"], "--min-score is not an option of generate"],
       [["generate", "a", "--config", " "], "--config must be a file path"],
-      [["audit", "u", "--site-url", "https://a.com"], "--site-url is an option of generate, not audit"],
+      [["audit", "u", "--ai-search", "allow"], "--ai-search is an option of generate, not audit"],
     ] as const) {
       expect(() => parseCliArgs([...argv]), argv.join(" ")).toThrow(msg);
     }

@@ -53,11 +53,15 @@ describe("collectAgentPageInPage", () => {
         <a href="javascript:alert(1)" data-agent-action="bad" data-agent-destructive="true">x</a>
         <a data-agent-action="no-href">x</a>
         <button data-agent-action="click-me">x</button>
-        <a href="mailto:a@b.co" data-agent-action="  ">x</a>`;
+        <a href="mailto:a@b.co" data-agent-action="  ">x</a>
+        <a href="/h" data-agent-action="handler-anchor" data-agent-kind="handler">x</a>
+        <a href="/c" data-agent-action="click-anchor" data-agent-kind="click">x</a>
+        <a href="/k" data-agent-action="kind-link" data-agent-kind="link">x</a>`;
     });
     expect(data.links).toEqual([
       { name: "open-resume", description: "Open the resume", destructive: false, href: "/resume.pdf" },
       { name: "bad", description: null, destructive: true, href: "javascript:alert(1)" },
+      { name: "kind-link", description: null, destructive: false, href: "/k" },
     ]);
   });
 });

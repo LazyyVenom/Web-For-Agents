@@ -1,6 +1,6 @@
 {
   "name": "@anubhav-choubey/web-for-agents",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "SEO and AI-agent readiness for React + Vite: head tags, JSON-LD, prerendering, markdown pages, llms.txt, agents.json and WebMCP",
   "license": "MIT",
   "author": "Anubhav Choubey",
@@ -55,25 +55,39 @@
       ],
       "overlay": [
         "dist/overlay.d.ts"
+      ],
+      "schema": [
+        "dist/schema.d.ts"
+      ],
+      "link": [
+        "dist/link.d.ts"
       ]
     }
   },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "default": "./dist/index.js"
     },
     "./vite": {
       "types": "./dist/vite.d.ts",
-      "import": "./dist/vite.js"
+      "default": "./dist/vite.js"
     },
     "./cli": {
       "types": "./dist/cli.d.ts",
-      "import": "./dist/cli.js"
+      "default": "./dist/cli.js"
     },
     "./overlay": {
       "types": "./dist/overlay.d.ts",
-      "import": "./dist/overlay.js"
+      "default": "./dist/overlay.js"
+    },
+    "./schema": {
+      "types": "./dist/schema.d.ts",
+      "default": "./dist/schema.js"
+    },
+    "./link": {
+      "types": "./dist/link.d.ts",
+      "default": "./dist/link.js"
     },
     "./package.json": "./package.json"
   },
@@ -81,6 +95,7 @@
     "build": "tsup",
     "demo:dev": "vite examples/demo",
     "demo:build": "vite build examples/demo --outDir dist-demo --emptyOutDir",
+    "prepare": "npm run build",
     "prepublishOnly": "npm run build && npm test && npm run typecheck",
     "test": "vitest run",
     "test:pack": "npm run build && vitest run --config vitest.pack.config.ts",
@@ -113,7 +128,7 @@
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.3",
-    "@types/node": "^26.6.5",
+    "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/turndown": "^5.0.6",

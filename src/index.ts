@@ -3,7 +3,7 @@ export type { SeoProviderProps } from "./runtime/Seo";
 export { JsonLd } from "./runtime/JsonLd";
 export { schema, serializeJsonLd } from "./runtime/schema";
 export type { SeoProps, SeoDefaults, HeadTag } from "./runtime/types";
-export type { JsonLdNode, JsonLdGraph } from "./runtime/schema";
+export type { JsonLdNode, JsonLdGraph, JsonLdRef, JsonLdNodeOptions, JsonLdExtra } from "./runtime/schema";
 export { ContentRegion, ExcludeFromContent } from "./runtime/content";
 export { holdPrerender } from "./runtime/prerender";
 export { hydrateApp } from "./runtime/hydrate";

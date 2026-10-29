@@ -233,6 +233,18 @@ describe("generateAgentFiles", () => {
     expect(r.warnings).toContain("[web-for-agents] a\\b.html cannot be a page URL (its name has a backslash or similar); skipped");
   });
 
+  it("warns once per action name about an unknown data-agent-kind and falls back to the element's kind", async () => {
+    const bogus = '<button data-agent-action="teleport" data-agent-kind="teleport">Go</button>';
+    const t = setup({ "index.html": page("Home", `<h1>Home</h1>${bogus}`), "about.html": page("About", `<h1>About</h1>${bogus}`) });
+    const r = await t.run();
+    const unknown = r.warnings.filter((w) => w.includes("data-agent-kind"));
+    expect(unknown).toEqual([
+      '[web-for-agents] action "teleport" has an unknown data-agent-kind "teleport" (expected handler, form, click or link); using "click"',
+    ]);
+    const map = JSON.parse(t.read("agents.json")) as { pages: Array<{ actions?: Array<{ name: string; kind: string }> }> };
+    expect(map.pages.flatMap((p) => p.actions ?? []).map((a) => [a.name, a.kind])).toContainEqual(["teleport", "click"]);
+  });
+
   it("validates options", async () => {
     const t = setup({ "index.html": SITE["index.html"]! });
     await expect(t.run({ robots: undefined as never })).rejects.toThrow("robots.ai.training and robots.ai.search are required");
@@ -253,6 +265,19 @@ describe("generateAgentFiles", () => {
     const u = setup();
     await expect(u.run({ sitemap: { lastmod: () => "soon" } })).rejects.toThrow('sitemap.lastmod must return "YYYY-MM-DD"');
     expect(u.has("llms.txt")).toBe(false);
+  });
+
+  it('sitemap.lastmod "file" dates use sitemap.timeZone; robots.sitemapUrl works with the sitemap off', async () => {
+    const t = setup();
+    // 00:30 on 29 Oct in India is 28 Oct in UTC.
+    const mtime = new Date("2026-10-29T00:30:00+05:30");
+    for (const f of ["index.html", "about.html", "experience.html", "blog/post/index.html"]) utimesSync(path.join(t.dir, f), mtime, mtime);
+    await t.run({ sitemap: { lastmod: "file", timeZone: "Asia/Kolkata" } });
+    expect(t.read("sitemap.xml").match(/<lastmod>2026-10-29<\/lastmod>/g)).toHaveLength(4);
+    const u = setup();
+    await u.run({ sitemap: false, robots: { ...robots, sitemapUrl: "/sitemap-index.xml" } });
+    expect(u.has("sitemap.xml")).toBe(false);
+    expect(u.read("robots.txt").endsWith("\nSitemap: https://me.dev/sitemap-index.xml\n")).toBe(true);
   });
 
   it("a write that fails partway leaves every page's content and mtime as it was", async () => {

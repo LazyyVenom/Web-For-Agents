@@ -49,6 +49,33 @@ describe("React API", () => {
     expect(container.querySelector("input")!.getAttribute("data-agent-param")).toBe("Your email");
   });
 
+  it("writes the true kind in data-agent-kind", async () => {
+    function Buttons() {
+      const withHandler = useAgentAction({ name: "k-handler", description: "d", handler: () => 1 });
+      const clicked = useAgentAction({ name: "k-click", description: "d" });
+      return (
+        <>
+          <a href="/x" ref={withHandler.ref} {...withHandler.hintProps}>h</a>
+          <a href="/y" ref={clicked.ref} {...clicked.hintProps}>c</a>
+        </>
+      );
+    }
+    await render(
+      <>
+        <Buttons />
+        <AgentForm agent={{ name: "k-form", description: "d" }}><input name="x" /></AgentForm>
+        <AgentForm agent={{ name: "k-form-handler", description: "d", handler: () => 1 }}><input name="y" /></AgentForm>
+      </>,
+    );
+    const kind = (n: string) => container.querySelector(`[data-agent-action="${n}"]`)!.getAttribute("data-agent-kind");
+    expect(kind("k-handler")).toBe("handler");
+    expect(kind("k-click")).toBe("click");
+    expect(kind("k-form")).toBe("form");
+    expect(kind("k-form-handler")).toBe("handler");
+    const listed = Object.fromEntries(listAgentActions().map((a) => [a.name, a.kind]));
+    expect(listed).toEqual({ "k-handler": "handler", "k-click": "click", "k-form": "form", "k-form-handler": "handler" });
+  });
+
   it("unmount unregisters", async () => {
     await render(<AgentForm agent={{ name: "a1", description: "d" }}><input name="x" /></AgentForm>);
     expect(registerTool).toHaveBeenCalledTimes(1);

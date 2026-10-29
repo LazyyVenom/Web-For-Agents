@@ -58,7 +58,9 @@ function DeleteAccount() {
 
 With a `handler`, the agent's input is validated against `inputSchema` (an object JSON Schema, empty when omitted) and passed to it. Nested objects and array items are checked the same way, with errors reported by path (`addr.zip`, `items[0].id`); keys not listed in `properties` are rejected unless that object sets `additionalProperties: true`. A string longer than 10,000 characters is rejected, without running the regex, when its schema has a `pattern` or `format: "email"`; this keeps slow polynomial patterns fast, but does not make exponential ones such as `(a+)+$` safe, so avoid those. The handler's return value is reported as `{ status: "ok", result }`. Without a `handler`, `ref` decides: a `<form>` uses the form fallback above, any other element is clicked (`{ status: "clicked" }`), unless it is disabled (`disabled`, `aria-disabled="true"` or inside a `<fieldset disabled>`) or hidden by markup (as above), which reports `{ status: "error" }` instead. An action with neither a handler nor an attached element is not exposed. If a handler throws, the error is caught and reported to the agent as `{ status: "error", message }`.
 
-`hintProps` puts `data-agent-action`, `data-agent-description`, `aria-description` and, for destructive actions, `data-agent-destructive="true"` on the element, so the hints are also in the prerendered HTML. `agentParam(description)` adds `data-agent-param` to a form field; it is used as that field's description in the schema (otherwise its `<label>`, `aria-label` or `placeholder`).
+`hintProps` puts `data-agent-action`, `data-agent-description`, `aria-description`, `data-agent-kind` and, for destructive actions, `data-agent-destructive="true"` on the element, so the hints are also in the prerendered HTML. `data-agent-kind` is how the action runs, decided from the spec at render time (also during server rendering): `"handler"` with a `handler`, otherwise `"click"`; `AgentForm` writes `"form"` (or `"handler"` with a `handler`) and `agentLinkProps` writes `"link"`. So an `<a href>` that is a WebMCP tool is not mistaken for a link action. Without a `handler`, use `AgentForm` for a form: a `<form>` given a handler-less `useAgentAction`'s `hintProps` runs as a form but is marked `"click"`. `agentParam(description)` adds `data-agent-param` to a form field; it is used as that field's description in the schema (otherwise its `<label>`, `aria-label` or `placeholder`).
+
+In hand-written HTML read by `generate`, an unknown `data-agent-kind` value is ignored with a warning (once per action name), and the kind is inferred from the element: `"form"` for a `<form>`, `"link"` for an `<a href>`, else `"click"`. A `<form>` marked `"handler"` is listed with the schema of its fields, since its code-side `inputSchema` is not in the HTML.
 
 `listAgentActions()` and `executeAgentAction(name, input)` give you the same registry directly. `refreshAgentActions()` re-checks the registry; pass `{ force: true }` to also re-describe actions that are already registered with WebMCP and re-register any whose schema changed.
 
@@ -80,28 +82,35 @@ WebMCP is feature-detected: when `document.modelContext` (or the older `navigato
 
 ## Link actions (no JavaScript)
 
-Some actions are just links: open a resume, email the author, call a number. Mark a plain `<a href>` with `agentLinkProps` and it is listed in `agents.json` as a link action, with no handler, no registration and no JavaScript needed at runtime:
+Some actions are just links: download a price sheet, open a status page, email sales, call a store. Mark a plain `<a href>` with `agentLinkProps` and it is listed in `agents.json` as a link action, with no handler, no registration and no JavaScript needed at runtime:
 
 ```tsx
 import { agentLinkProps } from "@anubhav-choubey/web-for-agents";
 
-<a href="/resume.pdf" {...agentLinkProps({ name: "open-resume", description: "Open the resume (PDF)" })}>Resume</a>
-<a href="mailto:me@example.com" {...agentLinkProps({ name: "contact", description: "Email me" })}>Email</a>
+<a href="/pricing.pdf" {...agentLinkProps({ name: "download_pricing_pdf", description: "Download the pricing sheet (PDF)" })}>Pricing (PDF)</a>
+<a href="https://status.example.com" {...agentLinkProps({ name: "open_status_page", description: "Open the service status page" })}>Status</a>
+<a href="mailto:sales@example.com" {...agentLinkProps({ name: "contact_sales", description: "Email the sales team" })}>Contact sales</a>
 ```
 
-`agentLinkProps({ name, description, destructive? })` only returns the `data-agent-action`, `data-agent-description`, `aria-description` (and, when `destructive`, `data-agent-destructive="true"`) attributes, so it is safe in server rendering and works in hand-written HTML too: any `<a href data-agent-action="...">` is a link action. It throws on an invalid name, like `useAgentAction`.
+`agentLinkProps({ name, description, destructive? })` only returns the `data-agent-action`, `data-agent-description`, `aria-description`, `data-agent-kind="link"` (and, when `destructive`, `data-agent-destructive="true"`) attributes, so it is safe in server rendering and works in hand-written HTML too: any `<a href data-agent-action="...">` is a link action. It throws on an invalid name, like `useAgentAction`.
+
+To keep React and the agent runtime out of a bundle that only marks links (a footer, a static page), import it from the `/link` entry, which imports nothing but a few constants and the name check (about 0.4 KB gzip when bundled):
+
+```ts
+import { agentLinkProps } from "@anubhav-choubey/web-for-agents/link";
+```
 
 In `agents.json` a link action looks like this:
 
 ```json
 {
-  "name": "open-resume",
-  "description": "Open the resume (PDF)",
+  "name": "download_pricing_pdf",
+  "description": "Download the pricing sheet (PDF)",
   "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
   "destructive": false,
   "readOnly": true,
   "kind": "link",
-  "href": "https://example.com/resume.pdf",
+  "href": "https://example.com/pricing.pdf",
   "method": "GET"
 }
 ```
