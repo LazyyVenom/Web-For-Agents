@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- `audit <url> --sitemap` audits every page in the site's sitemap and prints one table (path, score, top failing checks) with a summary line: pages audited, min, average and pages below `--min-score`. It exits 1 if any page is below `--min-score` or fails to load, which makes it a CI step. The sitemap comes from `robots.txt` or `/sitemap.xml`, and one level of sitemap index is followed. Only URLs on the audited origin are audited (mapped from `--site-url` when given); others are skipped, reported and never fetched, and no redirect may leave the origin. `--max-pages` (default 50, at most 500) and `--concurrency` (default 4) bound the run. `robots.txt`, the sitemap, `llms.txt` and `agents.json` are fetched once and reused, so each page scores as it would alone. `--json` prints `{ site, pages, summary }`. Also available as `auditSite` and `formatSiteText` from `/cli`. See [Auditing a whole site](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/cli.md#auditing-a-whole-site).
+
 ## 0.4.0 (2026-10-29)
 
 ### New
