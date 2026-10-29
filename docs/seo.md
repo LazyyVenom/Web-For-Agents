@@ -69,17 +69,19 @@ Search engines truncate long titles and descriptions, and very short description
   - `aggregateRating`: `ratingValue`, `reviewCount`, `ratingCount`, `bestRating`, `worstRating`; written as an `AggregateRating`. Also a node or a ref.
   - `review`: one review or an array, each with `author` (a person's name, `{ name, url }`, a node or a ref), `reviewRating` (`ratingValue`, `bestRating`, `worstRating`; written as a `Rating`), `reviewBody`, `datePublished` and `name`. Also a node or a ref.
 - `schema.aggregateRating` and `schema.review`: the same fields as a standalone `AggregateRating` or `Review` node, plus `itemReviewed` (a node or a ref). Give one an `id` and point a product at it with `schema.ref`.
-- `schema.faqPage(items, options?)`: `items` is `{ question, answer }[]`, written as `mainEntity` questions, each with an `acceptedAnswer`.
+- `schema.faqPage(items, options?)`: `items` is `{ question, answer }[]`, written as `mainEntity` questions, each with an `acceptedAnswer`. `options` takes the page options below, except `mainEntity`.
 - `schema.breadcrumbList(items, options?)`: `items` is `{ name, url }[]`, written as `itemListElement` with positions from 1.
 - `schema.organization`: `name`, `url`, `logo` (a URL, a node or a ref), `sameAs` (an array of URLs)
 - `schema.webSite`: `name`, `url`, `searchUrlTemplate` (written as a `SearchAction`; use `{search_term_string}` in the URL, as in `"https://example.com/search?q={search_term_string}"`), `publisher` (a node or a ref)
 - `schema.person`: `name`, `url`, `image`, `jobTitle`, `description`, `email`, `sameAs`, `worksFor` (a name, `{ name, url }`, a node or a ref), `address` (text or a `PostalAddress` node), `knowsAbout` (text, nodes or a mix)
 - `schema.softwareApplication`: `name`, `description`, `applicationCategory`, `operatingSystem`, `url`, `image`, `offers` (one `Offer`, as in `schema.product`), `aggregateRating` (as in `schema.product`), `author`. For rich results Google requires `name`, `offers.price` (`0` for a free app) and one of `aggregateRating` or `review`; the [audit](cli.md) warns when one is missing.
-- `schema.profilePage`: `mainEntity` (a person or organization node, or a ref; Google requires it for the rich result), `url`, `name`, `dateCreated`, `dateModified`, `breadcrumb`
+- `schema.profilePage`: the page options, with `mainEntity` the person or organization node, or a ref (Google requires it for the rich result), plus `dateCreated`
 - `schema.creativeWork`: `name`, `description`, `url`, `image`, `author`, `dateCreated`, `keywords` (a string or array, written comma-separated), `genre` (a string or array)
-- `schema.webPage`: `name`, `url`, `description`, `breadcrumb` (a `schema.breadcrumbList` node or a ref), `isPartOf` (usually a ref to the `WebSite`)
+- `schema.webPage`: the page options; `name` and `url` are required
 - `schema.graph(nodes)`: combines nodes into one `@graph` document with a single `@context`; nested nodes lose their own `@context`. `null`, `undefined` and `false` entries are skipped, so `cond && node` works.
 - `schema.ref(id)`: `{ "@id": id }`, a pointer to a node defined elsewhere. A missing or empty `id` throws a `TypeError`.
+
+Page options, shared by `webPage`, `profilePage` and `faqPage` (the `PageOptions` type), so the same object works for each and gives the same fields: `name`, `description`, `url`, `breadcrumb` (a `schema.breadcrumbList` node, its `{ name, url }[]` items, or a ref), `mainEntity` (a node or a ref), `isPartOf` (usually a ref to the `WebSite`), `datePublished`, `dateModified`, `inLanguage`, `image` (a URL, an array or a node), `primaryImageOfPage` (a URL, written as an `ImageObject`, or a node or a ref).
 
 Required fields: `headline` for `article`; `name` and `url` for `organization`, `webSite` and `webPage`; `name` for `product`, `person`, `softwareApplication` and `creativeWork`; `ratingValue` for `aggregateRating`; `author` for `review`; none for `profilePage`.
 
@@ -122,7 +124,7 @@ A personal site uses the same pattern: a `schema.person` node with an `id`, and 
 
 ### Without React
 
-`@anubhav-choubey/web-for-agents/schema` exports `schema`, `serializeJsonLd` and the `JsonLdNode`, `JsonLdGraph`, `JsonLdRef` and `JsonLdNodeOptions` types (and the product input types `OfferInput`, `AggregateOfferInput`, `AggregateRatingInput`, `ReviewInput`, `ItemAvailability` and `ItemCondition`), and imports nothing else: no React, no React DOM. Use it from Node scripts (for example one that writes JSON-LD into static HTML) and from code that should not pull React into its bundle. The root entry still exports the same functions.
+`@anubhav-choubey/web-for-agents/schema` exports `schema`, `serializeJsonLd` and the `JsonLdNode`, `JsonLdGraph`, `JsonLdRef` and `JsonLdNodeOptions` types (and the product input types `OfferInput`, `AggregateOfferInput`, `AggregateRatingInput`, `ReviewInput`, `ItemAvailability` and `ItemCondition`, and `PageOptions`), and imports nothing else: no React, no React DOM. Use it from Node scripts (for example one that writes JSON-LD into static HTML) and from code that should not pull React into its bundle. The root entry still exports the same functions.
 
 ```js
 import { schema, serializeJsonLd } from "@anubhav-choubey/web-for-agents/schema";

@@ -8,9 +8,14 @@
 - `schema.product` `offers` takes one offer or an array. Offers also take `priceValidUntil`, `itemCondition` (`"New"`, `"Used"`, `"Refurbished"` or `"Damaged"`) and `seller` (an organization name, or a node or a ref). An offer with `lowPrice`, `highPrice` and `offerCount` is written as an `AggregateOffer`.
 - `availability` accepts every schema.org `ItemAvailability` value, such as `"BackOrder"`, `"SoldOut"`, `"PreSale"` or `"MadeToOrder"`, written as `https://schema.org/<value>`. The 0.4 offers give the same output.
 - `schema.aggregateRating` and `schema.review` build standalone nodes (with `itemReviewed`, `id` and `extra`) that a product can point at with `schema.ref`. `schema.softwareApplication` `aggregateRating` also takes `worstRating`, and a string `bestRating`.
-- The input types `OfferInput`, `AggregateOfferInput`, `AggregateRatingInput`, `ReviewInput`, `ItemAvailability` and `ItemCondition` are exported from the root and `/schema` entries.
+- The input types `OfferInput`, `AggregateOfferInput`, `AggregateRatingInput`, `ReviewInput`, `ItemAvailability`, `ItemCondition` and `PageOptions` are exported from the root and `/schema` entries.
+- Page builders share one option set (`PageOptions`): `webPage`, `profilePage` and `faqPage` (in its second argument) all take `name`, `description`, `url`, `breadcrumb`, `mainEntity`, `isPartOf`, `datePublished`, `dateModified`, `inLanguage`, `image` and `primaryImageOfPage`, and give the same fields for the same options. `breadcrumb` also takes the `{ name, url }[]` items, written as a `BreadcrumbList`, and a `primaryImageOfPage` URL is written as an `ImageObject`. Existing inputs give the same output.
 
 ## 0.4.0 (2026-10-29)
+
+### Possibly breaking
+
+- `agents.json` `kind` values can change: the kind is now read from `data-agent-kind`, so some actions listed as `"link"` in 0.3.0 are now `"click"` or `"handler"`. Programmatic consumers of `agents.json` should check the `kind` they rely on.
 
 ### New
 
