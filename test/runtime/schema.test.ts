@@ -317,9 +317,9 @@ describe("0.4: @id, refs and extra fields", () => {
   });
 
   it("a node nested in a plain object in extra loses its @context", () => {
-    const org = schema.organization({ name: "U" });
+    const org = schema.organization({ name: "U", url: "https://u.edu" });
     const n = schema.webPage({ name: "P", url: "u", extra: { about: { deep: { org, list: [org] } } } });
-    expect(n.about).toEqual({ deep: { org: { "@type": "Organization", name: "U" }, list: [{ "@type": "Organization", name: "U" }] } });
+    expect(n.about).toEqual({ deep: { org: { "@type": "Organization", name: "U", url: "https://u.edu" }, list: [{ "@type": "Organization", name: "U", url: "https://u.edu" }] } });
     expect(serializeJsonLd(n).match(/@context/g)).toHaveLength(1);
   });
 

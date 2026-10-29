@@ -91,8 +91,10 @@ export function parenthesizeRegExps(code: string): string {
   if (!parseAst) throw new Error(withPrefix("internal: loadViteParser() must run before parenthesizeRegExps"));
   let ast: unknown;
   try {
-    // sourceType is read by Vite 8's parser (rolldown) and ignored by Rollup's, which always parses modules.
-    ast = parseAst(code, { sourceType: "module" });
+    // sourceType is read by Vite 8's parser (rolldown) and ignored by Rollup's, which always parses
+    // modules. Vite 5 to 7 type the options without it, so the object goes through unknown.
+    const options: Record<string, unknown> = { sourceType: "module" };
+    ast = parseAst(code, options as unknown as Parameters<ParseAst>[1]);
   } catch {
     return code;
   }
