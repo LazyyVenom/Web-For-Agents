@@ -9,6 +9,8 @@ After `vite build`, the plugin serves your `dist` locally, starts at `/` plus an
 
 Non-page links (other origins, `mailto:`, files with an extension, `exclude`d routes) are not followed. A path whose last segment contains a dot (`/v1.2`, `/files/report.final`) is treated as a file and not crawled; list such pages in `routes` to prerender them. Routes marked `<Seo noindex>` are written but left out of the sitemap and `llms.txt`. Nothing is written until every route has rendered: if any route fails, the build rejects with one error listing each failing route and renderer.
 
+Client routers (react-router's `BrowserRouter` and others) work: each route renders as it would in the browser, and `hydrateApp` hydrates it. Routes are found only by following links (`prerender.crawl`, on by default), so a dynamic route such as `/docs/:slug` is prerendered only for the slugs some page links to; list the others in `routes`. Give the router's not-found view `<Seo noindex />`, so it stays out of the sitemap, `llms.txt` and `agents.json`. Deploy with your host's fallback pointing at `200.html` (see [SPA fallback](#spa-fallback)).
+
 The default renderer is [happy-dom](https://github.com/capricorn86/happy-dom), which needs no browser. Pages that need a real browser can use your installed Chrome or Edge:
 
 ```sh
