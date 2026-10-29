@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Window } from "happy-dom";
-import { AGENT_GLOBAL } from "../../src/shared/conventions";
+import { AGENT_GLOBAL, AGENT_MAP_SCHEMA_URL } from "../../src/shared/conventions";
 import { markupDefinitions } from "../../src/shared/markupActions";
 import { inPageExpression } from "../../src/vite/prerender/extensions";
 import {
@@ -70,7 +70,7 @@ describe("collectAgentPageInPage", () => {
   it("collects every action element's hint attributes exactly as generate's markupDefinitions does", () => {
     const html = `
       <button data-agent-action=" buy " data-agent-description="Buy A" data-agent-kind="handler" data-agent-readonly="true">x</button>
-      <form data-agent-action="find" data-agent-destructive="true"></form>
+      <form data-agent-action="find" data-agent-destructive="true"><input name="q" required><select name="s"><option value="1">1</option><option>Two</option></select><input type="checkbox" name="c"><input type="hidden" name="h"></form>
       <a href="/k" data-agent-action="docs" data-agent-kind="link">x</a>
       <a data-agent-action="no-href">x</a>
       <div data-agent-action="  "></div>
@@ -80,6 +80,7 @@ describe("collectAgentPageInPage", () => {
     w.document.body.innerHTML = html;
     expect(data.markup).toEqual(markupDefinitions(w.document as unknown as Document));
     expect(data.markup.map((d: any) => d.name)).toEqual(["buy", "find", "docs", "no-href"]);
+    expect(data.markup[1].fields).toEqual(["q:text!", "s:select=1|Two", "c:checkbox=on"]);
     w.happyDOM.close();
   });
 });
@@ -114,7 +115,7 @@ describe("buildAgentMap", () => {
     expect(map.pages[1].markdown).toBe("https://a.com/contact.md");
     expect(map.pages[1].actions.map((x: any) => x.name)).toEqual(["a", "b"]);
     expect(map.pages[1].actions[0].description).toBe(desc.description);
-    expect(Object.keys(map)).toEqual(["version", "generator", "site", "llms", "webmcp", "pages"]);
+    expect(Object.keys(map)).toEqual(["$schema", "version", "generator", "site", "llms", "webmcp", "pages"]);
     expect(Object.keys(map.pages[1])).toEqual(["path", "url", "title", "description", "markdown", "actions"]);
   });
 
@@ -294,6 +295,7 @@ describe("site actions across kinds of sites", () => {
       pages: [{ route: "/a", actions: [footer] }, { route: "/", title: "Home", actions: [{ ...desc, name: "own" }, footer] }],
     });
     const expected = {
+      $schema: AGENT_MAP_SCHEMA_URL,
       version: 2,
       generator: "@anubhav-choubey/web-for-agents",
       site: { url: "https://a.com" },
@@ -406,7 +408,7 @@ describe("agentMapExtension duplicate names", () => {
       emitFile: () => {},
       warn: (m) => void warnings.push(m),
     });
-    expect(warnings).toEqual(["/products: 3 different actions named add_to_cart; only the first is listed"]);
+    expect(warnings).toEqual([`/products: 3 different actions named add_to_cart (differ in: description "Add A" vs "Add B" vs "Add C"); only the first is listed`]);
   });
 });
 

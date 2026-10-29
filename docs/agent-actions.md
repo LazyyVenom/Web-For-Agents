@@ -68,7 +68,7 @@ In hand-written HTML read by `generate`, an unknown `data-agent-kind` value is i
 
 Names must be 1 to 128 characters of `A-Z a-z 0-9 _ - .`; an invalid name throws. Names are per page: if two mounted components use the same name, only the first mounted one is exposed (in WebMCP and in `agents.json`) and a warning is logged. Give each a unique name, or use one action with an id input.
 
-When two elements on the same page share a name but define it differently (another description, kind, `href` or flag), the build and `generate` warn once per page and name, such as `/products: 2 different actions named add_to_cart; only the first is listed`. Identical copies, such as the same button in every card of a product grid, are not reported.
+When two elements on the same page share a name but define it differently (another kind, `href`, description, flag or form fields), the build and `generate` warn once per page and name, naming each field that differs with its values, such as `/contact: 2 different actions named open-resume (differ in: kind click vs link, readOnly true vs unset); only the first is listed`. `unset` is an absent attribute (or a flag that is off), values other than single words are quoted, and each is cut to 40 characters. Different form fields read `input schema`, without the schema. With 3 or more definitions, each field lists its distinct values in order, the first element's first, still on one line. Identical copies, such as the same button in every card of a product grid, are not reported.
 
 ## Destructive actions
 
@@ -147,6 +147,7 @@ An action is site-wide only when every page listed in `agents.json` has it with 
 
 ```json
 {
+  "$schema": "https://cdn.jsdelivr.net/npm/@anubhav-choubey/web-for-agents@0/schemas/agents.v2.schema.json",
   "version": 2,
   "generator": "@anubhav-choubey/web-for-agents",
   "site": {
@@ -199,6 +200,8 @@ An action is site-wide only when every page listed in `agents.json` has it with 
 
 `kind` is `"handler"`, `"form"`, `"click"` or `"link"` (see [Link actions](#link-actions-no-javascript)). `llms` is omitted when `llms: false`, and `markdown` when `markdown: false`.
 
-`version` is `2`. Version 1 (0.4 and earlier) had no `site.actions` and repeated site-wide actions on every page; a version 2 file without `site.actions` reads the same way. Set `agentMap: { siteActions: false }` to keep that per-page layout: each page then lists all its actions, exactly as before, and only `version` changes. The CLI audit accepts both versions.
+`version` is `2`. Version 1 (0.4 and earlier) had no `site.actions` and repeated site-wide actions on every page; a version 2 file without `site.actions` reads the same way. Set `agentMap: { siteActions: false }` to keep that per-page layout: each page then lists all its actions, exactly as before, and only `version` changes. That file is still version 2 (`site.actions` is optional in version 2) and matches the version 2 schema. The CLI audit accepts both versions.
+
+`$schema`, always the first key, is the URL of the [JSON Schema](https://json-schema.org/draft/2020-12) (draft 2020-12) of the format version, so editors and validators can check the file. The schema files ship in the package's `schemas/` directory (`schemas/agents.v2.schema.json`) and are served by jsDelivr. The URL pins the package's major version (`@0`) rather than an exact release: it stays valid across every minor and patch release, and a new format version ships as a new file (`agents.v3.schema.json`) next to the old one instead of changing it, so a file keeps pointing at the schema it was written for. An unpinned URL would follow the newest release, which could drop an old schema file in a later major. The CLI audit ignores `$schema`.
 
 Use `agentMap: { fileName: "ai.json" }` to change the file name (a plain `.json` name, no directories), or `agentMap: false` to turn the file and the `llms.txt` section off; WebMCP registration at runtime is unaffected. The CLI audit looks for the default `agents.json` unless you pass `--agent-map`. A `public/agents.json` of your own is never overwritten. The agent map needs prerender.

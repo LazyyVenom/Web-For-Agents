@@ -4,7 +4,17 @@ import { CONTENT_ATTR, LLMS_FULL_TXT_PATH, LLMS_TXT_PATH, ROBOTS_PATH, SITEMAP_P
 import { LOG_PREFIX, withPrefix } from "../shared/errors";
 import { compareStrings } from "../shared/sort";
 import { agentMapExtension, type AgentPageData } from "./agentMap";
-import { dropFileCollisions, fileOf, pageLengthWarnings, pageMarkdown, prefixed, SPA_FALLBACK_FILE, stageSiteFiles, type SitePage } from "./siteFiles";
+import {
+  dropFileCollisions,
+  fileOf,
+  pageCountText,
+  pageLengthWarnings,
+  pageMarkdown,
+  prefixed,
+  SPA_FALLBACK_FILE,
+  stageSiteFiles,
+  type SitePage,
+} from "./siteFiles";
 import { createFileStager, type FileStager, type StageSource } from "./fileStager";
 import { staticActions } from "./generateActions";
 import { markupDefinitions, markupLinks } from "../shared/markupActions";
@@ -312,15 +322,11 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
     logger.warn(`${LOG_PREFIX} ${utf16.join(", ")} ${utf16.length === 1 ? "is" : "are"} UTF-16; the markdown link was not added`);
   }
   for (const w of pageLengthWarnings(listed)) logger.warn(w);
-  const unlisted = pages.length - listed.length;
   // A kept agent map is not the one counted: leave its action counts out.
   const counted = extensions.filter((e) => !(e.name === "agent-map" && resolved.agentMap && kept.includes(resolved.agentMap.fileName)));
-  const counts = [
-    plural(pages.length, "page"),
-    ...(unlisted > 0 ? [`${unlisted} noindex`] : []),
-    ...extensionSummaries(counted),
-  ];
-  base.info(`${LOG_PREFIX} wrote ${plural(written.size, "file")} (${counts.join(", ")})`);
+  const pagesText = pageCountText("page", pages, { llms: !!resolved.llms, sitemap: !!resolved.sitemap });
+  const counts = extensionSummaries(counted).map((c) => `, ${c}`).join("");
+  base.info(`${LOG_PREFIX} wrote ${plural(written.size, "file")} for ${pagesText}${counts}`);
 
   return {
     outDir,

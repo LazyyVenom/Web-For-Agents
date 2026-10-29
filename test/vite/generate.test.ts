@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { generateAgentFiles, type GenerateOptions } from "../../src/vite/generate";
 import { routeMdFile, routeOfHtmlFile } from "../../src/vite/prerender/paths";
+import { agentMapStats } from "../../src/shared/agent";
 
 const tmpDirs: string[] = [];
 afterAll(() => tmpDirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
@@ -119,18 +120,23 @@ describe("generateAgentFiles", () => {
     });
     const r = await t.run();
     const info = t.logger.info.mock.calls.map((c) => String(c[0]));
-    expect(info).toEqual([`[web-for-agents] wrote ${r.written.length} files (3 pages, 1 noindex, 3 actions (1 page-specific, 2 site-wide))`]);
+    expect(info).toEqual([
+      `[web-for-agents] wrote ${r.written.length} files for 3 pages (2 listed in llms.txt and the sitemap, 1 noindex), 3 actions (1 page-specific, 2 site-wide)`,
+    ]);
+    // The listed count is the agent map's page count (what the audit reports) and the sitemap's.
+    expect(agentMapStats(JSON.parse(t.read("agents.json"))).pages).toBe(2);
+    expect(t.read("sitemap.xml").match(/<loc>/g)).toHaveLength(2);
 
     const u = setup({ "index.html": page("Home", "<h1>Home</h1>" + footer), "about.html": page("About", "<h1>About</h1>" + footer) });
     await u.run({ agentMap: { siteActions: false } });
-    expect(u.logger.info.mock.calls.map((c) => String(c[0]))[0]).toMatch(/^\[web-for-agents\] wrote \d+ files \(2 pages, 4 actions\)$/);
+    expect(u.logger.info.mock.calls.map((c) => String(c[0]))[0]).toMatch(/^\[web-for-agents\] wrote \d+ files for 2 pages \(2 listed in llms\.txt and the sitemap\), 4 actions$/);
     const map = JSON.parse(u.read("agents.json"));
     expect(map.site).not.toHaveProperty("actions");
     expect(map.pages.map((p: any) => p.actions.length)).toEqual([2, 2]);
 
     const v = setup({ "index.html": page("Home", "<h1>Home</h1>") });
     await v.run({ agentMap: false });
-    expect(v.logger.info.mock.calls.map((c) => String(c[0]))[0]).toMatch(/^\[web-for-agents\] wrote \d+ files \(1 page\)$/);
+    expect(v.logger.info.mock.calls.map((c) => String(c[0]))[0]).toMatch(/^\[web-for-agents\] wrote \d+ files for 1 page \(1 listed in llms\.txt and the sitemap\)$/);
   });
 
   it("reports no action counts when an existing agents.json was kept", async () => {
@@ -139,7 +145,7 @@ describe("generateAgentFiles", () => {
     const r = await t.run();
     expect(r.kept).toEqual(["agents.json"]);
     expect(t.read("agents.json")).toBe('{"mine":true}\n');
-    expect(t.logger.info.mock.calls.map((c) => String(c[0]))).toEqual([`[web-for-agents] wrote ${r.written.length} files (1 page)`]);
+    expect(t.logger.info.mock.calls.map((c) => String(c[0]))).toEqual([`[web-for-agents] wrote ${r.written.length} files for 1 page (1 listed in llms.txt and the sitemap)`]);
   });
 
   it("warns once per page and name when actions sharing a name differ; identical copies stay silent", async () => {
@@ -150,7 +156,7 @@ describe("generateAgentFiles", () => {
     });
     const r = await t.run();
     const dup = r.warnings.filter((w) => w.includes("different actions named"));
-    expect(dup).toEqual(["[web-for-agents] /products: 2 different actions named add_to_cart; only the first is listed"]);
+    expect(dup).toEqual([`[web-for-agents] /products: 2 different actions named add_to_cart (differ in: description "Add A" vs "Add B"); only the first is listed`]);
     const map = JSON.parse(t.read("agents.json"));
     expect(map.pages.find((p: any) => p.path === "/products").actions.map((a: any) => a.description)).toEqual(["Add A"]);
   });
