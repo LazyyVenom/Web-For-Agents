@@ -9,7 +9,7 @@ import { safeJson, safeText } from "./terminal";
 export { audit } from "./audit";
 export type { AuditOptions, AuditReport } from "./audit";
 export { auditSite } from "./siteAudit";
-export type { SiteAuditOptions, SiteAuditPage, SiteAuditReport, SitemapFile } from "./siteAudit";
+export type { SiteAuditLimit, SiteAuditOptions, SiteAuditPage, SiteAuditReport, SitemapFile } from "./siteAudit";
 export { formatSiteText, formatText } from "./report";
 export type { CheckId, CheckResult, CheckStatus } from "./checks";
 
@@ -48,7 +48,8 @@ export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<num
   // --json keeps page data raw; safeJson only writes terminal-active characters as \u escapes.
   io.stdout(args.json ? safeJson(report, 2) + "\n" : formatText(report));
   if (report.error !== undefined) {
-    io.stderr(withPrefix(`audit failed: ${safeText(report.error)}\n`));
+    // The text report already ends in "Error: ..."; with --json, stdout is JSON, so say it on stderr.
+    if (args.json) io.stderr(withPrefix(`audit failed: ${safeText(report.error)}\n`));
     return 2;
   }
   if (args.minScore !== undefined && report.score < args.minScore) {
@@ -58,7 +59,11 @@ export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<num
   return 0;
 }
 
-/** `audit <url> --sitemap`: 2 when no page could be audited, 1 when any page is below --min-score or failed to load. */
+/**
+ * `audit <url> --sitemap`: 2 when no page could be audited, 1 when any page is below --min-score or
+ * failed to load, or --max-time cut the run. The text report says each of these once; with --json,
+ * stdout is JSON, so they are also said on stderr.
+ */
 async function runSiteAudit(url: string, opts: AuditOptions, args: CliArgs, io: CliIo): Promise<number> {
   const report = await auditSite(url, {
     ...opts,
@@ -66,18 +71,25 @@ async function runSiteAudit(url: string, opts: AuditOptions, args: CliArgs, io: 
     ...(args.minScore === undefined ? {} : { minScore: args.minScore }),
   });
   io.stdout(args.json ? safeJson(report, 2) + "\n" : formatSiteText(report));
+  const say = (s: string): void => {
+    if (args.json) io.stderr(withPrefix(`${s}\n`));
+  };
   const { site, summary } = report;
   if (site.error !== undefined) {
-    io.stderr(withPrefix(`audit failed: ${safeText(site.error)}\n`));
+    say(`audit failed: ${safeText(site.error)}`);
     return 2;
   }
   let code = 0;
   if (summary.minScore !== undefined && summary.belowMinScore > 0) {
-    io.stderr(withPrefix(`${summary.belowMinScore} of ${summary.audited} pages are below --min-score ${summary.minScore}\n`));
+    say(`${summary.belowMinScore} of ${summary.audited} pages are below --min-score ${summary.minScore}`);
     code = 1;
   }
   if (summary.errors > 0) {
-    io.stderr(withPrefix(`${summary.errors} of ${summary.audited} pages failed to load\n`));
+    say(`${summary.errors} of ${summary.audited} pages failed to load`);
+    code = 1;
+  }
+  if (summary.limitedBy?.includes("max-time")) {
+    say(`stopped at --max-time ${summary.maxTimeMs / 1000}: ${summary.audited} of ${summary.listed} listed pages were audited`);
     code = 1;
   }
   return code;

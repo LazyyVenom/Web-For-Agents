@@ -3,6 +3,14 @@ import { errorMessage, withPrefix } from "../shared/errors";
 import { hasScheme } from "../shared/url";
 import { parseSiteOrigin } from "./audit";
 import { DEFAULT_TIMEOUT_MS } from "./fetch";
+import {
+  DEFAULT_SITE_CONCURRENCY,
+  DEFAULT_SITE_MAX_PAGES,
+  DEFAULT_SITE_MAX_TIME_S,
+  MAX_SITE_CONCURRENCY,
+  MAX_SITE_MAX_TIME_S,
+  MAX_SITE_PAGES,
+} from "./siteAudit";
 
 export interface GenerateArgs {
   outDir: string;
@@ -43,12 +51,9 @@ export interface SitemapArgs {
   maxPages: number;
   /** --concurrency: pages audited at the same time. */
   concurrency: number;
+  /** --max-time (given in seconds): the overall time budget. */
+  maxTimeMs: number;
 }
-
-export const DEFAULT_MAX_PAGES = 50;
-export const MAX_PAGES_LIMIT = 500;
-export const DEFAULT_CONCURRENCY = 4;
-export const MAX_CONCURRENCY = 16;
 
 const fail = (msg: string): never => {
   throw new Error(withPrefix(msg));
@@ -91,8 +96,10 @@ Options:
                        page's score is lower)
   --sitemap            audit every page listed in the site's sitemap (found through
                        robots.txt, else /sitemap.xml) on <url>'s origin, and print one table
-  --max-pages <n>      with --sitemap: audit at most n pages (default ${DEFAULT_MAX_PAGES}, at most ${MAX_PAGES_LIMIT})
-  --concurrency <n>    with --sitemap: pages audited at once (default ${DEFAULT_CONCURRENCY}, at most ${MAX_CONCURRENCY})
+  --max-pages <n>      with --sitemap: audit at most n pages (default ${DEFAULT_SITE_MAX_PAGES}, at most ${MAX_SITE_PAGES})
+  --concurrency <n>    with --sitemap: pages audited at once (default ${DEFAULT_SITE_CONCURRENCY}, at most ${MAX_SITE_CONCURRENCY})
+  --max-time <s>       with --sitemap: stop starting pages after s seconds and report
+                       the partial result, exit code 1 (default ${DEFAULT_SITE_MAX_TIME_S}, at most ${MAX_SITE_MAX_TIME_S})
   --timeout <ms>       per-request timeout (default ${DEFAULT_TIMEOUT_MS})
   --agent-map <path>   agent map file name (probed like agents.json), or a /path or URL
   --site-url <url>     the siteUrl the site was built with (for example your production
@@ -122,8 +129,8 @@ Options:
   --verbose            also print the layout, the pages and every file written
   --json               print the result as JSON
 
-Exit codes: 0 ok, 1 score below --min-score (with --sitemap: any page below it or
-            failing to load), 2 usage error or fatal error
+Exit codes: 0 ok, 1 score below --min-score (with --sitemap: any page below it,
+            failing to load, or --max-time reached), 2 usage error or fatal error
 `;
 
 /** A whole number from 1 to `max`, written as plain digits. */
@@ -149,6 +156,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
         sitemap: { type: "boolean" },
         "max-pages": { type: "string" },
         concurrency: { type: "string" },
+        "max-time": { type: "string" },
         "ai-training": { type: "string" },
         "ai-search": { type: "string" },
         config: { type: "string" },
@@ -166,7 +174,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
   if (values.help || positionals.length === 0) return { command: "help", json: false, timeoutMs: DEFAULT_TIMEOUT_MS };
   const [command, input, ...rest] = positionals;
   const GENERATE_FLAGS = ["ai-training", "ai-search", "config", "no-link-markdown", "overwrite", "no-site-actions", "verbose"] as const;
-  const AUDIT_FLAGS = ["min-score", "timeout", "agent-map", "no-private-redirects", "sitemap", "max-pages", "concurrency"] as const;
+  const AUDIT_FLAGS = ["min-score", "timeout", "agent-map", "no-private-redirects", "sitemap", "max-pages", "concurrency", "max-time"] as const;
   if (command === "generate") {
     if (input === undefined) return fail("generate requires an output directory");
     if (rest.length > 0) return fail(`unexpected argument "${rest[0]}"`);
@@ -239,13 +247,16 @@ export function parseCliArgs(argv: string[]): CliArgs {
     args.agentMap = v;
   }
   if (values.sitemap === true) {
+    const maxTimeS =
+      values["max-time"] === undefined ? DEFAULT_SITE_MAX_TIME_S : boundedInt("max-time", values["max-time"], MAX_SITE_MAX_TIME_S);
     args.sitemap = {
-      maxPages: values["max-pages"] === undefined ? DEFAULT_MAX_PAGES : boundedInt("max-pages", values["max-pages"], MAX_PAGES_LIMIT),
+      maxPages: values["max-pages"] === undefined ? DEFAULT_SITE_MAX_PAGES : boundedInt("max-pages", values["max-pages"], MAX_SITE_PAGES),
       concurrency:
-        values.concurrency === undefined ? DEFAULT_CONCURRENCY : boundedInt("concurrency", values.concurrency, MAX_CONCURRENCY),
+        values.concurrency === undefined ? DEFAULT_SITE_CONCURRENCY : boundedInt("concurrency", values.concurrency, MAX_SITE_CONCURRENCY),
+      maxTimeMs: maxTimeS * 1000,
     };
   } else {
-    const orphan = (["max-pages", "concurrency"] as const).find((f) => values[f] !== undefined);
+    const orphan = (["max-pages", "concurrency", "max-time"] as const).find((f) => values[f] !== undefined);
     if (orphan) return fail(`--${orphan} requires --sitemap`);
   }
   return args;

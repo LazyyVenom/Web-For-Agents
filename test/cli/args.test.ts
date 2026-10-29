@@ -102,11 +102,14 @@ describe("parseCliArgs", () => {
       url: "https://a.com/",
       json: false,
       timeoutMs: 10000,
-      sitemap: { maxPages: 50, concurrency: 4 },
+      sitemap: { maxPages: 50, concurrency: 4, maxTimeMs: 300_000 },
     });
-    expect(parseCliArgs(["audit", "a.com", "--sitemap", "--max-pages", "500", "--concurrency", "1"]).sitemap).toEqual({
+    expect(
+      parseCliArgs(["audit", "a.com", "--sitemap", "--max-pages", "500", "--concurrency", "1", "--max-time", "3600"]).sitemap,
+    ).toEqual({
       maxPages: 500,
       concurrency: 1,
+      maxTimeMs: 3_600_000,
     });
     expect(parseCliArgs(["audit", "a.com"]).sitemap).toBeUndefined();
   });
@@ -118,6 +121,9 @@ describe("parseCliArgs", () => {
       [["audit", "a.com", "--sitemap", "--max-pages", "2.5"], "--max-pages must be an integer from 1 to 500"],
       [["audit", "a.com", "--sitemap", "--concurrency", "0"], "--concurrency must be an integer from 1 to 16"],
       [["audit", "a.com", "--sitemap", "--concurrency", "17"], "--concurrency must be an integer from 1 to 16"],
+      [["audit", "a.com", "--sitemap", "--max-time", "0"], "--max-time must be an integer from 1 to 3600"],
+      [["audit", "a.com", "--sitemap", "--max-time", "3601"], "--max-time must be an integer from 1 to 3600"],
+      [["audit", "a.com", "--max-time", "60"], "--max-time requires --sitemap"],
       [["audit", "a.com", "--max-pages", "5"], "--max-pages requires --sitemap"],
       [["audit", "a.com", "--concurrency", "2"], "--concurrency requires --sitemap"],
       [["generate", "out", "--sitemap"], "--sitemap is not an option of generate"],
