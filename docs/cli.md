@@ -24,7 +24,7 @@ A URL without a scheme gets `http://` for `localhost`, `127.0.0.1` and `[::1]`, 
 
 `robots.txt` is read from the site root. The sitemap URL comes from its `Sitemap:` line, or `/sitemap.xml` if there is none. `llms.txt` and `agents.json` are looked for at the root and in each parent directory of the page and of its markdown alternate link. For example, auditing `https://example.com/sub/` also tries `/sub/llms.txt` and `/sub/agents.json`, which covers sites deployed under a subpath. If more than one copy exists, the deepest one is used. A missing file's message lists every URL tried.
 
-The agent map check accepts `agents.json` version 1 or 2. Its message counts the pages and the actions available on them, site-wide ones included, for example `Agent map found at https://example.com/agents.json (20 pages, 207 actions; 9 site-wide)`.
+The agent map check accepts `agents.json` version 1 or 2. Its message counts the pages and the actions as listed, each site-wide action once, for example `Agent map found at https://example.com/agents.json (20 pages, 36 actions (27 page-specific, 9 site-wide))`.
 
 Checks and weights (total 100):
 
@@ -162,10 +162,10 @@ export default {
 By default `generate` prints one summary line, for example:
 
 ```
-[web-for-agents] wrote 47 files (20 pages, 207 actions; 9 site-wide)
+[web-for-agents] wrote 47 files (20 pages, 36 actions (27 page-specific, 9 site-wide))
 ```
 
-It counts the files written, the pages found (and how many are `noindex`, if any), the actions available across all listed pages (a site-wide action counts once per page) and how many of them are site-wide. `--verbose` adds the layout, the page list and the file list.
+It counts the files written, the pages found (and how many are `noindex`, if any) and the actions as listed in `agents.json`: the pages' own actions, summed over the pages, plus each site-wide action once. The action counts are left out when an existing `agents.json` was kept. `--verbose` adds the layout, the page list, the file list and the pages whose own markdown link was kept.
 
 `generate` does not need Vite: it works on any directory of HTML files. Warnings go to stderr. Exit codes: `0` ok, `2` usage error or failure. When it fails, nothing is written.
 

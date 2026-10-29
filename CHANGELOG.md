@@ -4,8 +4,8 @@
 
 ### Possibly breaking
 
-- `agents.json` is now version 2. Actions found on every listed page with the same definition (name, kind, `href`, input schema, description and flags), such as footer links or a site search, are listed once in a new `site.actions` and left out of each page's `actions`. The actions on a page are now `site.actions` plus the page's `actions`. Tools that read only `pages[].actions` will miss site-wide actions. `agentMap: { siteActions: false }` (or `generate --no-site-actions`) keeps the per-page layout, byte for byte apart from `version`. See [agents.json](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/agent-actions.md#agentsjson).
-- `generate` prints one summary line, such as `[web-for-agents] wrote 47 files (20 pages, 207 actions; 9 site-wide)`, instead of the layout, the page list and every file written. Warnings are unchanged. Use `--verbose` for the full lists; `--json` is unchanged.
+- `agents.json` is now version 2. Actions present with the same definition (name, kind, `href`, input schema, description and flags) on every page listed in `agents.json`, such as footer links or a site search, are listed once in a new `site.actions` and left out of each page's `actions`. Pages left out of `agents.json` (`noindex`, `exclude`) do not count, so a `noindex` checkout page without the cart link does not keep the cart link off `site.actions`. The actions on a page are now `site.actions` plus the page's `actions`. Tools that read only `pages[].actions` will miss site-wide actions. `agentMap: { siteActions: false }` (or `generate --no-site-actions`) keeps the per-page layout, byte for byte apart from `version`. See [agents.json](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/agent-actions.md#agentsjson).
+- `generate` prints one summary line, such as `[web-for-agents] wrote 47 files (20 pages, 36 actions (27 page-specific, 9 site-wide))`, instead of the layout, the page list and every file written. The "kept the page's own markdown link" line moved to `--verbose` (and `ownMarkdownLinks` in the result). Use `--verbose` for the full lists; `--json` is unchanged apart from the new `ownMarkdownLinks` field.
 
 ### New
 
@@ -17,13 +17,23 @@
 - Page builders share one option set (`PageOptions`): `webPage`, `profilePage` and `faqPage` (in its second argument) all take `name`, `description`, `url`, `breadcrumb`, `mainEntity`, `isPartOf`, `datePublished`, `dateModified`, `inLanguage`, `image` and `primaryImageOfPage`, and give the same fields for the same options. `breadcrumb` also takes the `{ name, url }[]` items, written as a `BreadcrumbList`, and a `primaryImageOfPage` URL is written as an `ImageObject`. Existing inputs give the same output.
 - `audit <url> --sitemap` audits every page in the site's sitemap and prints one table (path, score, top failing checks) with a summary line: pages audited, min, average and pages below `--min-score`. It exits 1 if any page is below `--min-score` or fails to load, which makes it a CI step. The sitemap comes from `robots.txt` or `/sitemap.xml`, and one level of sitemap index is followed. If the URL you pass redirects to another origin (`example.com` → `www.example.com`, `http` → `https`), that origin is audited, with a note. Only URLs on the audited origin are audited (URLs on the origin you passed and on `--site-url` are mapped to it); others are skipped, reported and never fetched, and no page redirect may leave the origin. `--max-pages` (default 50, at most 500) and `--concurrency` (default 4) bound the run. `robots.txt`, the sitemap, `llms.txt` and `agents.json` are fetched once and reused, so each page scores as it would alone. `--json` prints `{ site, pages, summary }`. Also available as `auditSite` and `formatSiteText` from `/cli`. See [Auditing a whole site](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/cli.md#auditing-a-whole-site).
 - `agentMap.siteActions` (default `true`), `generate --no-site-actions` and `--verbose`.
-- The audit's agent map check accepts version 1 and 2 and counts pages and actions, site-wide ones included.
-- The plugin's build summary counts the actions in the agent map.
-- `@anubhav-choubey/web-for-agents/form` exports `AgentForm`, `useAgentAction`, `agentParam` and `refreshAgentActions` without `Seo`, `JsonLd`, `hydrateApp` or react-dom. With esbuild, which keeps the runtime eager when it is imported from the root entry, `/form` keeps it lazy (about 2.4 KB gzip eager).
+- The audit's agent map check accepts version 1 and 2 and counts pages and actions as listed, each site-wide action once: `(20 pages, 36 actions (27 page-specific, 9 site-wide))`.
+- The plugin's build summary counts the actions in the agent map the same way, after the "listed in" detail: `prerendered 20 routes (20 listed in llms.txt and the sitemap), 36 actions (27 page-specific, 9 site-wide)`.
+- `@anubhav-choubey/web-for-agents/form` exports `AgentForm`, `useAgentAction`, `agentParam` and `refreshAgentActions` without `Seo`, `JsonLd`, `hydrateApp` or react-dom (about 2.4 KB gzip eager with esbuild).
+- The build and `generate` warn when two elements on the same page share an action name but define it differently, once per page and name: `/products: 2 different actions named add_to_cart; only the first is listed`. Identical copies, as in a product grid, stay silent.
+- `useAgentAction` and `AgentForm` write `data-agent-readonly="true"` for `readOnly` actions, and `generate` reads it, so its `agents.json` has the same `readOnly` as the plugin's.
+
+### Fixed
+
+- With esbuild, the root entry no longer loads the agent runtime eagerly (about 7.2 KB gzip eager before, 2.5 KB now). `executeAgentAction` loads it on first use; `listAgentActions` lists form actions without their fields until it has loaded.
+- An element with `id="__WFA_PROBE__"` on a live page no longer makes the runtime think a prerender is running (which loaded it eagerly).
+- `generate` no longer reports action counts when an existing `agents.json` was kept rather than written.
+- The build summary says "1 route" rather than "1 routes", and mentions configured routes the sitemap keeps from `publicDir` only when there are some, with their number.
 
 ### Changed
 
 - The agent runtime behind `AgentForm` and `useAgentAction` loads lazily. Pages load only the hint attributes and a small registration shim, about 3 KB gzip instead of about 6.5 KB. Form schemas, validation, form filling, the confirm dialog and WebMCP registration are a separate chunk, loaded with `import()` once an action mounts while `document.modelContext` (or `navigator.modelContext`) exists, or while the prerender captures the page. Browsers without WebMCP never download it. The API, the hint attributes and `agents.json` are unchanged; tools are registered once the chunk has loaded. See [Lazy loading](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/agent-actions.md#lazy-loading).
+- Blocking only AI training in `robots.ai` (the recommended policy) no longer logs a notice that the agent files are still public. Blocking AI search still warns.
 
 ## 0.4.0 (2026-10-29)
 
