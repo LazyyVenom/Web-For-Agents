@@ -154,7 +154,7 @@ export function hoistSiteActions(pages: AgentMapPage[]): { actions: AgentActionD
   };
 }
 
-export function buildAgentMap(input: {
+interface AgentMapInput {
   siteUrl: string;
   siteName?: string;
   /** Absolute llms.txt URL. */
@@ -162,13 +162,22 @@ export function buildAgentMap(input: {
   pages: AgentMapPageInput[];
   /** List the actions found on every page once, in `site.actions`. Default true. */
   siteActions?: boolean;
-}): string {
+}
+
+/** The agent map as written to agents.json. */
+export function buildAgentMap(input: AgentMapInput): string {
+  return agentMapJson(agentMapOf(input));
+}
+
+const agentMapJson = (map: AgentMap): string => JSON.stringify(map, null, 2) + "\n";
+
+function agentMapOf(input: AgentMapInput): AgentMap {
   const site: AgentMap["site"] = { url: trimTrailingSlash(input.siteUrl) };
   if (input.siteName) site.name = input.siteName;
   const all = [...input.pages].sort(byRoute).map((p) => toPage(input.siteUrl, p));
   const hoisted = input.siteActions === false ? { actions: [], pages: all } : hoistSiteActions(all);
   if (hoisted.actions.length > 0) site.actions = hoisted.actions;
-  const map: AgentMap = {
+  return {
     version: AGENT_MAP_VERSION,
     generator: AGENT_MAP_GENERATOR,
     site,
@@ -176,7 +185,6 @@ export function buildAgentMap(input: {
     webmcp: { ...WEBMCP_INFO },
     pages: hoisted.pages,
   };
-  return JSON.stringify(map, null, 2) + "\n";
 }
 
 export function agentMapLlmsSection(siteUrl: string, fileName: string): LlmsSection {
@@ -227,9 +235,9 @@ export function agentMapExtension(opts: {
         if (p.mdUrl) page.markdown = p.mdUrl;
         return page;
       });
-      const json = buildAgentMap({ siteUrl, siteName: ctx.site.title, llmsUrl: ctx.llmsUrl, pages, siteActions });
-      summary = actionCountText(agentMapStats(JSON.parse(json) as AgentMap));
-      ctx.emitFile(fileName, json);
+      const map = agentMapOf({ siteUrl, siteName: ctx.site.title, llmsUrl: ctx.llmsUrl, pages, siteActions });
+      summary = actionCountText(agentMapStats(map));
+      ctx.emitFile(fileName, agentMapJson(map));
     },
     summary: () => summary,
   };
