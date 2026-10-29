@@ -196,6 +196,77 @@ describe("Seo prerendered head", () => {
   });
 });
 
+describe("Seo languages", () => {
+  const root = document.documentElement;
+  const hreflangs = () =>
+    [...document.head.querySelectorAll('link[rel="alternate"][hreflang]')].map((l) => `${l.getAttribute("hreflang")} ${l.getAttribute("href")}`);
+  const altLocales = () => [...document.head.querySelectorAll('meta[property="og:locale:alternate"]')].map((m) => m.getAttribute("content"));
+  beforeEach(() => {
+    root.setAttribute("lang", "en");
+    root.removeAttribute("dir");
+  });
+  afterEach(() => {
+    cleanup();
+    root.setAttribute("lang", "en");
+    root.removeAttribute("dir");
+  });
+
+  const Page = ({ lang }: { lang: "de" | "ar" | "none" }) =>
+    lang === "none" ? (
+      <Seo title="Plain" />
+    ) : (
+      <Seo
+        title={lang}
+        lang={lang}
+        locale={lang === "de" ? "de_DE" : "ar_EG"}
+        alternateLocales={["en_US"]}
+        alternates={[
+          { hrefLang: lang, href: `/${lang}/pricing` },
+          { hrefLang: lang === "de" ? "fr" : "he", href: "/other" },
+          { hrefLang: "x-default", href: "/pricing" },
+        ]}
+      />
+    );
+
+  it("sets <html lang> and dir, og:locale, og:locale:alternate and absolute hreflang links", () => {
+    render(
+      <SeoProvider defaults={{ siteUrl: "https://a.com", locale: "en_US" }}>
+        <Page lang="ar" />
+      </SeoProvider>,
+    );
+    expect([root.getAttribute("lang"), root.getAttribute("dir")]).toEqual(["ar", "rtl"]);
+    expect(meta('meta[property="og:locale"]')).toBe("ar_EG");
+    expect(altLocales()).toEqual(["en_US"]);
+    expect(hreflangs()).toEqual(["ar https://a.com/ar/pricing", "he https://a.com/other", "x-default https://a.com/pricing"]);
+  });
+
+  it("a route change replaces the alternates and lang, and leaves no stale hreflang", () => {
+    const tree = (lang: "de" | "ar" | "none") => (
+      <SeoProvider defaults={{ siteUrl: "https://a.com", lang: "en", locale: "en_US" }}>
+        <Page key={lang} lang={lang} />
+      </SeoProvider>
+    );
+    const { rerender } = render(tree("ar"));
+    rerender(tree("de"));
+    expect([root.getAttribute("lang"), root.getAttribute("dir")]).toEqual(["de", "ltr"]);
+    expect(hreflangs()).toEqual(["de https://a.com/de/pricing", "fr https://a.com/other", "x-default https://a.com/pricing"]);
+    rerender(tree("none"));
+    expect(hreflangs()).toEqual([]);
+    expect(altLocales()).toEqual([]);
+    expect(meta('meta[property="og:locale"]')).toBe("en_US");
+    // The provider's default lang is what remains.
+    expect([root.getAttribute("lang"), root.getAttribute("dir")]).toEqual(["en", "ltr"]);
+  });
+
+  it("unmounting everything restores the document's own lang and dir", () => {
+    const { unmount } = render(<Page lang="ar" />);
+    expect(root.getAttribute("dir")).toBe("rtl");
+    unmount();
+    expect([root.getAttribute("lang"), root.hasAttribute("dir")]).toEqual(["en", false]);
+    expect(hreflangs()).toEqual([]);
+  });
+});
+
 describe("default canonical", () => {
   const setPath = (path: string) => (window as unknown as { happyDOM: { setURL(u: string): void } }).happyDOM.setURL(`https://example.com${path}`);
   const canonical = () => document.head.querySelector('link[rel="canonical"]')?.getAttribute("href");

@@ -116,3 +116,56 @@ describe("buildHeadTags canonical", () => {
     expect(href(buildHeadTags({ canonical: "https://a b.com" }, { siteUrl: "https://x.com/sub" }))).toBe("https://a b.com");
   });
 });
+
+describe("buildHeadTags languages", () => {
+  const html = (tags: HeadTag[]) =>
+    Object.fromEntries(tags.filter((t) => t.kind === "html").map((t) => [t.key, t.kind === "html" ? t.attrs : undefined]));
+
+  it("lang sets <html lang> and a dir from the language, which dir overrides", () => {
+    expect(html(buildHeadTags({ lang: "de" }))).toEqual({ "html:lang": { lang: "de" }, "html:dir": { dir: "ltr" } });
+    expect(html(buildHeadTags({ lang: "ar-EG" }))).toEqual({ "html:lang": { lang: "ar-EG" }, "html:dir": { dir: "rtl" } });
+    for (const rtl of ["he", "fa", "ur", "yi", "ckb", "pa-Arab", "ps_AF"]) expect(html(buildHeadTags({ lang: rtl }))["html:dir"]).toEqual({ dir: "rtl" });
+    for (const ltr of ["en", "ja", "az-Latn", "hi", "arn"]) expect(html(buildHeadTags({ lang: ltr }))["html:dir"]).toEqual({ dir: "ltr" });
+    expect(html(buildHeadTags({ lang: "ar", dir: "auto" }))["html:dir"]).toEqual({ dir: "auto" });
+    expect(html(buildHeadTags({ dir: "rtl" }))).toEqual({ "html:dir": { dir: "rtl" } });
+    expect(html(buildHeadTags({}))).toEqual({});
+  });
+
+  it("a page lang beats the provider's lang and dir; the provider's apply otherwise", () => {
+    const defaults = { lang: "ar", dir: "rtl" as const };
+    expect(html(buildHeadTags({}, defaults))).toEqual({ "html:lang": { lang: "ar" }, "html:dir": { dir: "rtl" } });
+    expect(html(buildHeadTags({ lang: "en" }, defaults))).toEqual({ "html:lang": { lang: "en" }, "html:dir": { dir: "ltr" } });
+    expect(html(buildHeadTags({}, { lang: "he" }))["html:dir"]).toEqual({ dir: "rtl" });
+  });
+
+  it("locale sets og:locale over the provider's, and alternateLocales write og:locale:alternate", () => {
+    const t = buildHeadTags({ locale: "de_DE", alternateLocales: ["en_US", "de_DE", "fr_FR", "en_US"] }, { locale: "en_US" });
+    expect(content(t, "property:og:locale")).toBe("de_DE");
+    const alts = t.filter((x) => x.key.startsWith("alternate-locale:"));
+    expect(alts).toEqual([
+      { kind: "meta", key: "alternate-locale:en_US", attrs: { property: "og:locale:alternate", content: "en_US" } },
+      { kind: "meta", key: "alternate-locale:fr_FR", attrs: { property: "og:locale:alternate", content: "fr_FR" } },
+    ]);
+    const fromDefaults = buildHeadTags({}, { locale: "en_US", alternateLocales: ["de_DE"] });
+    expect(content(fromDefaults, "property:og:locale")).toBe("en_US");
+    expect(find(fromDefaults, "alternate-locale:de_DE")).toBeDefined();
+  });
+
+  it("alternates write hreflang links, absolute under siteUrl, x-default included", () => {
+    const t = buildHeadTags(
+      {
+        alternates: [
+          { hrefLang: "en", href: "/en/pricing" },
+          { hrefLang: "de", href: "de/preise" },
+          { hrefLang: "x-default", href: "https://other.example/pricing" },
+        ],
+      },
+      { siteUrl: "https://a.com/sub" },
+    );
+    expect(t.filter((x) => x.key.startsWith("hreflang:"))).toEqual([
+      { kind: "link", key: "hreflang:en", attrs: { rel: "alternate", hreflang: "en", href: "https://a.com/sub/en/pricing" } },
+      { kind: "link", key: "hreflang:de", attrs: { rel: "alternate", hreflang: "de", href: "https://a.com/sub/de/preise" } },
+      { kind: "link", key: "hreflang:x-default", attrs: { rel: "alternate", hreflang: "x-default", href: "https://other.example/pricing" } },
+    ]);
+  });
+});

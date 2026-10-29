@@ -75,6 +75,42 @@ describe("headManager", () => {
     expect(document.querySelectorAll("title")).toHaveLength(1);
   });
 
+  it("sets <html> attributes and restores the page's own value on removal", () => {
+    const root = document.documentElement;
+    root.setAttribute("lang", "en");
+    root.removeAttribute("dir");
+    applyHeadTags([
+      { kind: "html", key: "html:lang", attrs: { lang: "ar" } },
+      { kind: "html", key: "html:dir", attrs: { dir: "rtl" } },
+    ]);
+    expect([root.getAttribute("lang"), root.getAttribute("dir")]).toEqual(["ar", "rtl"]);
+    expect(document.head.querySelector("html, [lang]")).toBeNull();
+    applyHeadTags([{ kind: "html", key: "html:lang", attrs: { lang: "he" } }]);
+    removeHeadTag("html:lang");
+    removeHeadTag("html:dir");
+    expect([root.getAttribute("lang"), root.hasAttribute("dir")]).toEqual(["en", false]);
+  });
+
+  it("keeps hreflang alternates and og:locale:alternate tags apart by value", () => {
+    document.head.innerHTML = '<link rel="alternate" type="text/markdown" href="/x.md">';
+    const alt = (lang: string): HeadTag => ({
+      kind: "link",
+      key: `hreflang:${lang}`,
+      attrs: { rel: "alternate", hreflang: lang, href: `https://a.com/${lang}` },
+    });
+    const loc = (l: string): HeadTag => ({ kind: "meta", key: `alternate-locale:${l}`, attrs: { property: "og:locale:alternate", content: l } });
+    applyHeadTags([alt("en"), alt("de"), loc("en_US"), loc("de_DE")]);
+    expect(document.head.querySelectorAll('link[rel="alternate"][hreflang]')).toHaveLength(2);
+    expect(document.head.querySelectorAll('meta[property="og:locale:alternate"]')).toHaveLength(2);
+    removeHeadTag("hreflang:de");
+    removeHeadTag("alternate-locale:de_DE");
+    expect([...document.head.querySelectorAll("link[hreflang]")].map((l) => l.getAttribute("hreflang"))).toEqual(["en"]);
+    expect([...document.head.querySelectorAll('meta[property="og:locale:alternate"]')].map((m) => m.getAttribute("content"))).toEqual([
+      "en_US",
+    ]);
+    expect(document.head.querySelector('link[type="text/markdown"]')?.getAttribute("href")).toBe("/x.md");
+  });
+
   it("a repeated apply writes nothing to the DOM", () => {
     const tags: HeadTag[] = [
       { kind: "title", key: "title", text: "T" },
