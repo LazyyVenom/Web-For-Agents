@@ -11,7 +11,7 @@ function ok(body: string, contentType = "text/plain", url = URL_): FetchResult {
 }
 const SITEMAP_XML = (...locs: string[]) =>
   `<?xml version="1.0"?><urlset>${locs.map((l) => `<url><loc>${l}</loc></url>`).join("")}</urlset>`;
-const AGENT_MAP = '{"version":1,"pages":[]}';
+const AGENT_MAP = '{"version":2,"pages":[]}';
 const spa = (): FetchResult => ok("<!doctype html><div id=root></div>", "text/html");
 
 function pageHtml(over: { head?: string; text?: string } = {}): string {
@@ -257,17 +257,30 @@ describe("checks", () => {
     expect(custom.message).toBe("map.json not found at http://h/map.json");
     expect(custom.fix).toBe("Serve map.json; webForAgents() generates /agents.json from your marked agent actions.");
     expect(byId(inputs(), "llms-txt").message).toBe("/llms.txt found at http://h/llms.txt");
-    expect(byId(inputs(), "agent-map").message).toBe("Agent map found at http://h/agents.json");
+    expect(byId(inputs(), "agent-map").message).toBe("Agent map found at http://h/agents.json (0 pages, 0 actions)");
   });
 
-  it("agent map with another version warns", () => {
+  it("agent map with an unknown version warns", () => {
     const at = (body: string) =>
       byId(inputs({ agentMap: ok(body, "application/json", "http://h/agents.json") }), "agent-map");
-    const v2 = at('{"version":2,"pages":[]}');
-    expect(v2.status).toBe("warn");
-    expect(v2.message).toBe("http://h/agents.json has version 2; expected 1");
-    expect(v2.fix).toBe("Regenerate /agents.json with the current webForAgents().");
-    expect(at('{"pages":[]}').message).toBe("http://h/agents.json has version (none); expected 1");
+    const v3 = at('{"version":3,"pages":[]}');
+    expect(v3.status).toBe("warn");
+    expect(v3.message).toBe("http://h/agents.json has version 3; expected 1 or 2");
+    expect(v3.fix).toBe("Regenerate /agents.json with the current webForAgents().");
+    expect(at('{"pages":[]}').message).toBe("http://h/agents.json has version (none); expected 1 or 2");
+  });
+
+  it("agent map counts site-wide actions on every page, and still accepts version 1", () => {
+    const at = (map: unknown) =>
+      byId(inputs({ agentMap: ok(JSON.stringify(map), "application/json", "http://h/agents.json") }), "agent-map");
+    const a = (name: string) => ({ name, kind: "link" });
+    const v2 = at({ version: 2, site: { url: "http://h", actions: [a("terms"), a("help")] }, pages: [{ actions: [a("buy")] }, { actions: [] }] });
+    expect(v2.status).toBe("pass");
+    expect(v2.message).toBe("Agent map found at http://h/agents.json (2 pages, 5 actions; 2 site-wide)");
+    const v1 = at({ version: 1, site: { url: "http://h" }, pages: [{ actions: [a("terms"), a("buy")] }, { actions: [a("terms")] }] });
+    expect(v1.status).toBe("pass");
+    expect(v1.message).toBe("Agent map found at http://h/agents.json (2 pages, 3 actions)");
+    expect(at({ version: 2, pages: [{ actions: [a("x")] }] }).message).toBe("Agent map found at http://h/agents.json (1 page, 1 action)");
   });
 
   it("json-ld with only non-string @type warns", () => {
