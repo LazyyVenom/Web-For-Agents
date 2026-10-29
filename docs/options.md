@@ -59,7 +59,7 @@ export default defineConfig({
 | `llms` | `{ title?; description?; intro?; sections? } \| false` | Write `llms.txt` and `llms-full.txt`. Default on. |
 | `llms.intro` | `string` | Plain text after the summary in both files. Blank lines separate paragraphs. |
 | `llms.sections` | `Array<{ title: string; text?: string; links?: Array<{ title; url; description? }> }>` | Your own sections (an overview, key links, featured pages), written before `## Pages`. A link `url` is http(s), `mailto:`, or relative. A relative URL resolves against `siteUrl` plus `/`, using standard URL rules. With `siteUrl: "https://x.com/sub"`, `"pricing.pdf"` becomes `https://x.com/sub/pricing.pdf` and `"/pricing.pdf"` becomes `https://x.com/pricing.pdf` (the origin root). See [Custom sections](prerendering.md#custom-sections). |
-| `agentMap` | `boolean \| { fileName?: string }` | Write `agents.json` and link it from `llms.txt`. Needs prerender. Default `{ fileName: "agents.json" }`. |
+| `agentMap` | `boolean \| { fileName?: string; siteActions?: boolean }` | Write `agents.json` and link it from `llms.txt`. Needs prerender. `siteActions: false` repeats the actions found on every page on each page instead of listing them once in `site.actions` (see [agents.json](agent-actions.md#agentsjson)). Default `{ fileName: "agents.json", siteActions: true }`. |
 | `overlay` | `boolean \| { shortcut?: string; contentSelector?: string }` | Dev overlay, injected by `vite` (serve) only, under any `base` (e.g. `"/sub/"`), and skipped when Vitest runs. `false` disables it. Default on, shortcut `"alt+shift+a"`, `contentSelector` from `markdown.contentSelector` (else `"main"`). |
 
 ## Markdown transform

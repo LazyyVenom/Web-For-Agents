@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Possibly breaking
+
+- `agents.json` is now version 2. Actions found on every listed page with the same definition (name, kind, `href`, input schema, description and flags), such as footer links or a site search, are listed once in a new `site.actions` and left out of each page's `actions`. The actions on a page are now `site.actions` plus the page's `actions`. Tools that read only `pages[].actions` will miss site-wide actions. `agentMap: { siteActions: false }` (or `generate --no-site-actions`) keeps the per-page layout, byte for byte apart from `version`. See [agents.json](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/agent-actions.md#agentsjson).
+- `generate` prints one summary line, such as `[web-for-agents] wrote 47 files (20 pages, 207 actions; 9 site-wide)`, instead of the layout, the page list and every file written. Warnings are unchanged. Use `--verbose` for the full lists; `--json` is unchanged.
+
+### New
+
+- `agentMap.siteActions` (default `true`), `generate --no-site-actions` and `--verbose`.
+- The audit's agent map check accepts version 1 and 2 and counts pages and actions, site-wide ones included.
+- The plugin's build summary counts the actions in the agent map.
+
 ## 0.4.0 (2026-10-29)
 
 ### New

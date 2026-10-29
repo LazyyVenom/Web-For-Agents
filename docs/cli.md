@@ -21,6 +21,8 @@ A URL without a scheme gets `http://` for `localhost`, `127.0.0.1` and `[::1]`, 
 
 `robots.txt` is read from the site root. The sitemap URL comes from its `Sitemap:` line, or `/sitemap.xml` if there is none. `llms.txt` and `agents.json` are looked for at the root and in each parent directory of the page and of its markdown alternate link. For example, auditing `https://example.com/sub/` also tries `/sub/llms.txt` and `/sub/agents.json`, which covers sites deployed under a subpath. If more than one copy exists, the deepest one is used. A missing file's message lists every URL tried.
 
+The agent map check accepts `agents.json` version 1 or 2. Its message counts the pages and the actions available on them, site-wide ones included, for example `Agent map found at https://example.com/agents.json (20 pages, 207 actions; 9 site-wide)`.
+
 Checks and weights (total 100):
 
 | Check | Weight |
@@ -81,6 +83,8 @@ Flags:
 - `--config <file>` loads options from a `.json`, `.js` or `.mjs` file. A JS file default-exports the options object. Use a JS file for options that are functions or regular expressions, such as `markdown.transform` or `exclude`. Prefer `.mjs`: on Node 20 a `.js` file with `export default` only loads when your `package.json` has `"type": "module"`. Flags take precedence over the file. Keys that are not options (a typo such as `siteURL`, or `prerender`) are reported as a warning.
 - `--no-link-markdown` leaves your HTML files unchanged.
 - `--overwrite` replaces an existing `robots.txt`, `sitemap.xml`, `llms.txt`, `llms-full.txt` or `agents.json` whose content differs. By default such a file is kept, with a warning.
+- `--no-site-actions` lists the actions found on every page on each page of `agents.json`, instead of once in `site.actions` (see [agents.json](agent-actions.md#agentsjson)). The same as `agentMap: { siteActions: false }` in `--config`; other `agentMap` fields in the file are kept.
+- `--verbose` also prints the layout, the pages and every file written.
 - `--json` prints the result (pages found, layout, files written, files kept) as JSON.
 
 ```js
@@ -94,6 +98,14 @@ export default {
   },
 };
 ```
+
+By default `generate` prints one summary line, for example:
+
+```
+[web-for-agents] wrote 47 files (20 pages, 207 actions; 9 site-wide)
+```
+
+It counts the files written, the pages found (and how many are `noindex`, if any), the actions available across all listed pages (a site-wide action counts once per page) and how many of them are site-wide. `--verbose` adds the layout, the page list and the file list.
 
 `generate` does not need Vite: it works on any directory of HTML files. Warnings go to stderr. Exit codes: `0` ok, `2` usage error or failure. When it fails, nothing is written.
 

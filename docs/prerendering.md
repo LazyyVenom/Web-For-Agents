@@ -38,6 +38,8 @@ happy-dom 21 fails to load a module when a regex literal follows a character out
 
 Set `prerender: false` to skip all of this; `markdown`, `llms` and `agentMap` then turn off too, with a warning if you set them.
 
+The build logs warnings and one summary line, such as `[web-for-agents] prerendered 20 routes, 207 actions; 9 site-wide (20 listed in llms.txt and the sitemap)`. The action count is the actions available across all listed pages, where a site-wide action (see [agents.json](agent-actions.md#agentsjson)) counts once per page.
+
 ## Readiness
 
 A route is captured once the page has loaded, no `fetch`/XHR is in flight, and the DOM has been quiet for a moment (`prerender.idleMs`). If you load data some other way (timers, a custom client, a Suspense boundary), tell the renderer to wait:
@@ -281,9 +283,9 @@ Pages with `<meta name="robots" content="noindex">` get a `.md` file but stay ou
 
 Your HTML is changed only to add the markdown link, or to update the one `generate` added before. The file's encoding is detected (BOM, else `<meta charset>`, else UTF-8) and every other byte is left as it was, so a `windows-1252` page stays `windows-1252`. UTF-16 files are read but not changed. An existing `.md` file with different content is replaced, with a warning. Nothing is ever written through a symbolic link, so nothing lands outside `outDir`.
 
-The result lists the pages, the detected layout (`"flat"`, `"directory"` or `"mixed"`), the files written and the files kept. Nothing is written if any page fails, for example when `markdown.transform` throws.
+The result lists the pages, the detected layout (`"flat"`, `"directory"` or `"mixed"`), the files written and the files kept. The logger gets one summary line, such as `[web-for-agents] wrote 47 files (20 pages, 207 actions; 9 site-wide)`, plus warnings; the CLI prints the full lists only with `--verbose`. Nothing is written if any page fails, for example when `markdown.transform` throws.
 
-`agents.json` here comes from each page's static markup: elements with `data-agent-action` (what `useAgentAction` and `AgentForm` render) and WebMCP `<form toolname>` forms, with form fields as the input schema. An action registered with only a `handler` and no element exists only while your app runs, so it is not listed in this mode.
+`agents.json` here comes from each page's static markup, with the same layout as the plugin's (actions on every page are listed once in `site.actions`; `agentMap: { siteActions: false }` or `--no-site-actions` repeats them on each page): elements with `data-agent-action` (what `useAgentAction` and `AgentForm` render) and WebMCP `<form toolname>` forms, with form fields as the input schema. An action registered with only a `handler` and no element exists only while your app runs, so it is not listed in this mode.
 
 The plugin can also write flat files itself: set `prerender.fileLayout: "flat"` to write `/about` as `about.html` instead of `about/index.html`. See [Flat file layout](#flat-file-layout).
 
