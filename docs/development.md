@@ -34,7 +34,7 @@ Releases are published by `.github/workflows/release.yml` when a version tag is 
 2. Bump the version without tagging: `npm version 0.4.0 --no-git-tag-version`.
 3. Update `CHANGELOG.md` and commit.
 4. Tag and push: `git tag v0.4.0 && git push origin master v0.4.0`.
-5. Watch the "Release" run on the Actions tab.
+5. Watch the "Release" run on the Actions tab. GitHub skips the push event when the tagged commit's message contains `[skip ci]`; in that case start it by hand with `gh workflow run release.yml --ref v0.4.0` (or "Run workflow" on the tag).
 6. Approve the staged version: `npm stage list @anubhav-choubey/web-for-agents`, then `npm stage approve <stage-id>` (asks for 2FA), or approve it on npmjs.com. Check it with `npm view @anubhav-choubey/web-for-agents version`.
 
 ### One-time npm setup
