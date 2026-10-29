@@ -51,6 +51,7 @@ Requirements: npm CLI 11.5.1 or later (the workflow pins npm 12.2.1; update it d
 - Create a GitHub environment named `release` (Settings, Environments) with required reviewers, add `environment: release` to the `publish` job, and enter `release` in the environment field of npm's trusted-publisher settings. Do these together, or publishing fails.
 - Add a tag protection rule (or a ruleset) for `v*` tags so only maintainers can create them.
 - npm runs `prepare` (the build) only for git and local-folder installs, never for installs from the registry. pnpm 10 blocks build scripts for git dependencies by default; allow them with `pnpm.onlyBuiltDependencies`.
+- To use an unreleased version, install from git: `npm i github:LazyyVenom/Web-For-Agents`. npm installs the devDependencies for a git install, so the build works. A folder install (`npm i ../web-for-agents`) of a fresh clone fails with `tsup: command not found`, because npm does not install the folder's devDependencies before `prepare`. Run `npm ci` in the clone first.
 
 ## Troubleshooting
 
