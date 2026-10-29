@@ -47,6 +47,15 @@ describe("safeText / BIDI_CHARS (the one sanitizer, shared by the CLI and the bu
     expect(new RegExp(`^[${BIDI_CHARS}]+$`).test("\u061c\u200e\u200f\u202a\u202e\u2066\u2069")).toBe(true);
   });
 
+  it("removes exactly the BIDI_CHARS characters", () => {
+    const listed = new RegExp(`^[${BIDI_CHARS}]$`);
+    for (let c = 0x500; c <= 0x2100; c++) {
+      const ch = String.fromCharCode(c);
+      if (/\s/.test(ch)) continue;
+      expect(safeText(`a${ch}b`, 10) === "ab", c.toString(16)).toBe(listed.test(ch));
+    }
+  });
+
   it("is written with escapes: shared/text.ts has no literal invisible or bidi characters", () => {
     const source = readFileSync(path.resolve(__dirname, "../../src/shared/text.ts"), "utf8");
     expect(source).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/);

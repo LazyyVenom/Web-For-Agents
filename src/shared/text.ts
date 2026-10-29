@@ -23,7 +23,8 @@ const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
  * character class. Written as escapes: the source holds no invisible characters.
  */
 export const BIDI_CHARS = "\\u061c\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069";
-const BIDI = new RegExp(`[${BIDI_CHARS}]`, "g");
+/** BIDI_CHARS as a regex literal, which bundlers can drop where it is unused (a test keeps the two in step). */
+const BIDI = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
 
 /**
  * Makes a page-derived string safe to print on one line, in a terminal or a build log: control
