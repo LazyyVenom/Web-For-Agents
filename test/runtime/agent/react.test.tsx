@@ -47,6 +47,25 @@ describe("React API", () => {
     expect(form.getAttribute("aria-description")).toBe("Send a message");
     expect(form.getAttribute("data-agent-destructive")).toBe("true");
     expect(container.querySelector("input")!.getAttribute("data-agent-param")).toBe("Your email");
+    expect(form.hasAttribute("data-agent-readonly")).toBe(false);
+  });
+
+  it("writes data-agent-readonly only for readOnly actions", async () => {
+    function Button() {
+      const a = useAgentAction({ name: "ro-button", description: "d", readOnly: true, handler: () => 1 });
+      return <button ref={a.ref} {...a.hintProps}>b</button>;
+    }
+    await render(
+      <>
+        <Button />
+        <AgentForm agent={{ name: "ro-form", description: "d", readOnly: true }}><input name="q" /></AgentForm>
+        <AgentForm agent={{ name: "rw-form", description: "d", readOnly: false }}><input name="q" /></AgentForm>
+      </>,
+    );
+    const ro = (n: string) => container.querySelector(`[data-agent-action="${n}"]`)!.getAttribute("data-agent-readonly");
+    expect(ro("ro-button")).toBe("true");
+    expect(ro("ro-form")).toBe("true");
+    expect(ro("rw-form")).toBeNull();
   });
 
   it("writes the true kind in data-agent-kind", async () => {

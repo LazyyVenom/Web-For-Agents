@@ -1,6 +1,16 @@
 import { Window } from "happy-dom";
 import { describe, expect, it } from "vitest";
-import { actionGroups, firstPerName, linkActions, markupActions, markupKind, markupLinks, resolveLinkHref } from "../../src/shared/markupActions";
+import {
+  actionGroups,
+  differingDuplicates,
+  firstPerName,
+  linkActions,
+  markupActions,
+  markupDefinitions,
+  markupKind,
+  markupLinks,
+  resolveLinkHref,
+} from "../../src/shared/markupActions";
 import { staticActions } from "../../src/vite/generateActions";
 import { collectPageReport } from "../../src/overlay/collect";
 
@@ -16,10 +26,10 @@ describe("markupActions", () => {
       <form toolname="contact"></form>`;
     const list = markupActions(doc).map(({ element, ...rest }) => ({ tag: element.tagName, ...rest }));
     expect(list).toEqual([
-      { tag: "BUTTON", name: "buy", description: "Buy it", kind: "click", destructive: true, source: "markup" },
-      { tag: "FORM", name: "contact", description: null, kind: "form", destructive: false, source: "markup" },
-      { tag: "FORM", name: "search", description: "Search posts", kind: "form", destructive: false, source: "webmcp-declarative" },
-      { tag: "FORM", name: "contact", description: null, kind: "form", destructive: false, source: "webmcp-declarative" },
+      { tag: "BUTTON", name: "buy", description: "Buy it", kind: "click", destructive: true, readOnly: false, source: "markup" },
+      { tag: "FORM", name: "contact", description: null, kind: "form", destructive: false, readOnly: false, source: "markup" },
+      { tag: "FORM", name: "search", description: "Search posts", kind: "form", destructive: false, readOnly: false, source: "webmcp-declarative" },
+      { tag: "FORM", name: "contact", description: null, kind: "form", destructive: false, readOnly: false, source: "webmcp-declarative" },
     ]);
     window.happyDOM.close();
   });
@@ -117,10 +127,10 @@ describe("link actions", () => {
       <button data-agent-action="btn">x</button>`;
     const list = markupActions(d).map(({ element, ...rest }) => rest);
     expect(list).toEqual([
-      { name: "open-resume", description: "Resume", kind: "link", destructive: true, source: "markup", href: "/cv.pdf" },
-      { name: "no-href", description: null, kind: "click", destructive: false, source: "markup" },
-      { name: "empty-href", description: null, kind: "link", destructive: false, source: "markup", href: "" },
-      { name: "btn", description: null, kind: "click", destructive: false, source: "markup" },
+      { name: "open-resume", description: "Resume", kind: "link", destructive: true, readOnly: false, source: "markup", href: "/cv.pdf" },
+      { name: "no-href", description: null, kind: "click", destructive: false, readOnly: false, source: "markup" },
+      { name: "empty-href", description: null, kind: "link", destructive: false, readOnly: false, source: "markup", href: "" },
+      { name: "btn", description: null, kind: "click", destructive: false, readOnly: false, source: "markup" },
     ]);
     expect(markupLinks(d)).toEqual([
       { name: "open-resume", description: "Resume", destructive: true, href: "/cv.pdf" },
@@ -181,6 +191,42 @@ describe("link actions", () => {
       'link action "bad name" on /about skipped: invalid name (use 1-128 chars of A-Z a-z 0-9 _ - .)',
       'link action "evil" on /about skipped: javascript: links are not allowed (only http(s), mailto: and tel:)',
     ]);
+  });
+});
+
+describe("readOnly markup", () => {
+  it("generate's static actions read data-agent-readonly", () => {
+    const window = new Window();
+    const doc = window.document as unknown as Document;
+    doc.body.innerHTML = `
+      <form data-agent-action="search" data-agent-kind="form" data-agent-readonly="true"><input name="q"></form>
+      <button data-agent-action="buy" data-agent-kind="click"></button>`;
+    expect(markupActions(doc).map((a) => [a.name, a.readOnly])).toEqual([["search", true], ["buy", false]]);
+    expect(staticActions(doc).map((a) => [a.name, a.readOnly])).toEqual([["buy", false], ["search", true]]);
+    window.happyDOM.close();
+  });
+});
+
+describe("markupDefinitions / differingDuplicates", () => {
+  it("reports a name only when its elements define it differently, with the number of definitions", () => {
+    const window = new Window();
+    const doc = window.document as unknown as Document;
+    doc.body.innerHTML = `
+      <button data-agent-action="add_to_cart" data-agent-description="Add A" data-agent-kind="handler"></button>
+      <button data-agent-action="add_to_cart" data-agent-description="Add B" data-agent-kind="handler"></button>
+      <button data-agent-action="add_to_cart" data-agent-description="Add A" data-agent-kind="handler"></button>
+      <button data-agent-action="wish" data-agent-description="Wish" data-agent-kind="handler"></button>
+      <button data-agent-action="wish" data-agent-description="Wish" data-agent-kind="handler"></button>
+      <a href="/a" data-agent-action="docs" data-agent-kind="link"></a>
+      <a href="/b" data-agent-action="docs" data-agent-kind="link"></a>
+      <form data-agent-action="find" data-agent-readonly="true"></form>
+      <form data-agent-action="find"></form>
+      <form toolname="wish"></form>`;
+    const defs = markupDefinitions(doc);
+    expect(defs).toHaveLength(9);
+    expect(differingDuplicates(defs)).toEqual([["add_to_cart", 2], ["docs", 2], ["find", 2]]);
+    expect(differingDuplicates([])).toEqual([]);
+    window.happyDOM.close();
   });
 });
 

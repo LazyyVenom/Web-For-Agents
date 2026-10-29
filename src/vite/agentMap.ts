@@ -3,10 +3,17 @@ import {
   ACTION_DESCRIPTION_ATTR,
   ACTION_DESTRUCTIVE_ATTR,
   ACTION_KIND_ATTR,
+  ACTION_READONLY_ATTR,
   AGENT_GLOBAL,
   LINK_ACTION_SELECTOR,
 } from "../shared/conventions";
-import { firstPerName, linkActions, type LinkActionMarkup } from "../shared/markupActions";
+import {
+  differingDuplicates,
+  firstPerName,
+  linkActions,
+  type LinkActionMarkup,
+  type MarkupDefinition,
+} from "../shared/markupActions";
 import {
   AGENT_MAP_VERSION,
   actionCountText,
@@ -32,6 +39,8 @@ export interface AgentPageData {
   actions: AgentActionDescriptor[];
   /** Link actions in the markup, hrefs not yet checked: `linkActions` resolves them at finalize. */
   links?: LinkActionMarkup[];
+  /** Every action element's hint attributes (see markupDefinitions), to report names defined differently on one page. */
+  markup?: MarkupDefinition[];
 }
 
 /** The argument of collectAgentPageInPage: the conventions it reads, passed in as JSON. */
@@ -41,6 +50,7 @@ export interface AgentPageInPageArg {
   nameAttr: string;
   descriptionAttr: string;
   destructiveAttr: string;
+  readOnlyAttr: string;
   kindAttr: string;
 }
 
@@ -50,18 +60,33 @@ export const AGENT_PAGE_IN_PAGE_ARG: AgentPageInPageArg = {
   nameAttr: ACTION_ATTR,
   descriptionAttr: ACTION_DESCRIPTION_ATTR,
   destructiveAttr: ACTION_DESTRUCTIVE_ATTR,
+  readOnlyAttr: ACTION_READONLY_ATTR,
   kindAttr: ACTION_KIND_ATTR,
 };
 
 /**
  * Runs inside the page (happy-dom or Chrome). Must stay self-contained: no imports or outer
- * helpers, so it survives toString() / page.evaluate. Reads the registry global and the raw link
- * action markup (same fields as markupLinks); hrefs are checked outside the page, never followed.
+ * helpers, so it survives toString() / page.evaluate. Reads the registry global, the raw link
+ * action markup (same fields as markupLinks) and every action element's hint attributes (same
+ * fields as markupDefinitions); hrefs are checked outside the page, never followed.
  * An `<a href>` whose kind attribute names another kind ("handler", "click") is not a link action.
  */
 export function collectAgentPageInPage(arg: AgentPageInPageArg): AgentPageData {
   const api = (window as unknown as Record<string, Partial<AgentGlobal> | undefined>)[arg.globalKey];
   const actions = api && typeof api.actions === "function" ? api.actions() : [];
+  const markup: MarkupDefinition[] = [];
+  document.querySelectorAll(`[${arg.nameAttr}]`).forEach((el) => {
+    const name = (el.getAttribute(arg.nameAttr) || "").trim();
+    if (!name) return;
+    markup.push({
+      name,
+      kind: (el.getAttribute(arg.kindAttr) || "").trim(),
+      description: el.getAttribute(arg.descriptionAttr) ?? "",
+      destructive: el.getAttribute(arg.destructiveAttr) === "true",
+      readOnly: el.getAttribute(arg.readOnlyAttr) === "true",
+      href: el.tagName === "A" ? el.getAttribute("href") : null,
+    });
+  });
   const links: LinkActionMarkup[] = [];
   document.querySelectorAll(arg.linkSelector).forEach((el) => {
     const name = (el.getAttribute(arg.nameAttr) || "").trim();
@@ -74,7 +99,7 @@ export function collectAgentPageInPage(arg: AgentPageInPageArg): AgentPageData {
       href: el.getAttribute("href") || "",
     });
   });
-  return { actions, links };
+  return { actions, links, markup };
 }
 
 export interface AgentMapPageInput {
@@ -185,6 +210,10 @@ export function agentMapExtension(opts: {
       const pages = ctx.pages.map((p): AgentMapPageInput => {
         const found = data.get(p.route);
         const actions = found?.actions ?? [];
+        // Identical copies (a product grid) are normal; differing ones lose all but the first.
+        for (const [name, n] of differingDuplicates(found?.markup ?? [])) {
+          ctx.warn(`${p.route}: ${n} different actions named ${name}; only the first is listed`);
+        }
         // Same rules on both paths; actions found another way win over links of the same name.
         const links = linkActions(
           found?.links ?? [],

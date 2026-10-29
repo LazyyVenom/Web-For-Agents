@@ -41,6 +41,8 @@ export function markdownPathFor(pathname: string): string {
 export const ACTION_ATTR = "data-agent-action";
 export const ACTION_DESCRIPTION_ATTR = "data-agent-description";
 export const ACTION_DESTRUCTIVE_ATTR = "data-agent-destructive";
+/** Written as "true" by the runtime hint props for a `readOnly` action, so `generate` lists it as readOnly. */
+export const ACTION_READONLY_ATTR = "data-agent-readonly";
 export const ACTION_PARAM_ATTR = "data-agent-param";
 export const WEBMCP_TOOLNAME_ATTR = "toolname";
 export const WEBMCP_TOOLDESCRIPTION_ATTR = "tooldescription";

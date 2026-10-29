@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Window } from "happy-dom";
 import { AGENT_GLOBAL } from "../../src/shared/conventions";
+import { markupDefinitions } from "../../src/shared/markupActions";
 import { inPageExpression } from "../../src/vite/prerender/extensions";
 import {
   AGENT_PAGE_IN_PAGE_ARG,
@@ -40,11 +41,11 @@ describe("collectAgentPageInPage", () => {
     const data = run((w) => {
       (w as any)[AGENT_GLOBAL] = { version: 1, actions: () => [desc] };
     });
-    expect(data).toEqual({ actions: [desc], links: [] });
+    expect(data).toEqual({ actions: [desc], links: [], markup: [] });
   });
 
   it("defaults to no actions", () => {
-    expect(run(() => {})).toEqual({ actions: [], links: [] });
+    expect(run(() => {})).toEqual({ actions: [], links: [], markup: [] });
   });
 
   it("collects raw link action markup without resolving or following it", () => {
@@ -64,6 +65,22 @@ describe("collectAgentPageInPage", () => {
       { name: "bad", description: null, destructive: true, href: "javascript:alert(1)" },
       { name: "kind-link", description: null, destructive: false, href: "/k" },
     ]);
+  });
+
+  it("collects every action element's hint attributes exactly as generate's markupDefinitions does", () => {
+    const html = `
+      <button data-agent-action=" buy " data-agent-description="Buy A" data-agent-kind="handler" data-agent-readonly="true">x</button>
+      <form data-agent-action="find" data-agent-destructive="true"></form>
+      <a href="/k" data-agent-action="docs" data-agent-kind="link">x</a>
+      <a data-agent-action="no-href">x</a>
+      <div data-agent-action="  "></div>
+      <form toolname="declared"></form>`;
+    const data = run((w) => void (w.document.body.innerHTML = html));
+    const w = new Window();
+    w.document.body.innerHTML = html;
+    expect(data.markup).toEqual(markupDefinitions(w.document as unknown as Document));
+    expect(data.markup.map((d: any) => d.name)).toEqual(["buy", "find", "docs", "no-href"]);
+    w.happyDOM.close();
   });
 });
 
@@ -361,13 +378,35 @@ describe("agentMapExtension summary and siteActions", () => {
   it("hoists by default and sums up the actions", async () => {
     const { ext, map } = await finalize();
     expect(map.site.actions.map((a: any) => a.name)).toEqual(["newsletter"]);
-    expect(ext.summary!()).toBe("3 actions; 1 site-wide");
+    expect(ext.summary!()).toBe("2 actions (1 page-specific, 1 site-wide)");
   });
 
-  it("keeps per-page actions with siteActions: false; the count is the same", async () => {
+  it("keeps per-page actions with siteActions: false and counts them per page", async () => {
     const { ext, map } = await finalize(false);
     expect(map.site).not.toHaveProperty("actions");
     expect(ext.summary!()).toBe("3 actions");
+  });
+});
+
+describe("agentMapExtension duplicate names", () => {
+  it("warns once per listed page and name defined differently; identical copies stay silent", async () => {
+    const def = (name: string, description: string) => ({ name, kind: "handler", description, destructive: false, readOnly: false, href: null });
+    const ext = agentMapExtension({ siteUrl: "https://a.com", fileName: "agents.json" });
+    const grid = [def("add_to_cart", "Add A"), def("add_to_cart", "Add B"), def("add_to_cart", "Add C"), def("wish", "W"), def("wish", "W")];
+    await ext.onRoute!("/products", { actions: [{ ...desc, name: "add_to_cart" }], markup: grid });
+    await ext.onRoute!("/deals", { actions: [], markup: [def("wish", "W"), def("wish", "W")] });
+    await ext.onRoute!("/hidden", { actions: [], markup: grid });
+    const warnings: string[] = [];
+    await ext.finalize!({
+      site: { url: "https://a.com", title: "Site" },
+      pages: [
+        { route: "/deals", title: "Deals", url: "https://a.com/deals" },
+        { route: "/products", title: "Products", url: "https://a.com/products" },
+      ],
+      emitFile: () => {},
+      warn: (m) => void warnings.push(m),
+    });
+    expect(warnings).toEqual(["/products: 3 different actions named add_to_cart; only the first is listed"]);
   });
 });
 

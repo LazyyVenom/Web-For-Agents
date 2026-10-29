@@ -47,7 +47,7 @@ export function useAgentAction<I = Record<string, unknown>, R = unknown>(
 
   // The kind is known at render time (also during SSR) only from the spec: a handler runs code;
   // without one the action clicks its element. AgentForm says "form" itself.
-  return { ref, hintProps: buildHintProps(name, description, hasHandler ? "handler" : "click", destructive) };
+  return { ref, hintProps: buildHintProps(name, description, hasHandler ? "handler" : "click", destructive, readOnly) };
 }
 
 /** A `<form>` registered as an agent action. Without a `handler`, its fields define the input and the form is submitted. */

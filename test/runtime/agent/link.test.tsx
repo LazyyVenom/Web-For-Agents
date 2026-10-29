@@ -18,6 +18,10 @@ describe("agentLinkProps", () => {
     expect(listAgentActions()).toEqual([]);
   });
 
+  it("never writes the read-only hint on a link (links are readOnly unless destructive)", () => {
+    expect(agentLinkProps({ name: "x", description: "X" })).not.toHaveProperty("data-agent-readonly");
+  });
+
   it("throws on an invalid name", () => {
     expect(() => agentLinkProps({ name: "has space", description: "x" })).toThrow(/invalid action name/);
   });
