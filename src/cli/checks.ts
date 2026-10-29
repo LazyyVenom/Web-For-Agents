@@ -5,7 +5,7 @@ import { errorMessage } from "../shared/errors";
 import { jsonLdNodes, jsonLdTypes } from "../shared/jsonLd";
 import { DESCRIPTION_MAX_CHARS, DESCRIPTION_MIN_CHARS, metaLength, TITLE_MAX_CHARS } from "../shared/metaLength";
 import { checkSchemaNodes, SCHEMA_RULES, type SchemaIssue, type SchemaRule } from "../shared/schemaRules";
-import { stripBom } from "../shared/text";
+import { plural, stripBom } from "../shared/text";
 import { hasScheme, trimTrailingSlash, tryResolveUrl } from "../shared/url";
 import { isOk, looksLikeHtml, MAX_BODY_BYTES, type FetchResult } from "./fetch";
 import { getLinks, getMeta, type HtmlFacts } from "./html";
@@ -227,7 +227,7 @@ function checkJsonLd({ html }: AuditInputs): Outcome {
     return warn("JSON-LD parses but has no @type", "Add an @type (for example Organization) to your JSON-LD.");
   }
   const { issues, total, scored } = checkSchemaNodes(parsed.flatMap(jsonLdNodes), SCHEMA_ISSUES_SHOWN);
-  const base = `${parsed.length} JSON-LD block${parsed.length === 1 ? " parses" : "s parse"} with an @type`;
+  const base = `${plural(parsed.length, "JSON-LD block")} ${parsed.length === 1 ? "parses" : "parse"} with an @type`;
   if (total === 0) return pass(base);
   // Issues come scored first. Gaps in retired rich results (FAQPage) never lower the score: they
   // follow as a note, after the gaps that do.
@@ -384,7 +384,7 @@ function checkAgentMap({ agentMap, tried, agentMapPath }: AuditInputs): Outcome 
     );
   }
   const stats = agentMapStats(map);
-  return pass(`Agent map found at ${at} (${stats.pages} page${stats.pages === 1 ? "" : "s"}, ${actionCountText(stats)})`);
+  return pass(`Agent map found at ${at} (${plural(stats.pages, "page")}, ${actionCountText(stats)})`);
 }
 
 const CHECKS: Record<CheckId, (i: AuditInputs) => Outcome> = {

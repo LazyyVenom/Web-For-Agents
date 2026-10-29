@@ -1,3 +1,4 @@
+import { plural } from "../shared/text";
 import type { AuditReport } from "./audit";
 import { MAX_BODY_BYTES } from "./fetch";
 import { MAX_SITEMAP_FILES, type SiteAuditReport } from "./siteAudit";
@@ -48,8 +49,6 @@ function pathOf(url: string, origin: string): string {
     return shown;
   }
 }
-
-const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /**
  * The `--sitemap` report: one row per page (path, score, the checks that lost the most points),

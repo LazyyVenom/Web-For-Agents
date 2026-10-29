@@ -1,5 +1,6 @@
 import { ROBOTS_PATH, SITEMAP_PATH } from "../shared/conventions";
 import { errorMessage } from "../shared/errors";
+import { plural } from "../shared/text";
 import { tryResolveUrl } from "../shared/url";
 import {
   HTML_ACCEPT,
@@ -363,7 +364,7 @@ export async function auditSiteWithHooks(url: string, opts: SiteAuditOptions = {
         limits,
       },
     );
-    if (tooLong > 0) note(`skipped ${tooLong} sitemap URL${tooLong === 1 ? "" : "s"} longer than ${MAX_URL_CHARS} characters`);
+    if (tooLong > 0) note(`skipped ${plural(tooLong, "sitemap URL")} longer than ${MAX_URL_CHARS} characters`);
 
     const urls = [...pageSet];
     summary.listed = urls.length;
