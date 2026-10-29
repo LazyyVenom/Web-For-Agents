@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { audit, runCli } from "../../src/cli/index";
+import { auditWithHooks, sameSite, type AuditHooks } from "../../src/cli/audit";
+import { audit, formatSiteText, runCli } from "../../src/cli/index";
+import { auditSiteWithHooks } from "../../src/cli/siteAudit";
 import { wellFormedPage } from "../helpers/page";
 import { useTestServers, type Route } from "../helpers/server";
 
 const serve = useTestServers();
+
+/** Public DNS for tests: every name resolves to the test server's 127.0.0.1, and every address counts as public. */
+const publicDns: AuditHooks = {
+  isPrivateHost: async () => false,
+  isPrivateIp: () => false,
+  lookup: async () => [{ address: "127.0.0.1", family: 4 }],
+};
 
 async function run(argv: string[]) {
   let out = "";
@@ -44,6 +53,35 @@ async function site(routes: (base: string) => Record<string, Route>, fallback?: 
   });
   built = routes(s.url);
   return { url: s.url, hits };
+}
+
+/**
+ * One server for http://example.test:<port> and http://www.example.test:<port> (resolve them with
+ * publicDns): the apex redirects every request to www, which serves `routes(apex)` and an SPA shell
+ * for any other path. Counts requests per host.
+ */
+async function apexAndWww(routes: (apex: string) => Record<string, Route>) {
+  const hits = { apex: 0, www: 0 };
+  let built: Record<string, Route> = {};
+  const s = await serve({}, (req, res) => {
+    const host = req.headers.host ?? "";
+    if (host.startsWith("example.test")) {
+      hits.apex++;
+      res.writeHead(301, { location: `http://www.${host}${req.url}` });
+      res.end();
+      return;
+    }
+    hits.www++;
+    const path = (req.url ?? "/").split("?")[0]!;
+    const route: Route | undefined = Object.prototype.hasOwnProperty.call(built, path) ? built[path] : { headers: htmlH, body: spaShell };
+    if (typeof route === "function") return route(req, res);
+    res.writeHead(route!.status ?? 200, route!.headers ?? {});
+    res.end(route!.body ?? "");
+  });
+  const port = new URL(s.url).port;
+  const apex = `http://example.test:${port}`;
+  built = routes(apex);
+  return { apex, www: `http://www.example.test:${port}`, hits };
 }
 
 const page = (base: string, path: string, md = path === "/" ? "/index.md" : `${path}.md`): Route => ({
@@ -176,7 +214,10 @@ describe("audit --sitemap", () => {
     expect(row("/app")).toMatch(/^\/app\s+\d+\s+Content without JavaScript, JSON-LD, Meta description$/);
     expect(row("/gone")).toMatch(/^\/gone\s+0\s+error: HTTP 404$/);
     expect(out).toMatch(/Pages: 3 audited, min 0, average \d+(\.\d)?, 2 below --min-score 80 \(1 failed to load\)\n$/);
-    expect(err).toContain("2 of 3 pages are below --min-score 80");
+    // The summary line says it; stderr repeats it only with --json, where stdout is JSON.
+    expect(err).toBe("");
+    const json = await run(["audit", s.url, "--sitemap", "--min-score", "80", "--json"]);
+    expect(json.err).toContain("2 of 3 pages are below --min-score 80");
   });
 
   it("exits 0 when every page meets --min-score, and 2 when the sitemap has no pages", async () => {
@@ -199,6 +240,9 @@ describe("audit --sitemap", () => {
     expect(t.code).toBe(2);
     expect(t.out).toContain("Error: no pages to audit: no sitemap found");
     expect(t.out).toContain("Fix: Serve /sitemap.xml");
+    // Said once: no per-file warning repeating it, nothing on stderr.
+    expect(t.out.match(/HTTP 404/g)).toHaveLength(1);
+    expect(t.err).toBe("");
   });
 
   it("a large store sitemap is cut at the default --max-pages and the output says so", async () => {
@@ -256,56 +300,62 @@ describe("audit --sitemap", () => {
     expect(other.hits.size).toBe(0);
     const text = await run(["audit", s.url, "--sitemap"]);
     expect(text.out).toMatch(/^\/old → \/new\s+\d+/m);
-    expect(text.err).toContain("1 of 2 pages failed to load");
+    expect(text.out).toMatch(/Pages: 2 audited, .*, 1 failed to load\n$/);
+    expect(text.err).toBe("");
   });
 
-  it("an entry URL that redirects to another origin (apex to www) adopts that origin for the run", async () => {
-    // `apex` redirects every request to `www`; the site was built for apex, so its files list apex URLs.
-    let apexUrl = "";
-    const www = await site(() => ({
-      ...siteFiles(`${apexUrl}/sitemap.xml`),
-      "/sitemap.xml": { headers: xmlH, body: urlset([`${apexUrl}/`, `${apexUrl}/docs`, "https://elsewhere.example/x"]) },
-    }), { headers: htmlH, body: spaShell });
-    const apex = await site(() => ({}), (req, res) => {
-      res.writeHead(301, { location: `${www.url}${req.url}` });
-      res.end();
-    });
-    apexUrl = apex.url;
-    const { code, out } = await run(["audit", apex.url + "/", "--sitemap", "--json"]);
-    expect(code).toBe(0);
-    const report = JSON.parse(out) as SiteJson & { summary: { resolvedOrigin?: string } };
-    expect(report.summary.resolvedOrigin).toBe(www.url);
-    expect(report.site.origin).toBe(www.url);
-    expect(report.site.notes).toEqual([`${apex.url}/ redirects to ${www.url}/; auditing ${www.url}`]);
-    expect(report.pages.map((p) => p.url)).toEqual([`${www.url}/`, `${www.url}/docs`]);
+  it("an entry that redirects to its www host adopts that origin for the run", async () => {
+    // One server answers both names; the site was built for the apex, so its files list apex URLs.
+    const { apex, www, hits } = await apexAndWww((base) => ({
+      ...siteFiles(`${base}/sitemap.xml`),
+      "/sitemap.xml": { headers: xmlH, body: urlset([`${base}/`, `${base}/docs`, "https://elsewhere.example/x"]) },
+    }));
+    const report = await auditSiteWithHooks(apex + "/", { timeoutMs: 3000 }, publicDns);
+    expect(report.site.error).toBeUndefined();
+    expect(report.summary.resolvedOrigin).toBe(www);
+    expect(report.site.origin).toBe(www);
+    expect(report.site.notes).toEqual([`${apex}/ redirects to ${www}/; auditing ${www}`]);
+    expect(report.pages.map((p) => p.url)).toEqual([`${www}/`, `${www}/docs`]);
     expect(report.site.skipped.map((k) => k.url)).toEqual(["https://elsewhere.example/x"]);
     // Only the entry request goes to the given origin; everything else goes to the resolved one.
-    expect([...apex.hits.values()].reduce((a, b) => a + b, 0)).toBe(1);
-    for (const p of report.pages) expect(p.score).toBe((await audit(p.url, { timeoutMs: 5000 })).score);
-
-    const text = await run(["audit", apex.url, "--sitemap"]);
-    expect(text.out).toContain(`Note: ${apex.url}/ redirects to ${www.url}/; auditing ${www.url}`);
+    expect(hits.apex).toBe(1);
+    for (const p of report.pages) expect(p.score).toBe((await auditWithHooks(p.url, { timeoutMs: 3000 }, publicDns)).score);
+    expect(formatSiteText(report)).toContain(`Note: ${apex}/ redirects to ${www}/; auditing ${www}`);
   });
 
-  it("with --site-url and a redirecting entry, both the given and the --site-url origin map to the resolved origin", async () => {
+  it("with --site-url and a www redirect, both the given and the --site-url origin map to the resolved origin", async () => {
     const PROD = "https://prod.example";
-    let apexUrl = "";
-    const www = await site(() => ({
+    const { apex, www } = await apexAndWww((base) => ({
       ...siteFiles(),
-      "/sitemap.xml": { headers: xmlH, body: urlset([`${PROD}/a`, `${apexUrl}/b`]) },
-    }), { headers: htmlH, body: spaShell });
-    const apex = await site(() => ({}), (req, res) => {
-      res.writeHead(308, { location: `${www.url}${req.url}` });
-      res.end();
-    });
-    apexUrl = apex.url;
-    const { out } = await run(["audit", apex.url, "--sitemap", "--site-url", PROD, "--json"]);
-    const report = JSON.parse(out) as SiteJson;
-    expect(report.pages.map((p) => p.url)).toEqual([`${www.url}/a`, `${www.url}/b`]);
-    expect(report.site.notes).toEqual([`${apex.url}/ redirects to ${www.url}/; auditing ${www.url}`, `mapped ${PROD} → ${www.url}`]);
+      "/sitemap.xml": { headers: xmlH, body: urlset([`${PROD}/a`, `${base}/b`]) },
+    }));
+    const report = await auditSiteWithHooks(apex + "/", { timeoutMs: 3000, siteUrl: PROD }, publicDns);
+    expect(report.pages.map((p) => p.url)).toEqual([`${www}/a`, `${www}/b`]);
+    expect(report.site.notes).toEqual([`${apex}/ redirects to ${www}/; auditing ${www}`, `mapped ${PROD} → ${www}`]);
   });
 
-  it("an entry that redirects to an unrelated host is followed, as a single-page audit does", async () => {
+  it("sameSite allows adding or removing www. and http -> https, nothing else", () => {
+    const yes = [
+      ["https://example.com/", "https://www.example.com/x"],
+      ["https://www.example.com/", "https://example.com/"],
+      ["http://example.com/", "https://example.com/"],
+      ["http://example.com/", "https://www.example.com/"],
+      ["http://localhost:5173/", "http://localhost:5173/app/"],
+    ];
+    const no = [
+      ["https://example.com/", "http://example.com/"],
+      ["https://example.com/", "https://shop.example.com/"],
+      ["https://example.com/", "https://example.net/"],
+      ["https://example.com/", "https://www.www.example.com/"],
+      ["http://localhost:5173/", "http://localhost:5174/"],
+      ["http://localhost:8080/", "https://localhost:8443/"],
+      ["http://127.0.0.1/", "http://localhost/"],
+    ];
+    for (const [a, b] of yes) expect(sameSite(new URL(a!), new URL(b!)), `${a} -> ${b}`).toBe(true);
+    for (const [a, b] of no) expect(sameSite(new URL(a!), new URL(b!)), `${a} -> ${b}`).toBe(false);
+  });
+
+  it("an entry that redirects to another site stops with a Fix line; a single-page audit still follows it", async () => {
     const unrelated = await site((base) => ({
       ...siteFiles(),
       "/sitemap.xml": { headers: xmlH, body: urlset([`${base}/landing`]) },
@@ -313,10 +363,56 @@ describe("audit --sitemap", () => {
     const given = await site(() => ({ "/": { status: 302, headers: { location: `${unrelated.url}/landing` } } }));
     const single = await run(["audit", given.url, "--json"]);
     expect(JSON.parse(single.out).finalUrl).toBe(`${unrelated.url}/landing`);
-    const { out } = await run(["audit", given.url, "--sitemap", "--json"]);
-    const report = JSON.parse(out) as SiteJson & { summary: { resolvedOrigin?: string } };
-    expect(report.summary.resolvedOrigin).toBe(unrelated.url);
-    expect(report.pages.map((p) => p.url)).toEqual([`${unrelated.url}/landing`]);
+    unrelated.hits.clear();
+    const { code, out } = await run(["audit", given.url, "--sitemap", "--json"]);
+    expect(code).toBe(2);
+    const report = JSON.parse(out) as SiteJson & { site: { fix?: string }; summary: { resolvedOrigin?: string } };
+    expect(report.summary.resolvedOrigin).toBeUndefined();
+    expect(report.site.notes).toEqual([`${given.url}/ redirects to ${unrelated.url}/landing`]);
+    expect(report.site.error).toBe(
+      `no pages to audit: ${unrelated.url} is another site than ${given.url}; a site audit only follows a redirect that adds or removes "www." or goes from http to https`,
+    );
+    expect(report.site.fix).toBe(`Pass the final URL directly: ${unrelated.url}/landing`);
+    // The other site is never requested.
+    expect(unrelated.hits.size).toBe(0);
+    const text = await run(["audit", given.url, "--sitemap"]);
+    expect(text.code).toBe(2);
+    expect(text.out).toContain(`Fix: Pass the final URL directly: ${unrelated.url}/landing`);
+  });
+
+  it("never adopts a private target from a public entry, even on the same site", async () => {
+    const { apex, hits } = await apexAndWww(() => siteFiles());
+    // The apex is public, its www host private (by name): the entry redirect is refused.
+    const hooks: AuditHooks = { ...publicDns, isPrivateHost: async (h) => h.startsWith("www.") };
+    const report = await auditSiteWithHooks(apex + "/", { timeoutMs: 3000 }, hooks);
+    expect(report.site.error).toMatch(/^no pages to audit: .* could not be loaded \(network error: blocked redirect from example\.test:\d+ to private address http:\/\/www\.example\.test:\d+\/\)$/);
+    expect(hits.www).toBe(0);
+  });
+
+  it("a public site whose name rebinds to a private address is refused at connect time", async () => {
+    const s = await site((base) => ({
+      ...siteFiles(),
+      "/sitemap.xml": { headers: xmlH, body: urlset([`${base}/a`, `${base}/b`]) },
+    }), (_req, res) => {
+      // A new connection per request, so every request resolves the name again.
+      res.writeHead(200, { ...htmlH, connection: "close" });
+      res.end(spaShell);
+    });
+    const port = new URL(s.url).port;
+    let lookups = 0;
+    const hooks: AuditHooks = {
+      isPrivateHost: async () => false,
+      // The first answer is "public" 127.0.0.1; every later one is the private 10.0.0.1.
+      isPrivateIp: (ip) => ip.startsWith("10."),
+      lookup: async () => [{ address: lookups++ === 0 ? "127.0.0.1" : "10.0.0.1", family: 4 }],
+    };
+    const report = await auditSiteWithHooks(`http://rebind.test:${port}/`, { timeoutMs: 3000 }, hooks);
+    expect(lookups).toBeGreaterThan(1);
+    // The entry loaded; nothing after it reached the private address.
+    expect([...s.hits.keys()]).toEqual(["/"]);
+    expect(report.site.error).toBe(
+      `no pages to audit: no sitemap found at http://rebind.test:${port}/sitemap.xml (network error: refused to connect to private address 10.0.0.1 (rebind.test:${port}))`,
+    );
   });
 
   it("an unreachable entry URL is a fatal error", async () => {
@@ -451,5 +547,183 @@ describe("audit --sitemap", () => {
     const { out } = await run(["audit", s.url, "--sitemap"]);
     expect(out).toContain("Skipped 1 URL not on");
     expect(out).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f‪-‮]/);
+  });
+});
+
+describe("audit --sitemap against hostile sites", () => {
+  it("keeps per-directory site files under the byte budget, and root files once", async () => {
+    const big = "x".repeat(200 * 1024);
+    const s = await site((base) => ({
+      ...siteFiles(),
+      "/sitemap.xml": { headers: xmlH, body: urlset(Array.from({ length: 40 }, (_, i) => `${base}/a${i}/b/c/page`)) },
+    }), (req, res) => {
+      const path = (req.url ?? "/").split("?")[0]!;
+      // Every directory has its own large llms.txt and agents.json.
+      if (path.endsWith("/llms.txt") || path.endsWith("/agents.json")) {
+        res.writeHead(200, text());
+        res.end(big);
+        return;
+      }
+      res.writeHead(200, htmlH);
+      res.end(spaShell);
+    });
+    const budget = 1024 * 1024;
+    let peak = 0;
+    const report = await auditSiteWithHooks(s.url, { timeoutMs: 5000, concurrency: 4 }, {
+      dirCacheBytes: budget,
+      onDirCacheBytes: (bytes) => (peak = Math.max(peak, bytes)),
+    });
+    expect(report.summary.audited).toBe(40);
+    // 40 pages x 3 directories x 2 files of 200 KiB were fetched (about 48 MiB); at most 1 MiB is kept.
+    const dirFetches = [...s.hits].filter(([p]) => /^\/a\d+\//.test(p) && /(llms\.txt|agents\.json)$/.test(p)).length;
+    expect(dirFetches).toBe(240);
+    expect(peak).toBeGreaterThan(0);
+    expect(peak).toBeLessThanOrEqual(budget);
+    for (const f of ["/robots.txt", "/sitemap.xml", "/llms.txt", "/agents.json"]) expect(s.hits.get(f), f).toBe(1);
+  }, 20_000);
+
+  it("--max-pages stops fetching child sitemaps once the merged ones list enough pages", async () => {
+    const s = await site((base) => ({
+      ...siteFiles(),
+      "/sitemap.xml": { headers: xmlH, body: sitemapIndex(Array.from({ length: 30 }, (_, i) => `${base}/c${i}.xml`)) },
+    }), (req, res) => {
+      const m = /^\/c(\d+)\.xml$/.exec(req.url ?? "");
+      if (m) {
+        res.writeHead(200, xmlH);
+        res.end(urlset(Array.from({ length: 100 }, (_, i) => `http://${req.headers.host}/c${m[1]}/p${i}`)));
+        return;
+      }
+      res.writeHead(200, htmlH);
+      res.end(spaShell);
+    });
+    const { out } = await run(["audit", s.url, "--sitemap", "--max-pages", "50", "--concurrency", "4", "--json"]);
+    const report = JSON.parse(out) as SiteJson & { summary: { limitedBy?: string[] } };
+    expect(report.summary.audited).toBe(50);
+    expect(report.pages[0]!.url).toBe(`${s.url}/c0/p0`);
+    expect(report.pages.at(-1)!.url).toBe(`${s.url}/c0/p49`);
+    expect(report.summary.limitedBy).toEqual(["max-pages"]);
+    const children = [...s.hits.keys()].filter((p) => /^\/c\d+\.xml$/.test(p));
+    // The first child lists enough: only the children already in flight (the concurrency) are fetched.
+    expect(children.length).toBeLessThanOrEqual(4);
+  });
+
+  it("fetches top-level sitemaps concurrently and still merges them in robots.txt order", async () => {
+    const tops = Array.from({ length: 6 }, (_, i) => `/s${i}.xml`);
+    const s = await site((base) => ({
+      "/robots.txt": { headers: text(), body: tops.map((t) => `Sitemap: ${base}${t}`).join("\n") },
+    }), (req, res) => {
+      const m = /^\/s(\d)\.xml$/.exec(req.url ?? "");
+      if (m) {
+        // Later sitemaps answer sooner.
+        setTimeout(() => {
+          res.writeHead(200, xmlH);
+          res.end(urlset([`http://${req.headers.host}/p${m[1]}`]));
+        }, 300 - Number(m[1]) * 40);
+        return;
+      }
+      res.writeHead(200, htmlH);
+      res.end(spaShell);
+    });
+    const t = performance.now();
+    const report = await auditSiteWithHooks(s.url, { timeoutMs: 3000, concurrency: 4 });
+    // Serially this takes at least 6 x 100 ms in the sitemap phase alone.
+    expect(performance.now() - t).toBeLessThan(1200);
+    expect(report.pages.map((p) => new URL(p.url).pathname)).toEqual(["/p0", "/p1", "/p2", "/p3", "/p4", "/p5"]);
+    expect(report.site.sitemaps.map((f) => new URL(f.url).pathname)).toEqual(tops);
+  });
+
+  it("site files that redirect to another origin score the same in a site audit as alone", async () => {
+    const files = await site(() => ({
+      "/llms.txt": { headers: text(), body: "# Site\n" },
+      "/agents.json": { headers: text("application/json"), body: AGENT_MAP },
+      "/index.md": md,
+    }));
+    const s = await site((base) => ({
+      "/robots.txt": { headers: text(), body: "User-agent: *\nAllow: /\n" },
+      "/sitemap.xml": { headers: xmlH, body: urlset([`${base}/`]) },
+      "/": page(base, "/"),
+      "/llms.txt": { status: 302, headers: { location: `${files.url}/llms.txt` } },
+      "/agents.json": { status: 301, headers: { location: `${files.url}/agents.json` } },
+      "/index.md": { status: 307, headers: { location: `${files.url}/index.md` } },
+    }));
+    // Both servers are on 127.0.0.1: count every address as public, as two public hosts would be.
+    const report = await auditSiteWithHooks(s.url, { timeoutMs: 3000 }, publicDns);
+    const single = await auditWithHooks(`${s.url}/`, { timeoutMs: 3000 }, publicDns);
+    expect(single.score).toBe(100);
+    expect(report.pages[0]!.score).toBe(single.score);
+    expect(report.pages[0]!.checks).toEqual(single.checks);
+    expect(files.hits.get("/llms.txt")).toBe(2);
+  });
+
+  it("--max-time stops starting pages, reports the partial result and exits 1", async () => {
+    const s = await site((base) => ({
+      ...siteFiles(),
+      "/sitemap.xml": { headers: xmlH, body: urlset(Array.from({ length: 10 }, (_, i) => `${base}/p${i}`)) },
+    }), (_req, res) => {
+      setTimeout(() => {
+        res.writeHead(200, htmlH);
+        res.end(spaShell);
+      }, 400);
+    });
+    const report = await auditSiteWithHooks(s.url, { timeoutMs: 3000, concurrency: 1, maxTimeMs: 1000 });
+    expect(report.site.error).toBeUndefined();
+    expect(report.summary.audited).toBeGreaterThan(0);
+    expect(report.summary.audited).toBeLessThan(10);
+    expect(report.summary).toMatchObject({ limited: true, limitedBy: ["max-time"], maxTimeMs: 1000, listed: 10 });
+    expect(formatSiteText(report)).toContain(`Stopped at the time limit (--max-time 1): ${report.summary.audited} of 10 listed pages were audited.`);
+
+    const cli = await run(["audit", s.url, "--sitemap", "--concurrency", "1", "--max-time", "1"]);
+    expect(cli.code).toBe(1);
+    expect(cli.out).toContain("Stopped at the time limit (--max-time 1)");
+
+    // Out of time before any page: no pages to audit.
+    const none = await auditSiteWithHooks(s.url, { timeoutMs: 3000, maxTimeMs: 1 });
+    expect(none.site.error).toMatch(/^no pages to audit: the time limit \(0\.001 s\) was reached/);
+  }, 20_000);
+
+  it("skips <loc> values over 2048 characters with a counted note, and clips long URLs in the report", async () => {
+    const long = "/" + "a".repeat(3000);
+    const s = await site((base) => ({
+      ...siteFiles(),
+      "/robots.txt": { headers: text(), body: `Sitemap: ${base}/${"s".repeat(5000)}.xml\nSitemap: ${base}/sitemap.xml\n` },
+      "/sitemap.xml": {
+        headers: xmlH,
+        body: urlset([`${base}${long}`, `${base}/ok`, `${base}${long}b`, `${base}/away`, `https://other.example/${"o".repeat(2000)}`]),
+      },
+      "/ok": { headers: htmlH, body: spaShell },
+      "/away": { status: 302, headers: { location: `https://other.example/${"r".repeat(10_000)}` } },
+    }));
+    const report = await auditSiteWithHooks(s.url, { timeoutMs: 3000 });
+    expect(report.site.notes).toEqual(["skipped 3 sitemap URLs longer than 2048 characters"]);
+    expect(report.pages.map((p) => new URL(p.url).pathname)).toEqual(["/ok", "/away"]);
+    expect(s.hits.get(long)).toBeUndefined();
+    const json = JSON.stringify(report);
+    expect(json).not.toContain("a".repeat(2100));
+    expect(json).not.toContain("r".repeat(4100));
+    expect(report.pages[1]!.error!.length).toBeLessThanOrEqual(4096);
+    expect(report.site.skipped[0]!.url.length).toBeLessThanOrEqual(2048);
+
+    const only = await site(() => ({
+      ...siteFiles(`https://other.example/${"s".repeat(500_000)}.xml`),
+    }));
+    const r = await run(["audit", only.url, "--sitemap", "--json"]);
+    expect(r.code).toBe(2);
+    expect(r.out.length).toBeLessThan(10_000);
+    expect((JSON.parse(r.out) as SiteJson).site.error).toBe("no pages to audit: every Sitemap line in /robots.txt is longer than 2048 characters");
+  });
+
+  it("auditSite clamps its options to the CLI bounds and treats zero pages as an error", async () => {
+    const s = await site((base) => ({
+      ...siteFiles(),
+      "/sitemap.xml": { headers: xmlH, body: urlset([`${base}/a`, `${base}/b`]) },
+    }), { headers: htmlH, body: spaShell });
+    const zero = await auditSiteWithHooks(s.url, { timeoutMs: 3000, concurrency: 0, maxPages: 0 });
+    expect(zero.site.error).toBeUndefined();
+    expect(zero.summary).toMatchObject({ audited: 1, maxPages: 1 });
+    const huge = await auditSiteWithHooks(s.url, { timeoutMs: 3000, concurrency: 1e9, maxPages: Infinity, maxTimeMs: 1e12 });
+    expect(huge.summary).toMatchObject({ audited: 2, maxPages: 500, maxTimeMs: 3_600_000 });
+    const nan = await auditSiteWithHooks(s.url, { maxPages: Number.NaN });
+    expect(nan.site.error).toBe("invalid maxPages: expected a number, got NaN");
+    expect(nan.pages).toEqual([]);
   });
 });

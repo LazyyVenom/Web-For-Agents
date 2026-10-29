@@ -110,7 +110,8 @@ describe("siteUrl mapping safety", () => {
     const report = await auditWithHooks(
       s.url + "/",
       { siteUrl: "https://prod.example", blockPrivateRedirects: true, timeoutMs: 3000 },
-      { isPrivateHost: async (h) => h === "localhost" },
+      // Every server is on 127.0.0.1, so the connect-time address check passes; the redirect check is under test.
+      { isPrivateHost: async (h) => h === "localhost", isPrivateIp: () => false },
     );
     expect(report.checks.find((c) => c.id === "markdown")!.status).toBe("fail");
     expect(report.warnings?.[0]).toContain("blocked a redirect");

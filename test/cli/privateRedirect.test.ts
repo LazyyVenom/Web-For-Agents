@@ -22,6 +22,19 @@ describe("isPrivateIp / isPrivateHost", () => {
       expect(isPrivateIp(ip), ip).toBe(false);
     }
   });
+  it("covers reserved IPv4 ranges and IPv6 forms that embed an IPv4 address", () => {
+    for (const ip of [
+      "198.18.0.1", "198.19.255.255", "100.127.0.1", "0.1.2.3", "224.0.0.1", "255.255.255.255", "192.0.0.8",
+      "::", "::ffff:7f00:1", "::ffff:a9fe:a9fe", "::a9fe:a9fe", "::127.0.0.1", "64:ff9b::a9fe:a9fe", "64:ff9b::10.0.0.1",
+      "64:ff9b:1::1", "2002:a9fe:a9fe::", "2002:0a00:0001::1", "fec0::1", "fc00::1", "fdff::1", "fe80::1%lo0", "febf::1", "ff02::1",
+    ]) {
+      expect(isPrivateIp(ip), ip).toBe(true);
+    }
+    for (const ip of ["198.20.0.1", "198.17.255.255", "100.128.0.1", "1.1.1.1", "64:ff9b::808:808", "2002:808:808::", "2606:4700::1111", "::ffff:1.1.1.1"]) {
+      expect(isPrivateIp(ip), ip).toBe(false);
+    }
+  });
+
   it("treats localhost names and bracketed IPv6 literals as private without DNS", async () => {
     expect(await isPrivateHost("localhost")).toBe(true);
     expect(await isPrivateHost("app.localhost")).toBe(true);
@@ -75,9 +88,45 @@ describe("redirects from a public host to a private address", () => {
     expect(report.warnings![0]).toMatch(/^followed a redirect from public 127\.0\.0\.1:\d+ to private address http:\/\/localhost/);
     expect(formatText(report)).toContain("\nWarning: followed a redirect from public 127.0.0.1:");
 
-    const blocked = await auditWithHooks(site.url + "/", { timeoutMs: 2000, blockPrivateRedirects: true }, { isPrivateHost: fakeClassifier });
+    const blocked = await auditWithHooks(
+      site.url + "/",
+      { timeoutMs: 2000, blockPrivateRedirects: true },
+      { isPrivateHost: fakeClassifier, isPrivateIp: () => false },
+    );
     expect(blocked.error).toMatch(/blocked redirect/);
     expect(blocked.warnings![0]).toMatch(/^blocked a redirect from public/);
+  });
+
+  it("with blockPrivateRedirects, a public host that resolves to a private address is refused at connect time", async () => {
+    let hits = 0;
+    const s = await serve({}, (_req, res) => {
+      hits++;
+      res.writeHead(200, html);
+      res.end("<html></html>");
+    });
+    const url = `http://rebind.test:${new URL(s.url).port}/`;
+    // The name looks public when classified, but connections resolve it to 127.0.0.1.
+    const hooks = { isPrivateHost: async () => false, lookup: async () => [{ address: "127.0.0.1", family: 4 }] };
+    const blocked = await auditWithHooks(url, { timeoutMs: 2000, blockPrivateRedirects: true }, hooks);
+    expect(blocked.error).toBe(`network error: refused to connect to private address 127.0.0.1 (${new URL(url).host})`);
+    expect(hits).toBe(0);
+    // Without the flag a single-page audit connects, as in 0.4.
+    expect((await auditWithHooks(url, { timeoutMs: 2000 }, hooks)).error).toBeUndefined();
+  });
+
+  it("with blockPrivateRedirects, a private URL may use private addresses on its own origin only", async () => {
+    const other = await serve({ "/llms.txt": { headers: { "content-type": "text/plain" }, body: "# Other\n" } });
+    const s = await serve({
+      "/": { headers: html, body: "<html><title>local</title></html>" },
+      "/llms.txt": { status: 302, headers: { location: `${other.url}/llms.txt` } },
+    });
+    const local = await auditWithHooks(s.url + "/", { timeoutMs: 2000, blockPrivateRedirects: true });
+    expect(local.error).toBeUndefined();
+    const llms = local.checks.find((c) => c.id === "llms-txt")!;
+    expect(llms.status).not.toBe("pass");
+    expect(llms.message).toContain(`refused to connect to private address 127.0.0.1 (127.0.0.1:${new URL(other.url).port})`);
+    const free = await auditWithHooks(s.url + "/", { timeoutMs: 2000 });
+    expect(free.checks.find((c) => c.id === "llms-txt")!.status).toBe("pass");
   });
 
   it("audits without a crossing have no warnings field", async () => {

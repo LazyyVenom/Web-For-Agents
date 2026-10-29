@@ -130,6 +130,14 @@ describe("audit e2e", () => {
     expect(err).toContain("HTTP 404");
   });
 
+  it("a fatal error in text mode is printed once, on stdout", async () => {
+    const s = await serve({});
+    const { code, out, err } = await run(["audit", s.url + "/missing"]);
+    expect(code).toBe(2);
+    expect(out.match(/HTTP 404/g)).toHaveLength(1);
+    expect(err).toBe("");
+  });
+
   it("redirect loop is fatal", async () => {
     const s = await serve({ "/": { status: 302, headers: { location: "/" } } });
     const { code, out } = await run(["audit", s.url + "/", "--json"]);
