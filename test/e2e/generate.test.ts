@@ -1,4 +1,4 @@
-// The portfolio scenario: a site with its own prerender script writes flat about.html files after
+// A site with its own prerender script writes flat about.html files after
 // `vite build`; `web-for-agents generate` adds the agent files without replacing that page builder.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";

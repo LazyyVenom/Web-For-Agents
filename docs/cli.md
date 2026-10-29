@@ -152,10 +152,10 @@ Flags:
 // wfa.config.mjs
 export default {
   exclude: ["/drafts/*"],
-  llms: { title: "Jane Doe" },
+  llms: { title: "Example Co" },
   markdown: {
     contentSelector: "main",
-    transform: ({ route, markdown }) => (route === "/" ? markdown + "\n\nEmail: jane@example.com\n" : undefined),
+    transform: ({ route, markdown }) => (route === "/" ? markdown + "\n\nEmail: hello@example.com\n" : undefined),
   },
 };
 ```

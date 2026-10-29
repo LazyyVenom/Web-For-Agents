@@ -61,7 +61,7 @@ export interface AuditHooks {
 }
 
 /** Per-directory site files (llms.txt, agent map below the root) kept in memory per run, at most. */
-export const DIR_CACHE_BYTES = 32 * 1024 * 1024;
+const DIR_CACHE_BYTES = 32 * 1024 * 1024;
 
 /**
  * Per-directory site file fetches by key, under a byte budget: once the bodies held pass it, the

@@ -31,7 +31,7 @@ export const MAX_SITE_MAX_TIME_S = 3600;
 /** Sitemap files read per site audit (top-level sitemaps plus index children). */
 export const MAX_SITEMAP_FILES = 50;
 /** Longest `<loc>` or `Sitemap:` URL read (the sitemap protocol's limit); longer ones are skipped and counted. */
-export const MAX_URL_CHARS = 2048;
+const MAX_URL_CHARS = 2048;
 /** Skipped URLs listed in the report; the rest are only counted. */
 const MAX_SKIPPED_LISTED = 20;
 /** Distinct page URLs counted in `summary.listed`; past this the count stops (`listedCapped`). */

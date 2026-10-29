@@ -1,4 +1,4 @@
-// Link actions without JavaScript: a flat hand-built dist (the portfolio case) with a resume link and
+// Link actions without JavaScript: a flat hand-built dist with a PDF link and
 // a mailto link; `web-for-agents generate` lists them in agents.json with absolute hrefs.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
