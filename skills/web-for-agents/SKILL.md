@@ -5,12 +5,12 @@ description: Use when adding SEO, head tags, JSON-LD structured data, prerenderi
 
 # web-for-agents
 
-Head tags and JSON-LD at runtime; prerendered HTML, `.md` copies, `llms.txt`, `agents.json`, sitemap and `robots.txt` at build time; an `audit` CLI. The docs ship in the package (see Docs): read them, not the `.d.ts` files.
+Read the shipped docs (see Docs), not the `.d.ts` files.
 
 ## Checklist
 
 1. `npm i @anubhav-choubey/web-for-agents react react-dom` and `npm i -D vite @vitejs/plugin-react`.
-2. Plugin with `siteUrl` and the required `robots.ai`; `routes` for pages no link reaches.
+2. Plugin with `siteUrl` and the required `robots.ai`.
 
 ```ts
 // vite.config.ts
@@ -24,7 +24,7 @@ export default defineConfig({
 ```
 
 3. One `SeoProvider` with `defaults`, mounted with `hydrateApp`.
-4. EVERY indexable page (home, about, contact, lists, details): `Seo` with title and description; a `JsonLd` graph of a page node (`webPage` or a fitting type) plus the shared `organization` and `webSite`, linked with `schema.ref`; real text in `<main>`.
+4. EVERY indexable page: `Seo` with title and description; a `JsonLd` graph of a page node (`webPage` or a fitting type) plus the shared `organization` and `webSite`, linked with `schema.ref`; real text in `<main>`.
 
 ```tsx
 import { SeoProvider, Seo, JsonLd, schema, hydrateApp } from "@anubhav-choubey/web-for-agents";
@@ -51,7 +51,7 @@ hydrateApp(
 );
 ```
 
-5. Actions: `AgentForm` for forms, `useAgentAction` for buttons with a handler, `agentLinkProps` for links (`register: true` adds a WebMCP tool). Unique names per page; one definition per name.
+5. Actions: `AgentForm` for forms, `useAgentAction` for buttons with a handler, `agentLinkProps` for links (`register: true` adds a WebMCP tool). Unique names per page.
 
 ```tsx
 import { AgentForm, agentParam, useAgentAction } from "@anubhav-choubey/web-for-agents";
@@ -74,6 +74,13 @@ export function Actions({ send, save }: { send: () => void; save: () => Promise<
 6. Plugin `llms.intro` and `llms.sections`: what the site is, key links.
 7. Run the verify loop.
 
+## Routing
+
+- Client routers (BrowserRouter and others) work with `hydrateApp`.
+- Routes are found by crawling links from "/" (`prerender.crawl`): link each dynamic page (`/docs/:slug`) or list it in `routes`.
+- 404 or not-found view: `<Seo noindex />`.
+- Deploy with the host fallback serving `200.html` (SPA fallback in `prerendering.md`).
+
 ## Which entry
 
 | Need | Use |
@@ -90,21 +97,20 @@ export function Actions({ send, save }: { send: () => void; save: () => Promise<
 1. `npx vite build`
 2. `npx serve dist -l 4173` (serves `dir/index.html`)
 3. `npx web-for-agents audit http://localhost:4173 --sitemap --site-url <production URL> --min-score 90`
-4. Fix every failing or warning check, then repeat.
+4. The `--sitemap` table names only failing checks; for each check's Fix text, audit one page: `npx web-for-agents audit <page URL> --site-url <production URL>`.
+5. Fix every failing or warning check, then repeat.
 
 ## Common mistakes
 
 | Mistake | Fix |
 | --- | --- |
-| JSON-LD only on detail pages | Graph on every indexable page |
 | A page that is only a form | 200+ characters of text in `<main>` |
-| Skipping the audit | Run the verify loop |
+| `schema.softwareApplication` without a real `aggregateRating` or `review` | Google needs one; the audit flags it. Use `schema.product` with `offers`, or `schema.webPage`. NEVER invent ratings or reviews |
 | SVG icon or placeholder as JSON-LD `image` | Crawlable JPEG, PNG or WebP photo (see `seo.md`) |
 | `noindex` on real pages, or missing on cart or account pages | `noindex` leaves the sitemap, `llms.txt` and `agents.json` |
 | One action name, different definitions | Only one is listed; rename or align |
 | Root entry in a Node script | Needs react and react-dom; use `/schema` |
-| Stale exports after upgrading | `vite --force` |
-| Auditing `vite preview` | Sub-routes without a trailing slash can get the home page; use `serve` |
+| Auditing `vite preview` | Sub-routes can get the home page; use `serve` |
 
 ## Docs
 
