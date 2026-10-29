@@ -73,9 +73,11 @@ jobs:
           registry-url: https://registry.npmjs.org
       # Trusted publishing needs npm >= 11.5.1. Pinned on purpose; update it deliberately.
       - run: npm install -g npm@12.2.1
-      - name: Publish
+      # Staged publish: the version stays private until a maintainer approves it with 2FA
+      # (npm stage approve <id>, or on npmjs.com). Allowed by the trusted publisher by default.
+      - name: Stage publish
         run: |
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then tag=next; else tag=latest; fi
           files=("$RUNNER_TEMP"/package/*.tgz)
           [ "${#files[@]}" -eq 1 ] || { echo "Expected exactly one tarball" >&2; exit 1; }
-          npm publish "${files[0]}" --provenance --access public --tag "$tag" --ignore-scripts
+          npm stage publish "${files[0]}" --provenance --access public --tag "$tag" --ignore-scripts

@@ -28,19 +28,20 @@ The demo in `examples/demo` uses every feature; its README lists what each page 
 
 ## Releasing
 
-Releases are published by `.github/workflows/release.yml` when a version tag is pushed. It runs two jobs. `verify` has read-only permissions and no OIDC token: it runs `npm ci`, typecheck, tests, build and the pack test, fails if the tag does not match the `version` in `package.json`, then runs `npm pack` and uploads the tarball as an artifact. `publish` needs `verify`, has `id-token: write`, installs no dependencies, downloads the tarball and publishes it with npm trusted publishing (OIDC) and `--ignore-scripts`, using a pinned npm version. There is no `NPM_TOKEN`, and provenance is attached automatically. Neither job runs on forks, and all actions are pinned by commit SHA. Tags with a hyphen (`v0.5.0-beta.1`) publish under the `next` dist-tag; others under `latest`.
+Releases are published by `.github/workflows/release.yml` when a version tag is pushed. It runs two jobs. `verify` has read-only permissions and no OIDC token: it runs `npm ci`, typecheck, tests, build and the pack test, fails if the tag does not match the `version` in `package.json`, then runs `npm pack` and uploads the tarball as an artifact. `publish` needs `verify`, has `id-token: write`, installs no dependencies, downloads the tarball and stages it with `npm stage publish`, using npm trusted publishing (OIDC), `--ignore-scripts` and a pinned npm version. A staged version is not public until a maintainer approves it with 2FA, so a leaked workflow cannot publish on its own. There is no `NPM_TOKEN`, and provenance is attached automatically. Neither job runs on forks, and all actions are pinned by commit SHA. Tags with a hyphen (`v0.5.0-beta.1`) publish under the `next` dist-tag; others under `latest`.
 
 1. Run the manual CI matrix from the Actions tab if the release touches Vite or Node support.
 2. Bump the version without tagging: `npm version 0.4.0 --no-git-tag-version`.
 3. Update `CHANGELOG.md` and commit.
 4. Tag and push: `git tag v0.4.0 && git push origin master v0.4.0`.
 5. Watch the "Release" run on the Actions tab.
+6. Approve the staged version: `npm stage list @anubhav-choubey/web-for-agents`, then `npm stage approve <stage-id>` (asks for 2FA), or approve it on npmjs.com. Check it with `npm view @anubhav-choubey/web-for-agents version`.
 
 ### One-time npm setup
 
 1. The package must already exist on npm (publish the first version by hand if it does not).
 2. On npmjs.com open the package, then Settings, then Trusted publisher, and choose GitHub Actions.
-3. Enter organization or user `LazyyVenom`, repository `Web-For-Agents`, workflow filename `release.yml` (filename only, with the extension). Leave environment empty. Allow `npm publish`.
+3. Enter organization or user `LazyyVenom`, repository `Web-For-Agents` (the name only, not the URL), workflow filename `release.yml` (filename only, with the extension). Leave environment empty. Leave direct publishing unchecked: `npm stage publish` is always allowed. The fields cannot be edited later; to fix one, delete the connection and create it again.
 4. Save. All fields are case-sensitive and npm does not check them until the first publish, which must succeed within 2 days or the setting expires.
 5. Optional: under Publishing access, require 2FA and disallow tokens.
 
