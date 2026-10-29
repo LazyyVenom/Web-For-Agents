@@ -309,6 +309,20 @@ describe("0.4: @id, refs and extra fields", () => {
     expect(schema.profilePage({ name: "N", extra: { name: undefined } })).toEqual({ "@context": C, "@type": "ProfilePage" });
   });
 
+  it("extra skips __proto__, so the node keeps Object.prototype", () => {
+    const n = schema.webPage({ name: "P", url: "u", extra: JSON.parse('{"__proto__":{"polluted":1},"about":"y"}') });
+    expect(Object.getPrototypeOf(n)).toBe(Object.prototype);
+    expect("polluted" in n).toBe(false);
+    expect(n.about).toBe("y");
+  });
+
+  it("a node nested in a plain object in extra loses its @context", () => {
+    const org = schema.organization({ name: "U" });
+    const n = schema.webPage({ name: "P", url: "u", extra: { about: { deep: { org, list: [org] } } } });
+    expect(n.about).toEqual({ deep: { org: { "@type": "Organization", name: "U" }, list: [{ "@type": "Organization", name: "U" }] } });
+    expect(serializeJsonLd(n).match(/@context/g)).toHaveLength(1);
+  });
+
   it("is importable from the React-free /schema entry", async () => {
     const entry = await import("../../src/entries/schema");
     expect(entry.schema).toBe(schema);

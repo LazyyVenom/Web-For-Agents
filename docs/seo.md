@@ -80,7 +80,7 @@ Fields left `undefined` or `null` are omitted from every builder, including nest
 Every builder takes two more options (in its input object; `faqPage` and `breadcrumbList` take them as a second argument):
 
 - `id`: written as `"@id"`, so other nodes can point at this one with `schema.ref(id)`.
-- `extra`: any other schema.org properties, merged in last, so they override the typed fields. `@type` and `@context` cannot be overridden. Values can be nodes, refs or arrays of them.
+- `extra`: any other schema.org properties, merged in last, so they override the typed fields. `@type` and `@context` cannot be overridden, and a `__proto__` key is ignored. Values can be nodes, refs, arrays or plain objects; a node nested anywhere in them loses its own `@context`.
 
 ```ts
 const site = "https://example.com";

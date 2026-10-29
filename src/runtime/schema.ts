@@ -32,8 +32,8 @@ export interface JsonLdNodeOptions {
   id?: string;
   /**
    * Extra schema.org properties merged in last (they override the typed fields). `@type` and
-   * `@context` cannot be overridden. Nodes and refs are allowed as values; a nested node's own
-   * `@context` is dropped.
+   * `@context` cannot be overridden, and a `__proto__` key is ignored. Nodes and refs are allowed
+   * as values; a nested node's own `@context` is dropped, at any depth.
    */
   extra?: Record<string, unknown>;
 }
@@ -53,11 +53,26 @@ function nested(n: Embeddable | null | undefined): Embeddable | undefined {
   return rest as Embeddable;
 }
 
-/** Any value placed inside a node: nested nodes and refs (also inside arrays) lose their `@context`; null becomes undefined. */
+const isPlainObject = (v: unknown): v is Record<string, unknown> => {
+  if (!isObject(v)) return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+};
+
+/**
+ * Any value placed inside a node: nested nodes and refs lose their `@context` at any depth (inside
+ * arrays and plain objects too); a null value becomes undefined, and nulls are dropped from arrays.
+ */
 function embed(v: unknown): unknown {
   if (v === null) return undefined;
   if (Array.isArray(v)) return v.filter((x) => x !== undefined && x !== null).map(embed);
-  return isEmbeddable(v) ? nested(v) : v;
+  if (!isPlainObject(v)) return v;
+  const isNode = isEmbeddable(v);
+  return Object.fromEntries(
+    Object.entries(v)
+      .filter(([k]) => !(isNode && k === "@context"))
+      .map(([k, x]) => [k, x === null ? null : embed(x)]),
+  );
 }
 
 function definedOnly(o: Record<string, unknown>): Record<string, unknown> {
@@ -72,7 +87,8 @@ function node(type: string, fields: Record<string, unknown>, options: JsonLdNode
     if (e !== undefined) out[k] = e;
   }
   for (const [k, v] of Object.entries(options.extra ?? {})) {
-    if (k === "@type" || k === "@context") continue;
+    // "__proto__" would replace the node's prototype instead of adding a property.
+    if (k === "@type" || k === "@context" || k === "__proto__") continue;
     const e = embed(v);
     if (e === undefined) delete out[k];
     else out[k] = e;
