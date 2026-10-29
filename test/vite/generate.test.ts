@@ -156,7 +156,9 @@ describe("generateAgentFiles", () => {
     });
     const r = await t.run();
     const dup = r.warnings.filter((w) => w.includes("different actions named"));
-    expect(dup).toEqual([`[web-for-agents] /products: 2 different actions named add_to_cart (differ in: description "Add A" vs "Add B"); only the first is listed`]);
+    expect(dup).toEqual([
+      `[web-for-agents] /products: 2 different actions named add_to_cart (differ in: description "Add A" vs "Add B"); the first, a click action, is listed, which keeps add_to_cart out of site.actions`,
+    ]);
     const map = JSON.parse(t.read("agents.json"));
     expect(map.pages.find((p: any) => p.path === "/products").actions.map((a: any) => a.description)).toEqual(["Add A"]);
   });

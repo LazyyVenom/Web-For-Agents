@@ -11,6 +11,7 @@ import {
 import {
   duplicateNameWarnings,
   firstPerName,
+  type DuplicateWarningContext,
   linkActions,
   type LinkActionMarkup,
   type MarkupDefinition,
@@ -175,6 +176,29 @@ export function hoistSiteActions(pages: AgentMapPage[]): { actions: AgentActionD
   };
 }
 
+/**
+ * What a duplicate-name warning on `route` needs from the written map: the action listed for each
+ * name, and the names that this page alone keeps out of `site.actions` (listed on every page, the
+ * same on all the others, but defined differently here).
+ */
+function warningContext(map: AgentMap, route: string, pageUrl: string, siteActions: boolean): DuplicateWarningContext {
+  const page = map.pages.find((p) => p.path === route);
+  const others = map.pages.filter((p) => p !== page);
+  const keptOutOfSite = new Set<string>();
+  if (siteActions && page && others.length > 0) {
+    for (const a of page.actions) {
+      const keys = new Set(others.map((p) => canonicalJson(p.actions.find((b) => b.name === a.name) ?? null)));
+      const [key] = keys;
+      if (keys.size === 1 && key !== "null" && key !== canonicalJson(a)) keptOutOfSite.add(a.name);
+    }
+  }
+  return {
+    pageUrl,
+    listed: (name) => map.site.actions?.find((a) => a.name === name) ?? page?.actions.find((a) => a.name === name),
+    keptOutOfSite,
+  };
+}
+
 interface AgentMapInput {
   siteUrl: string;
   siteName?: string;
@@ -240,8 +264,6 @@ export function agentMapExtension(opts: {
       const pages = ctx.pages.map((p): AgentMapPageInput => {
         const found = data.get(p.route);
         const actions = found?.actions ?? [];
-        // Identical copies (a product grid) are normal; differing ones lose all but the first.
-        for (const w of duplicateNameWarnings(p.route, found?.markup ?? [])) ctx.warn(w);
         // Same rules on both paths; actions found another way win over links of the same name.
         const links = linkActions(
           found?.links ?? [],
@@ -256,6 +278,12 @@ export function agentMapExtension(opts: {
         return page;
       });
       const map = agentMapOf({ siteUrl, siteName: ctx.site.title, llmsUrl: ctx.llmsUrl, pages, siteActions });
+      // Identical copies (a product grid) are normal; differing ones lose all but the listed one.
+      for (const p of ctx.pages) {
+        const markup = data.get(p.route)?.markup ?? [];
+        if (markup.length < 2) continue;
+        for (const w of duplicateNameWarnings(p.route, markup, warningContext(map, p.route, p.url, siteActions !== false))) ctx.warn(w);
+      }
       summary = actionCountText(agentMapStats(map));
       ctx.emitFile(fileName, agentMapJson(map));
     },

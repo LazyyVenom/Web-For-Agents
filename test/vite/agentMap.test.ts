@@ -408,7 +408,50 @@ describe("agentMapExtension duplicate names", () => {
       emitFile: () => {},
       warn: (m) => void warnings.push(m),
     });
-    expect(warnings).toEqual([`/products: 3 different actions named add_to_cart (differ in: description "Add A" vs "Add B" vs "Add C"); only the first is listed`]);
+    expect(warnings).toEqual([
+      `/products: 3 different actions named add_to_cart (differ in: description "Add A" vs "Add B" vs "Add C"); the form action registered on the page is listed`,
+    ]);
+  });
+
+  /** A footer link on every page; /contact also has a card link of the same name to another href, before the footer. */
+  async function statusSite(opts: { cardOn?: string[]; footerOff?: string[]; siteActions?: boolean } = {}) {
+    const { cardOn = ["/contact"], footerOff = [], siteActions } = opts;
+    const link = (href: string) => ({ name: "open_status", description: "Open the status page", destructive: false, href });
+    const def = (href: string) => ({ name: "open_status", kind: "link", description: "Open the status page", destructive: false, readOnly: false, href });
+    const ext = agentMapExtension({ siteUrl: "https://shop.example", fileName: "agents.json", siteActions });
+    const routes = ["/", "/about", "/contact", "/faq"];
+    for (const route of routes) {
+      const hrefs = [...(cardOn.includes(route) ? ["https://status.example.com/v2"] : []), ...(footerOff.includes(route) ? [] : ["https://status.example.com"])];
+      await ext.onRoute!(route, { actions: [], links: hrefs.map(link), markup: hrefs.map(def) });
+    }
+    const warnings: string[] = [];
+    let map: any;
+    await ext.finalize!({
+      site: { url: "https://shop.example", title: "Shop" },
+      pages: routes.map((route) => ({ route, title: route, url: "https://shop.example" + (route === "/" ? "/" : route) })),
+      emitFile: (_f, s) => void (map = JSON.parse(String(s))),
+      warn: (m) => void warnings.push(m),
+    });
+    return { warnings, map };
+  }
+
+  it("shows hrefs as agents.json lists them, names the listed one and says it keeps the name out of site.actions", async () => {
+    const { warnings, map } = await statusSite();
+    expect(warnings).toEqual([
+      '/contact: 2 different actions named open_status (differ in: href "https://status.example.com/v2" vs "https://status.example.com/"); the first, a link, is listed, which keeps open_status out of site.actions',
+    ]);
+    expect(map.site).not.toHaveProperty("actions");
+    expect(map.pages.find((p: any) => p.path === "/contact").actions[0].href).toBe("https://status.example.com/v2");
+  });
+
+  it("does not blame the page when other pages also differ, or when site actions are off", async () => {
+    const twoCards = await statusSite({ cardOn: ["/contact", "/faq"] });
+    expect(twoCards.warnings).toHaveLength(2);
+    for (const w of twoCards.warnings) expect(w).toMatch(/; the first, a link, is listed$/);
+    const notEverywhere = await statusSite({ footerOff: ["/about"] });
+    expect(notEverywhere.warnings[0]).toMatch(/; the first, a link, is listed$/);
+    const off = await statusSite({ siteActions: false });
+    expect(off.warnings[0]).toMatch(/; the first, a link, is listed$/);
   });
 });
 

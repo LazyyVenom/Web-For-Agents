@@ -9,7 +9,7 @@ import {
   WEBMCP_TOOLDESCRIPTION_ATTR,
   WEBMCP_TOOLNAME_ATTR,
 } from "./conventions";
-import { safeText } from "./text";
+import { collapseWhitespace, safeText } from "./text";
 import { tryResolveUrl } from "./url";
 
 export interface MarkupAction {
@@ -47,9 +47,12 @@ function unknownKindOf(el: Element): string | undefined {
  * `<form>`, "link" for an `<a href>` (LINK_ACTION_SELECTOR), else "click".
  */
 export function markupKind(el: Element): ActionKind {
-  const isForm = el.tagName === "FORM";
-  const isLink = el.matches(LINK_ACTION_SELECTOR);
-  switch (el.getAttribute(ACTION_KIND_ATTR)?.trim()) {
+  return kindOf(el.getAttribute(ACTION_KIND_ATTR)?.trim(), el.tagName === "FORM", el.matches(LINK_ACTION_SELECTOR));
+}
+
+/** markupKind from the kind attribute and whether the element is a `<form>` or an `<a href>`. */
+function kindOf(attr: string | undefined, isForm: boolean, isLink: boolean): ActionKind {
+  switch (attr) {
     case "handler":
       return "handler";
     case "click":
@@ -170,74 +173,167 @@ export interface DifferingDuplicate {
   name: string;
   /** Distinct definitions. */
   count: number;
-  /** What differs from the first definition, such as `kind click vs link` (see duplicateNameWarnings). */
+  /** The distinct definitions, in document order of their first element. */
+  definitions: MarkupDefinition[];
+  /** What differs between them, such as `kind click vs link` (see duplicateNameWarnings). */
   differences: string[];
+}
+
+/** What the agent map knows about a page, so a duplicate-name warning reads as agents.json does. */
+export interface DuplicateWarningContext {
+  /** The page's URL: hrefs are compared and shown resolved against it, as agents.json lists them. */
+  pageUrl?: string;
+  /** The action agents.json lists for `name` on the page; without it, the winner follows firstPerName's precedence. */
+  listed?: (name: string) => AgentActionDescriptor | undefined;
+  /** Names that the definition listed on this page alone keeps out of `site.actions`. */
+  keptOutOfSite?: ReadonlySet<string>;
 }
 
 /** Longest value shown in a duplicate-name warning. */
 const MAX_SHOWN_VALUE = 40;
 /** Distinct values shown per field; the rest are counted. */
 const MAX_SHOWN_VALUES = 4;
+/** Longest page path shown in a duplicate-name warning. */
+const MAX_SHOWN_PAGE = 200;
 
 /** A value as shown: "unset" when absent, bare when a simple word, else quoted; sanitized and cut. */
-function shownValue(v: string | boolean | null | undefined): string {
+function shownValue(v: string | boolean): string {
   if (v === true) return "true";
-  if (v === false || v === null || v === undefined || v === "") return "unset";
+  if (v === false || v === "") return "unset";
   const s = safeText(v, MAX_SHOWN_VALUE);
-  return /^[\w.…-]+$/.test(s) ? s : JSON.stringify(s);
+  return /^[\w.\u2026-]+$/.test(s) ? s : JSON.stringify(s);
+}
+
+type Compared = (d: MarkupDefinition, pageUrl: string | undefined) => string | boolean;
+
+/** An href as agents.json lists it: resolved against the page URL when it can be; "" when absent. */
+function comparedHref(href: string | null, pageUrl: string | undefined): string {
+  if (!href || pageUrl === undefined) return href ?? "";
+  const r = resolveLinkHref(href, pageUrl);
+  return r.ok ? r.href : href;
 }
 
 /** The compared hint fields, in message order; the input schema (`fields`) is checked after them. */
-const COMPARED: ReadonlyArray<[label: string, get: (d: MarkupDefinition) => string | boolean | null]> = [
+const COMPARED: ReadonlyArray<[label: string, get: Compared]> = [
   ["kind", (d) => d.kind],
-  ["href", (d) => d.href],
+  ["href", (d, pageUrl) => comparedHref(d.href, pageUrl)],
   ["description", (d) => d.description],
   ["destructive", (d) => d.destructive],
   ["readOnly", (d) => d.readOnly],
 ];
 
+const definitionKey = (d: MarkupDefinition, pageUrl: string | undefined): string =>
+  JSON.stringify([...COMPARED.map(([, get]) => get(d, pageUrl)), d.fields ?? null]);
+
+/** Code points two strings share at the start. */
+function sharedPrefix(a: string, b: string): number {
+  const x = Array.from(a);
+  const y = Array.from(b);
+  let i = 0;
+  while (i < x.length && i < y.length && x[i] === y[i]) i++;
+  return i;
+}
+
+/** Why distinct raw values print alike: whitespace, invisible characters, or a cut. */
+function hiddenDifference(raws: readonly string[]): string {
+  const same = (f: (s: string) => string) => new Set(raws.map(f)).size < raws.length;
+  if (same(collapseWhitespace)) return "differs in whitespace";
+  const clean = raws.map((v) => safeText(v, Infinity));
+  if (new Set(clean).size < raws.length) return "differs in control or bidi characters";
+  let at = Infinity;
+  clean.forEach((a, i) => {
+    for (const b of clean.slice(i + 1)) if (shownValue(a) === shownValue(b)) at = Math.min(at, sharedPrefix(a, b));
+  });
+  return `differs after ${at} characters`;
+}
+
 /**
- * Each field on which the distinct definitions `defs` differ, with its distinct values, the first
- * definition's first; the input schema is named, never printed.
+ * Each field on which the distinct definitions `defs` differ, decided on the raw values (hrefs
+ * resolved), with its distinct values, the first definition's first. Values that would print alike
+ * (cut, or differing only in whitespace or invisible characters) are described instead. The input
+ * schema is named, never printed.
  */
-function differencesOf(defs: readonly MarkupDefinition[]): string[] {
+function differencesOf(defs: readonly MarkupDefinition[], pageUrl: string | undefined): string[] {
   const out: string[] = [];
   for (const [label, get] of COMPARED) {
-    const values = [...new Set(defs.map((d) => shownValue(get(d))))];
-    if (values.length < 2) continue;
-    const more = values.length - MAX_SHOWN_VALUES;
-    out.push(`${label} ${values.slice(0, MAX_SHOWN_VALUES).join(" vs ")}${more > 0 ? `, +${more} more` : ""}`);
+    const raws = [...new Set(defs.map((d) => get(d, pageUrl)))];
+    if (raws.length < 2) continue;
+    const shown = raws.map(shownValue);
+    if (new Set(shown).size < raws.length) {
+      out.push(`${label} (${hiddenDifference(raws as string[])})`);
+      continue;
+    }
+    const more = shown.length - MAX_SHOWN_VALUES;
+    out.push(`${label} ${shown.slice(0, MAX_SHOWN_VALUES).join(" vs ")}${more > 0 ? `, +${more} more` : ""}`);
   }
   if (new Set(defs.map((d) => JSON.stringify(d.fields ?? null))).size > 1) out.push("input schema");
   return out;
 }
 
 /**
- * Names that more than one element on a page defines differently, with the number of distinct
- * definitions and what differs, in first-seen order. Identical copies (a product grid) are not reported.
+ * Valid names that more than one element on a page defines differently, with the distinct
+ * definitions and what differs, in first-seen order. Identical copies (a product grid) are not
+ * reported, nor are hrefs that resolve alike against `pageUrl`. Invalid names are skipped: they are
+ * reported as invalid and never listed.
  */
-export function differingDuplicates(defs: readonly MarkupDefinition[]): DifferingDuplicate[] {
+export function differingDuplicates(defs: readonly MarkupDefinition[], pageUrl?: string): DifferingDuplicate[] {
   const byName = new Map<string, Map<string, MarkupDefinition>>();
   for (const d of defs) {
+    if (!isValidActionName(d.name)) continue;
     const distinct = byName.get(d.name) ?? new Map<string, MarkupDefinition>();
-    const key = JSON.stringify([d.kind, d.description, d.destructive, d.readOnly, d.href, d.fields ?? null]);
+    const key = definitionKey(d, pageUrl);
     if (!distinct.has(key)) distinct.set(key, d);
     byName.set(d.name, distinct);
   }
   return [...byName]
     .filter(([, distinct]) => distinct.size > 1)
-    .map(([name, distinct]) => ({ name, count: distinct.size, differences: differencesOf([...distinct.values()]) }));
+    .map(([name, distinct]) => {
+      const definitions = [...distinct.values()];
+      return { name, count: definitions.length, definitions, differences: differencesOf(definitions, pageUrl) };
+    });
+}
+
+/** The kind the runtime gives a definition's element (see markupKind). */
+const definitionKind = (d: MarkupDefinition): ActionKind => kindOf(d.kind || undefined, d.fields !== undefined, d.href !== null);
+
+const KIND_PHRASE: Record<ActionKind, string> = { handler: "a handler action", form: "a form", click: "a click action", link: "a link" };
+const ORDINALS = ["first", "second", "third", "fourth", "fifth"];
+
+/** "the first, a link, is listed", or how else agents.json picked the listed action. */
+function listedText(defs: readonly MarkupDefinition[], name: string, ctx: DuplicateWarningContext): string {
+  const listed = ctx.listed?.(name);
+  let i: number;
+  if (listed) {
+    const matches = defs
+      .map((d, j) => [d, j] as const)
+      .filter(([d]) => definitionKind(d) === listed.kind && (listed.kind !== "link" || comparedHref(d.href, ctx.pageUrl) === listed.href));
+    i = (matches.find(([d]) => d.description.trim() === listed.description) ?? matches[0])?.[1] ?? -1;
+    if (i < 0) return `the ${listed.kind} action registered on the page is listed`;
+  } else {
+    // firstPerName's precedence: form and click (and handler) actions win over links, then document order.
+    i = Math.max(0, defs.findIndex((d) => definitionKind(d) !== "link"));
+  }
+  const nth = ORDINALS[i] ?? `${i + 1}th`;
+  return `the ${nth}, ${KIND_PHRASE[definitionKind(defs[i]!)]}, is listed`;
 }
 
 /**
- * One line per name defined differently on `page`, naming what differs, such as `/contact: 2
- * different actions named open-resume (differ in: kind click vs link, readOnly true vs unset); only
- * the first is listed`. The one message for both the build plugin and generate.
+ * One line per valid name defined differently on `page`, naming what differs and which definition
+ * agents.json lists, such as `/contact: 2 different actions named open_status (differ in: href
+ * "https://status.example.com/v2" vs "https://status.example.com/"); the first, a link, is listed,
+ * which keeps open_status out of site.actions`. Page-derived values are sanitized and cut. The one
+ * message for both the build plugin and generate.
  */
-export function duplicateNameWarnings(page: string, defs: readonly MarkupDefinition[]): string[] {
-  return differingDuplicates(defs).map(
-    (d) => `${page}: ${d.count} different actions named ${d.name} (differ in: ${d.differences.join(", ")}); only the first is listed`,
-  );
+export function duplicateNameWarnings(page: string, defs: readonly MarkupDefinition[], ctx: DuplicateWarningContext = {}): string[] {
+  const where = safeText(page, MAX_SHOWN_PAGE);
+  return differingDuplicates(defs, ctx.pageUrl).map(({ name, definitions, differences }) => {
+    const site = ctx.keptOutOfSite?.has(name) ? `, which keeps ${name} out of site.actions` : "";
+    return (
+      `${where}: ${definitions.length} different actions named ${name} (differ in: ${differences.join(", ")}); ` +
+      listedText(definitions, name, ctx) +
+      site
+    );
+  });
 }
 
 /** A link action as found in markup, before its href is checked. JSON-serializable. */
