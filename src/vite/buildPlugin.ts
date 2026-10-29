@@ -12,7 +12,16 @@ import { extensionSummaries, type PrerenderExtension } from "./prerender/extensi
 import { MAX_ROUTE_BYTES, MAX_SEGMENT_BYTES, publicUrl, routeHtmlFile, routeMdFile, shortRoute } from "./prerender/paths";
 import { buildRobots } from "./robots";
 import { buildSitemap, sitemapLastmods } from "./sitemap";
-import { dropFileCollisions, fileOf, pageLengthWarnings, pageMarkdown, prefixed, SPA_FALLBACK_FILE, stageSiteFiles } from "./siteFiles";
+import {
+  dropFileCollisions,
+  fileOf,
+  pageCountText,
+  pageLengthWarnings,
+  pageMarkdown,
+  prefixed,
+  SPA_FALLBACK_FILE,
+  stageSiteFiles,
+} from "./siteFiles";
 
 export { SPA_FALLBACK_FILE };
 
@@ -167,14 +176,12 @@ export function createBuildPlugin(resolved: ResolvedOptions, extensions: Prerend
       );
     }
     for (const w of pageLengthWarnings(listed)) logger.warn(w);
-    // Name only the files this build writes (sitemap: false or llms: false leave them out).
-    const listedIn = [resolved.llms ? "llms.txt" : "", resolved.sitemap ? "the sitemap" : ""].filter(Boolean).join(" and ");
     const fromPublic = resolved.sitemap ? sitemapRoutes.length - listed.length : 0;
-    const publicNote =
+    const note =
       fromPublic > 0 ? `; the sitemap also keeps ${plural(fromPublic, "configured route")} served from publicDir` : "";
-    const detail = listedIn ? ` (${listed.length} listed in ${listedIn}${publicNote})` : "";
+    const routes = pageCountText("route", result.pages, { llms: !!resolved.llms, sitemap: !!resolved.sitemap, note });
     const counts = extensionSummaries(extensions).map((c) => `, ${c}`).join("");
-    logger.info(`${LOG_PREFIX} prerendered ${plural(result.pages.length, "route")}${detail}${counts}`);
+    logger.info(`${LOG_PREFIX} prerendered ${routes}${counts}`);
   };
 
   return {

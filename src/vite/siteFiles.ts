@@ -3,6 +3,7 @@ import { buildPageMarkdown } from "../shared/markdown";
 import { LLMS_FULL_TXT_PATH, LLMS_TXT_PATH } from "../shared/conventions";
 import { errorMessage, LOG_PREFIX, withPrefix } from "../shared/errors";
 import { metaLengthWarnings, type MetaLengthPage } from "../shared/metaLength";
+import { plural } from "../shared/text";
 import type { FileStager } from "./fileStager";
 import { buildLlmsFullTxt, buildLlmsTxt, type LlmsPage, type LlmsSection } from "./llms";
 import type { ResolvedMarkdown, ResolvedOptions } from "./options";
@@ -102,6 +103,31 @@ export async function pageMarkdown(
     throw new Error(withPrefix(`markdown.transform must return a string or undefined (got ${typeof out} for ${shortRoute(page.route)})`));
   }
   return out;
+}
+
+/**
+ * The pages part of a one-line summary, such as "21 routes (20 listed in llms.txt and the sitemap,
+ * 1 noindex)". Listed pages are the ones in llms.txt, the sitemap and the agent map (whose page
+ * count the audit reports), so every summary gives the same number. Only the files written are
+ * named; `note` goes last, inside the parentheses.
+ */
+export function pageCountText(
+  noun: string,
+  pages: ReadonlyArray<{ listed: boolean; info: { noindex: boolean } }>,
+  opts: { llms: boolean; sitemap: boolean; note?: string },
+): string {
+  const listedIn = [opts.llms ? "llms.txt" : "", opts.sitemap ? "the sitemap" : ""].filter(Boolean).join(" and ");
+  const listed = pages.filter((p) => p.listed).length;
+  const noindex = pages.filter((p) => !p.listed && p.info.noindex).length;
+  // The plugin also leaves out routes that redirect to another route.
+  const redirected = pages.length - listed - noindex;
+  const parts = [
+    ...(listedIn ? [`${listed} listed in ${listedIn}`] : []),
+    ...(noindex > 0 ? [`${noindex} noindex`] : []),
+    ...(redirected > 0 ? [`${redirected} redirected`] : []),
+  ];
+  const detail = parts.join(", ") + (opts.note ?? "");
+  return plural(pages.length, noun) + (detail ? ` (${detail})` : "");
 }
 
 /** Grouped title and description length warnings for listed pages. */

@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it, vi } from "vitest";
+import { agentMapStats } from "../../src/shared/agent";
 import { agentMapExtension } from "../../src/vite/agentMap";
 import { createBuildPlugin } from "../../src/vite/buildPlugin";
 import { resolveOptions, type WebForAgentsOptions } from "../../src/vite/options";
@@ -506,6 +507,19 @@ describe("createBuildPlugin", () => {
     expect(noSitemap).toMatch(/prerendered \d+ routes? \(\d+ listed in llms\.txt\), \d+ actions?$/);
     expect(await summary({ sitemap: false, llms: false, prerender: { crawl: false } })).toMatch(/prerendered \d+ routes?, \d+ actions?$/);
     expect(await summary({ sitemap: false, llms: false, agentMap: false, prerender: { crawl: false } })).toMatch(/prerendered \d+ routes?$/);
+  }, 30_000);
+
+  it("the summary counts noindex and redirected routes; the listed count matches the sitemap and agents.json", async () => {
+    const t = make({}, [agentMapExtension({ siteUrl: "https://a.com", fileName: "agents.json" })]);
+    await t.run();
+    const line = t.info.mock.calls.map((c) => String(c[0])).find((m) => /prerendered \d+ routes?/.test(m))!;
+    const m = /^\[web-for-agents\] prerendered (\d+) routes \((\d+) listed in llms\.txt and the sitemap, 1 noindex, 1 redirected\), \d+ actions?$/.exec(line);
+    expect(m, line).not.toBeNull();
+    const [total, listed] = [Number(m![1]), Number(m![2])];
+    expect(total).toBe(listed + 2);
+    expect(t.read("sitemap.xml").match(/<loc>/g)).toHaveLength(listed);
+    // What the audit's agent map check reports.
+    expect(agentMapStats(JSON.parse(t.read("agents.json"))).pages).toBe(listed);
   }, 30_000);
 
   it("the summary names configured routes the sitemap keeps from publicDir", async () => {
