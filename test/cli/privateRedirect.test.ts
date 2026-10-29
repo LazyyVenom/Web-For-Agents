@@ -22,6 +22,19 @@ describe("isPrivateIp / isPrivateHost", () => {
       expect(isPrivateIp(ip), ip).toBe(false);
     }
   });
+  it("covers reserved IPv4 ranges and IPv6 forms that embed an IPv4 address", () => {
+    for (const ip of [
+      "198.18.0.1", "198.19.255.255", "100.127.0.1", "0.1.2.3", "224.0.0.1", "255.255.255.255", "192.0.0.8",
+      "::", "::ffff:7f00:1", "::ffff:a9fe:a9fe", "::a9fe:a9fe", "::127.0.0.1", "64:ff9b::a9fe:a9fe", "64:ff9b::10.0.0.1",
+      "64:ff9b:1::1", "2002:a9fe:a9fe::", "2002:0a00:0001::1", "fec0::1", "fc00::1", "fdff::1", "fe80::1%lo0", "febf::1", "ff02::1",
+    ]) {
+      expect(isPrivateIp(ip), ip).toBe(true);
+    }
+    for (const ip of ["198.20.0.1", "198.17.255.255", "100.128.0.1", "1.1.1.1", "64:ff9b::808:808", "2002:808:808::", "2606:4700::1111", "::ffff:1.1.1.1"]) {
+      expect(isPrivateIp(ip), ip).toBe(false);
+    }
+  });
+
   it("treats localhost names and bracketed IPv6 literals as private without DNS", async () => {
     expect(await isPrivateHost("localhost")).toBe(true);
     expect(await isPrivateHost("app.localhost")).toBe(true);
