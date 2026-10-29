@@ -1,7 +1,22 @@
-/** Recommended title and meta description lengths, in characters. */
+/** Recommended title and meta description lengths, in characters as measured by metaLength. */
 export const TITLE_MAX_CHARS = 60;
 export const DESCRIPTION_MIN_CHARS = 50;
 export const DESCRIPTION_MAX_CHARS = 160;
+
+/** East Asian wide characters: Han, Hiragana, Katakana, Hangul, CJK punctuation and fullwidth forms. */
+const WIDE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}　-〿！-｠￠-￦]/u;
+/** Halfwidth Katakana and Hangul are narrow although their scripts are not. */
+const HALFWIDTH = /[｡-ￜ]/u;
+
+/**
+ * The length search engines budget for a title or description: wide characters (see WIDE) count as 2,
+ * since a snippet fits about half as many of them; every other code point counts as 1.
+ */
+export function metaLength(text: string): number {
+  let n = 0;
+  for (const c of text) n += WIDE.test(c) && !HALFWIDTH.test(c) ? 2 : 1;
+  return n;
+}
 
 export interface MetaLengthPage {
   route: string;
@@ -15,10 +30,12 @@ export function metaLengthWarnings(pages: MetaLengthPage[]): string[] {
   const shortDesc: string[] = [];
   const longDesc: string[] = [];
   for (const { route, title, description } of pages) {
-    if (title && title.length > TITLE_MAX_CHARS) longTitle.push(`${route} (${title.length})`);
+    const t = title ? metaLength(title) : 0;
+    if (t > TITLE_MAX_CHARS) longTitle.push(`${route} (${t})`);
     if (!description) continue;
-    if (description.length < DESCRIPTION_MIN_CHARS) shortDesc.push(`${route} (${description.length})`);
-    else if (description.length > DESCRIPTION_MAX_CHARS) longDesc.push(`${route} (${description.length})`);
+    const d = metaLength(description);
+    if (d < DESCRIPTION_MIN_CHARS) shortDesc.push(`${route} (${d})`);
+    else if (d > DESCRIPTION_MAX_CHARS) longDesc.push(`${route} (${d})`);
   }
   const out: string[] = [];
   if (longTitle.length > 0) {

@@ -3,7 +3,7 @@ import { AI_BOTS } from "../shared/bots";
 import { AGENT_MAP_PATH, LLMS_TXT_PATH, MARKDOWN_MIME, ROBOTS_PATH, SITEMAP_PATH } from "../shared/conventions";
 import { errorMessage } from "../shared/errors";
 import { jsonLdNodes, jsonLdTypes } from "../shared/jsonLd";
-import { DESCRIPTION_MAX_CHARS, DESCRIPTION_MIN_CHARS, TITLE_MAX_CHARS } from "../shared/metaLength";
+import { DESCRIPTION_MAX_CHARS, DESCRIPTION_MIN_CHARS, metaLength, TITLE_MAX_CHARS } from "../shared/metaLength";
 import { checkSchemaNodes, SCHEMA_RULES, type SchemaIssue, type SchemaRule } from "../shared/schemaRules";
 import { stripBom } from "../shared/text";
 import { hasScheme, trimTrailingSlash, tryResolveUrl } from "../shared/url";
@@ -165,8 +165,9 @@ function checkTitle({ html }: AuditInputs): Outcome {
   const fix = `Set a page title with <Seo title="..." /> (at most ${TITLE_MAX_CHARS} characters).`;
   const t = html.title;
   if (!t) return fail("No <title> found", fix);
-  if (t.length > TITLE_MAX_CHARS) return warn(`Title is ${t.length} characters (over ${TITLE_MAX_CHARS})`, fix);
-  return pass(`Title is ${t.length} characters`);
+  const n = metaLength(t);
+  if (n > TITLE_MAX_CHARS) return warn(`Title is ${n} characters (over ${TITLE_MAX_CHARS})`, fix);
+  return pass(`Title is ${n} characters`);
 }
 
 function checkDescription({ html }: AuditInputs): Outcome {
@@ -174,10 +175,11 @@ function checkDescription({ html }: AuditInputs): Outcome {
   const fix = `Add <Seo description="..." /> with ${range} characters.`;
   const d = getMeta(html, { name: "description" })?.trim();
   if (!d) return fail("No meta description found", fix);
-  if (d.length < DESCRIPTION_MIN_CHARS || d.length > DESCRIPTION_MAX_CHARS) {
-    return warn(`Meta description is ${d.length} characters (aim for ${range})`, fix);
+  const n = metaLength(d);
+  if (n < DESCRIPTION_MIN_CHARS || n > DESCRIPTION_MAX_CHARS) {
+    return warn(`Meta description is ${n} characters (aim for ${range})`, fix);
   }
-  return pass(`Meta description is ${d.length} characters`);
+  return pass(`Meta description is ${n} characters`);
 }
 
 function checkOpenGraph({ html }: AuditInputs): Outcome {

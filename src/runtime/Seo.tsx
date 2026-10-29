@@ -2,7 +2,7 @@ import { createContext, createElement, useContext, useEffect, useLayoutEffect, u
 import type { ReactNode } from "react";
 import { buildEntryTags, buildHeadTags, defaultCanonicalTags } from "./buildHeadTags";
 import { HEAD_OWNED_ATTR } from "../shared/conventions";
-import { DESCRIPTION_MAX_CHARS, DESCRIPTION_MIN_CHARS, TITLE_MAX_CHARS } from "../shared/metaLength";
+import { DESCRIPTION_MAX_CHARS, DESCRIPTION_MIN_CHARS, metaLength, TITLE_MAX_CHARS } from "../shared/metaLength";
 import { applyHeadTags, removeHeadTag } from "./headManager";
 import type { HeadTag, SeoDefaults, SeoProps } from "./types";
 
@@ -142,11 +142,13 @@ function warnLengths(merged: Map<string, HeadTag>): void {
       warnedLengths.add(message + value);
       console.warn(`[web-for-agents] ${message}: "${value}"`);
     };
-    if (title && title.length > TITLE_MAX_CHARS) {
-      once(title, `<Seo> title is ${title.length} characters (over ${TITLE_MAX_CHARS})`);
+    const titleLength = title ? metaLength(title) : 0;
+    const descriptionLength = description ? metaLength(description) : 0;
+    if (title && titleLength > TITLE_MAX_CHARS) {
+      once(title, `<Seo> title is ${titleLength} characters (over ${TITLE_MAX_CHARS})`);
     }
-    if (description && (description.length < DESCRIPTION_MIN_CHARS || description.length > DESCRIPTION_MAX_CHARS)) {
-      once(description, `<Seo> description is ${description.length} characters (aim for ${DESCRIPTION_MIN_CHARS}-${DESCRIPTION_MAX_CHARS})`);
+    if (description && (descriptionLength < DESCRIPTION_MIN_CHARS || descriptionLength > DESCRIPTION_MAX_CHARS)) {
+      once(description, `<Seo> description is ${descriptionLength} characters (aim for ${DESCRIPTION_MIN_CHARS}-${DESCRIPTION_MAX_CHARS})`);
     }
   }
 }

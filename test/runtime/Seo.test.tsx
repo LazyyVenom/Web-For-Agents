@@ -454,6 +454,17 @@ describe("Seo length warnings", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it("counts East Asian wide characters as 2", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    // 40 characters of Japanese fill a snippet; 40 of English do not.
+    render(<Seo title="宿" description={"静かな湖畔の宿で季節ごとに変わる景色と地元の料理をゆっくり楽しめます。富士山の麓"} />);
+    expect(warn).not.toHaveBeenCalled();
+    render(<Seo title={"山".repeat(31)} description={"d".repeat(40)} />);
+    const calls = warn.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(calls[0]).toContain("<Seo> title is 62 characters (over 60)");
+    expect(calls[1]).toContain("<Seo> description is 40 characters (aim for 50-160)");
+  });
+
   it("does not warn in production", () => {
     vi.stubEnv("NODE_ENV", "production");
     render(<Seo title={"t".repeat(80)} description={"x" + long} />);
