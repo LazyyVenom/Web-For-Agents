@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseCliArgs } from "../../src/cli/args";
+import { runCli } from "../../src/cli/index";
 import { packagedSkillDir, runSkill, type SkillRunOptions } from "../../src/cli/skill";
 import type { SkillArgs } from "../../src/cli/args";
 
@@ -37,6 +38,13 @@ describe("packagedSkillDir", () => {
   it("finds skills/web-for-agents next to this package's package.json", () => {
     expect(packagedSkillDir(path.join(repo, "src/cli/skill.ts"))).toBe(path.join(repo, "skills/web-for-agents"));
     expect(packagedSkillDir(path.join(repo, "dist/bin.js"))).toBe(path.join(repo, "skills/web-for-agents"));
+  });
+
+  it("runCli skill --print prints the package's own SKILL.md", async () => {
+    let out = "";
+    const code = await runCli(["skill", "--print"], { stdout: (s) => void (out += s), stderr: () => {} });
+    expect(code).toBe(0);
+    expect(out).toBe(readFileSync(path.join(repo, "skills/web-for-agents/SKILL.md"), "utf8"));
   });
 
   it("throws when no package.json of this package is above the file", () => {

@@ -216,7 +216,7 @@ afterAll(async () => {
 const read = (rel: string) => readFileSync(path.join(dist, rel), "utf8");
 
 describe(`packed package in a Vite ${viteMajor} app`, () => {
-  it("ships only dist, the docs and package metadata", () => {
+  it("ships only dist, the docs, the skill and package metadata", () => {
     expect(packedFiles).toContain("dist/bin.js");
     expect(packedFiles).toContain("CHANGELOG.md");
     expect(packedFiles).toContain("schemas/agents.v2.schema.json");
@@ -231,6 +231,7 @@ describe(`packed package in a Vite ${viteMajor} app`, () => {
     const docs = readdirSync(path.join(repo, "docs")).filter((f) => f.endsWith(".md"));
     expect(docs.length).toBeGreaterThan(0);
     for (const doc of docs) expect(packedFiles).toContain(`docs/${doc}`);
+    expect(packedFiles).toContain("skills/web-for-agents/SKILL.md");
     expect(packedFiles.filter((f) => f.startsWith("src/") || f.startsWith("test/"))).toEqual([]);
   });
 
@@ -353,6 +354,16 @@ describe("packed package without vite", () => {
       expect(existsSync(path.join(site, f)), f).toBe(true);
     }
     expect(readFileSync(path.join(site, "about.html"), "utf8")).toContain('href="https://example.com/about.md"');
+  });
+
+  it("the installed CLI copies the packaged skill into the project", async () => {
+    const bin = path.join(bare, "node_modules/.bin/web-for-agents");
+    const out = await sh(bin, ["skill"], bare);
+    expect(out).toContain("use the web-for-agents skill");
+    const copied = readFileSync(path.join(bare, ".claude/skills/web-for-agents/SKILL.md"), "utf8");
+    expect(copied).toBe(readFileSync(path.join(bare, "node_modules/@anubhav-choubey/web-for-agents/skills/web-for-agents/SKILL.md"), "utf8"));
+    expect(copied).toMatch(/^---\nname: web-for-agents\n/);
+    expect(await sh(bin, ["skill", "--print"], bare)).toBe(copied);
   });
 
   it("the /schema and /link entries run in Node without react or react-dom installed", async () => {
