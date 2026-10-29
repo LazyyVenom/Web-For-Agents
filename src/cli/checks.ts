@@ -180,12 +180,17 @@ function checkDescription({ html }: AuditInputs): Outcome {
   return pass(`Meta description is ${lengthText(d)}`);
 }
 
+/** "a", "a and b", "a, b and c". */
+const andList = (items: readonly string[]): string =>
+  items.length < 2 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+
 function checkOpenGraph({ html }: AuditInputs): Outcome {
-  const tags = ["og:title", "og:description", "og:image"];
-  const missing = tags.filter((t) => !getMeta(html, { property: t })?.trim());
-  const fix = "Pass title, description and image to <Seo>; it emits og:title, og:description and og:image.";
+  const props = ["title", "description", "image"];
+  const absent = props.filter((p) => !getMeta(html, { property: `og:${p}` })?.trim());
+  const missing = absent.map((p) => `og:${p}`);
+  const fix = `Pass ${andList(absent)} to <Seo> (${andList(missing)} ${missing.length === 1 ? "is" : "are"} missing).`;
   if (missing.length === 0) return pass("og:title, og:description and og:image are present");
-  if (missing.length === tags.length) return fail("No Open Graph tags found", fix);
+  if (missing.length === props.length) return fail("No Open Graph tags found", fix);
   return warn(`Missing ${missing.join(", ")}`, fix);
 }
 
