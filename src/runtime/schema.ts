@@ -1,3 +1,5 @@
+import { withPrefix } from "../shared/errors";
+
 export type JsonLdNode = {
   "@context"?: "https://schema.org";
   "@type": string;
@@ -274,7 +276,7 @@ export type RecipeInput = {
   recipeIngredient?: string[];
   /** One step per entry: text, written as a `HowToStep`, or a `HowToStep` or `HowToSection` node or a ref. */
   recipeInstructions?: Array<string | JsonLdEmbeddable>;
-  /** ISO 8601 durations, such as "PT30M" or "PT1H15M", written unchanged. Anything else throws a TypeError. */
+  /** ISO 8601 durations, such as "PT30M" or "PT1H15M", written unchanged. Anything else is left out with a warning. */
   prepTime?: string;
   cookTime?: string;
   totalTime?: string;
@@ -298,10 +300,12 @@ export type RecipeInput = {
 /** An ISO 8601 duration, checked loosely: `P`, then numbers with designators (`Y M W D`, and `H M S` after `T`). */
 const DURATION = /^P(?=.*\d)[\d.,YMWD]*(T[\d.,HMS]+)?$/i;
 
+/** Durations often come from content, so a malformed one is left out with a warning instead of throwing. */
 function duration(field: string, v: string | null | undefined): string | undefined {
   if (v === undefined || v === null) return undefined;
   if (typeof v !== "string" || !DURATION.test(v)) {
-    throw new TypeError(`schema.recipe: ${field} must be an ISO 8601 duration such as "PT30M" (got ${JSON.stringify(v)})`);
+    console.warn(withPrefix(`schema.recipe: ${field} must be an ISO 8601 duration such as "PT30M", got ${JSON.stringify(v)}; left out`));
+    return undefined;
   }
   return v;
 }

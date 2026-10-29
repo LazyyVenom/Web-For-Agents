@@ -102,7 +102,7 @@ Search engines truncate long titles and descriptions, and very short description
   - `name` and `image` are required. `image` is a URL, an array of URLs (Google recommends 16x9, 4x3 and 1x1 photos of the dish), or an `ImageObject` node or a ref.
   - `author`: a person's name, `{ name, url }`, a node or a ref, or an array of them. Also `datePublished`, `description`, `url` and `inLanguage`.
   - `recipeIngredient`: one string per ingredient. `recipeInstructions`: one entry per step; a string is written as a `HowToStep` with `text`, and a `HowToStep` or `HowToSection` node (or a ref) is kept as it is.
-  - `prepTime`, `cookTime` and `totalTime`: ISO 8601 durations such as `"PT30M"` or `"PT1H15M"`, written unchanged. A value that is not one (`"30 minutes"`) throws a `TypeError`.
+  - `prepTime`, `cookTime` and `totalTime`: ISO 8601 durations such as `"PT30M"` or `"PT1H15M"`, written unchanged. A value that is not one (`"30 minutes"`) is left out, with a console warning.
   - `recipeYield` (such as `4` or `"1 loaf"`), `recipeCategory`, `recipeCuisine`, `keywords` (a string or an array, written comma-separated).
   - `nutrition`: `{ calories, proteinContent, fatContent, ... }` (the `NutritionInput` type; text with units, such as `"240 calories"`), written as a `NutritionInformation`, or a node or a ref.
   - `aggregateRating` and `review`: as in `schema.product`. `video`: a `VideoObject` node or a ref (or use `extra`).

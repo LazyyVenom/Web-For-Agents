@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { schema, serializeJsonLd } from "../../src/runtime/schema";
 
 describe("schema builders", () => {
@@ -841,7 +841,7 @@ describe("schema.recipe", () => {
     ).toEqual({ "@context": "https://schema.org", "@type": "Recipe", name: "D", image: "i" });
   });
 
-  it("checks durations loosely as ISO 8601 and writes them unchanged", () => {
+  it("checks durations loosely as ISO 8601, writes valid ones unchanged and leaves bad ones out with a warning", () => {
     for (const d of ["PT1H30M", "P1D", "PT45M", "pt20m", "PT0.5H", "P1DT2H"]) {
       expect(schema.recipe({ name: "D", image: "i", cookTime: d }).cookTime).toBe(d);
     }
@@ -852,9 +852,12 @@ describe("schema.recipe", () => {
       ["totalTime", "1H"],
       ["prepTime", ""],
     ] as const) {
-      expect(() => schema.recipe({ name: "D", image: "i", [field]: d }), `${field} ${d}`).toThrow(
-        new TypeError(`schema.recipe: ${field} must be an ISO 8601 duration such as "PT30M" (got ${JSON.stringify(d)})`),
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      expect(schema.recipe({ name: "D", image: "i", [field]: d })[field], `${field} ${d}`).toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(
+        `[web-for-agents] schema.recipe: ${field} must be an ISO 8601 duration such as "PT30M", got ${JSON.stringify(d)}; left out`,
       );
+      warn.mockRestore();
     }
   });
 
