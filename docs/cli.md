@@ -61,7 +61,7 @@ The JSON-LD check fails when there is no JSON-LD or none of it parses. It warns 
 `Article`, `NewsArticle`, `BlogPosting`, `Organization` and `Person` have no required properties, so they are never flagged. Other types are not checked. Google stopped showing FAQ rich results on 7 May 2026. It still reads `FAQPage` markup, so the check still uses Google's last documented FAQ requirements.
 If `FAQPage` gaps are the only issues, the check still passes at full weight and lists them in its message, because answer engines may still use the markup. A gap in any other type still warns. Its message names that gap first, and any `FAQPage` gaps follow as a note.
 
-The rules, with Google's recommended properties and a documentation link per type, live as plain data in `SCHEMA_RULES` in `src/shared/schemaRules.ts` (internal, not a package export).
+The rules, with Google's recommended properties and a documentation link per type, live as plain data in `SCHEMA_RULES` in [`src/shared/schemaRules.ts`](https://github.com/LazyyVenom/Web-For-Agents/blob/master/src/shared/schemaRules.ts) in the repository (internal, not a package export).
 
 A passing check earns its full weight, a warning half, a failure none. Each non-passing check prints a `Fix:` line.
 

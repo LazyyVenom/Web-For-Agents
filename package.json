@@ -36,7 +36,8 @@
   "files": [
     "dist",
     "CHANGELOG.md",
-    "schemas"
+    "schemas",
+    "docs"
   ],
   "bin": {
     "web-for-agents": "dist/bin.js"

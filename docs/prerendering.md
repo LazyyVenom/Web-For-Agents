@@ -236,7 +236,7 @@ If `robots.ai.search` is `"block"` while `.md` files, `llms.txt`, `llms-full.txt
 
 ## Performance and memory
 
-Prerendering is fast. As approximate measurements on a laptop: the 12-page demo in `examples/demo` builds and prerenders in about 1.5 seconds, and a 500-route test site prerenders in under 10 seconds with the default settings.
+Prerendering is fast. As approximate measurements on a laptop: the 12-page [demo](https://github.com/LazyyVenom/Web-For-Agents/tree/master/examples/demo) builds and prerenders in about 1.5 seconds, and a 500-route test site prerenders in under 10 seconds with the default settings.
 
 Every page being rendered is held in memory at once. These figures are approximate. A typical page takes tens of MB, but a heavy page (a large DOM, big data payloads) can peak at around 500 MB. Peak memory is roughly `prerender.concurrency` times the heaviest page, plus about 150 MB for the build and 100 MB for the render process; the Chrome renderer adds Chrome's own processes on top. On small CI runners or containers (1 to 2 GB), lower `prerender.concurrency`, for example to `2`. If a render runs out of memory, the build fails with a message suggesting exactly that, rather than crashing.
 
