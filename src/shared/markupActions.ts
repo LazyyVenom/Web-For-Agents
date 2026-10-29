@@ -9,6 +9,7 @@ import {
   WEBMCP_TOOLDESCRIPTION_ATTR,
   WEBMCP_TOOLNAME_ATTR,
 } from "./conventions";
+import { safeSnippet } from "./text";
 import { tryResolveUrl } from "./url";
 
 export interface MarkupAction {
@@ -117,6 +118,32 @@ export interface MarkupDefinition {
   destructive: boolean;
   readOnly: boolean;
   href: string | null;
+  /** `<form>` elements only: its agent-visible fields (see formFields), a stand-in for the input schema. */
+  fields?: string[];
+}
+
+/**
+ * A form's fields as "name:type", with "!" when required and "=values" for options, radios and
+ * checkboxes; skips unnamed fields and the input types an agent never fills. Compared, never shown.
+ * collectAgentPageInPage repeats this in the page: keep both in step.
+ */
+function formFields(form: Element): string[] {
+  const skip = ["hidden", "password", "file", "submit", "button", "reset", "image"];
+  const out: string[] = [];
+  form.querySelectorAll("input, select, textarea").forEach((el) => {
+    const name = el.getAttribute("name");
+    const tag = el.tagName.toLowerCase();
+    const type = tag === "input" ? (el.getAttribute("type") || "text").toLowerCase() : tag;
+    if (!name || skip.includes(type)) return;
+    const values =
+      tag === "select"
+        ? Array.from(el.querySelectorAll("option"), (o) => o.getAttribute("value") ?? o.textContent ?? "")
+        : type === "radio" || type === "checkbox"
+          ? [el.getAttribute("value") ?? "on"]
+          : [];
+    out.push(`${name}:${type}${el.hasAttribute("required") ? "!" : ""}${values.length ? "=" + values.join("|") : ""}`);
+  });
+  return out;
 }
 
 /** Every `data-agent-action` element's hint attributes, in document order; names trimmed, empty names skipped. */
@@ -132,23 +159,85 @@ export function markupDefinitions(doc: ParentNode): MarkupDefinition[] {
       destructive: el.getAttribute(ACTION_DESTRUCTIVE_ATTR) === "true",
       readOnly: el.getAttribute(ACTION_READONLY_ATTR) === "true",
       href: el.tagName === "A" ? el.getAttribute("href") : null,
+      ...(el.tagName === "FORM" ? { fields: formFields(el) } : {}),
     });
   });
   return out;
 }
 
+/** A name that more than one element on a page defines differently. */
+export interface DifferingDuplicate {
+  name: string;
+  /** Distinct definitions. */
+  count: number;
+  /** What differs from the first definition, such as `kind click vs link` (see duplicateNameWarnings). */
+  differences: string[];
+}
+
+/** Longest value shown in a duplicate-name warning. */
+const MAX_SHOWN_VALUE = 40;
+/** Distinct values shown per field; the rest are counted. */
+const MAX_SHOWN_VALUES = 4;
+
+/** A value as shown: "unset" when absent, bare when a simple word, else quoted; sanitized and cut. */
+function shownValue(v: string | boolean | null | undefined): string {
+  if (v === true) return "true";
+  if (v === false || v === null || v === undefined || v === "") return "unset";
+  const s = safeSnippet(v, MAX_SHOWN_VALUE);
+  return /^[\w.…-]+$/.test(s) ? s : JSON.stringify(s);
+}
+
+/** The compared hint fields, in message order; the input schema (`fields`) is checked after them. */
+const COMPARED: ReadonlyArray<[label: string, get: (d: MarkupDefinition) => string | boolean | null]> = [
+  ["kind", (d) => d.kind],
+  ["href", (d) => d.href],
+  ["description", (d) => d.description],
+  ["destructive", (d) => d.destructive],
+  ["readOnly", (d) => d.readOnly],
+];
+
+/**
+ * Each field on which the distinct definitions `defs` differ, with its distinct values, the first
+ * definition's first; the input schema is named, never printed.
+ */
+function differencesOf(defs: readonly MarkupDefinition[]): string[] {
+  const out: string[] = [];
+  for (const [label, get] of COMPARED) {
+    const values = [...new Set(defs.map((d) => shownValue(get(d))))];
+    if (values.length < 2) continue;
+    const more = values.length - MAX_SHOWN_VALUES;
+    out.push(`${label} ${values.slice(0, MAX_SHOWN_VALUES).join(" vs ")}${more > 0 ? `, +${more} more` : ""}`);
+  }
+  if (new Set(defs.map((d) => JSON.stringify(d.fields ?? null))).size > 1) out.push("input schema");
+  return out;
+}
+
 /**
  * Names that more than one element on a page defines differently, with the number of distinct
- * definitions, in first-seen order. Identical copies (a product grid) are not reported.
+ * definitions and what differs, in first-seen order. Identical copies (a product grid) are not reported.
  */
-export function differingDuplicates(defs: readonly MarkupDefinition[]): Array<[string, number]> {
-  const byName = new Map<string, Set<string>>();
+export function differingDuplicates(defs: readonly MarkupDefinition[]): DifferingDuplicate[] {
+  const byName = new Map<string, Map<string, MarkupDefinition>>();
   for (const d of defs) {
-    const keys = byName.get(d.name) ?? new Set<string>();
-    keys.add(JSON.stringify([d.kind, d.description, d.destructive, d.readOnly, d.href]));
-    byName.set(d.name, keys);
+    const distinct = byName.get(d.name) ?? new Map<string, MarkupDefinition>();
+    const key = JSON.stringify([d.kind, d.description, d.destructive, d.readOnly, d.href, d.fields ?? null]);
+    if (!distinct.has(key)) distinct.set(key, d);
+    byName.set(d.name, distinct);
   }
-  return [...byName].filter(([, keys]) => keys.size > 1).map(([name, keys]) => [name, keys.size]);
+  return [...byName]
+    .filter(([, distinct]) => distinct.size > 1)
+    .map(([name, distinct]) => ({ name, count: distinct.size, differences: differencesOf([...distinct.values()]) }));
+}
+
+/**
+ * One line per name defined differently on `page`, naming what differs, such as `/contact: 2
+ * different actions named open-resume (differ in: kind click vs link, readOnly true vs unset); only
+ * the first is listed`. The one message for both the build plugin and generate.
+ */
+export function duplicateNameWarnings(page: string, defs: readonly MarkupDefinition[]): string[] {
+  return differingDuplicates(defs).map(
+    (d) => `${page}: ${d.count} different actions named ${d.name} (differ in: ${d.differences.join(", ")}); only the first is listed`,
+  );
 }
 
 /** A link action as found in markup, before its href is checked. JSON-serializable. */

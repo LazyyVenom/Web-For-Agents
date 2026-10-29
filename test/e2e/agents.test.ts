@@ -120,8 +120,8 @@ describe("agent map build", () => {
   it("warns once per page about a name defined differently by two elements", () => {
     const dup = warnings.filter((w) => w.includes("different actions named"));
     expect(dup).toEqual([
-      "[web-for-agents] /: 2 different actions named subscribe; only the first is listed",
-      "[web-for-agents] /contact: 2 different actions named contact; only the first is listed",
+      `[web-for-agents] /: 2 different actions named subscribe (differ in: description "Subscribe to the newsletter (header)" vs "Subscribe to the newsletter (footer)"); only the first is listed`,
+      `[web-for-agents] /contact: 2 different actions named contact (differ in: kind form vs link, href unset vs "mailto:hello@example.com", description "Send us a message" vs "Email us", input schema); only the first is listed`,
     ]);
   });
 

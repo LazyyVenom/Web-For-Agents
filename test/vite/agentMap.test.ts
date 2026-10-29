@@ -70,7 +70,7 @@ describe("collectAgentPageInPage", () => {
   it("collects every action element's hint attributes exactly as generate's markupDefinitions does", () => {
     const html = `
       <button data-agent-action=" buy " data-agent-description="Buy A" data-agent-kind="handler" data-agent-readonly="true">x</button>
-      <form data-agent-action="find" data-agent-destructive="true"></form>
+      <form data-agent-action="find" data-agent-destructive="true"><input name="q" required><select name="s"><option value="1">1</option><option>Two</option></select><input type="checkbox" name="c"><input type="hidden" name="h"></form>
       <a href="/k" data-agent-action="docs" data-agent-kind="link">x</a>
       <a data-agent-action="no-href">x</a>
       <div data-agent-action="  "></div>
@@ -80,6 +80,7 @@ describe("collectAgentPageInPage", () => {
     w.document.body.innerHTML = html;
     expect(data.markup).toEqual(markupDefinitions(w.document as unknown as Document));
     expect(data.markup.map((d: any) => d.name)).toEqual(["buy", "find", "docs", "no-href"]);
+    expect(data.markup[1].fields).toEqual(["q:text!", "s:select=1|Two", "c:checkbox=on"]);
     w.happyDOM.close();
   });
 });
@@ -406,7 +407,7 @@ describe("agentMapExtension duplicate names", () => {
       emitFile: () => {},
       warn: (m) => void warnings.push(m),
     });
-    expect(warnings).toEqual(["/products: 3 different actions named add_to_cart; only the first is listed"]);
+    expect(warnings).toEqual([`/products: 3 different actions named add_to_cart (differ in: description "Add A" vs "Add B" vs "Add C"); only the first is listed`]);
   });
 });
 

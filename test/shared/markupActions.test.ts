@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   actionGroups,
   differingDuplicates,
+  duplicateNameWarnings,
   firstPerName,
   linkActions,
   markupActions,
@@ -11,6 +12,7 @@ import {
   markupLinks,
   resolveLinkHref,
 } from "../../src/shared/markupActions";
+import type { MarkupDefinition } from "../../src/shared/markupActions";
 import { staticActions } from "../../src/vite/generateActions";
 import { collectPageReport } from "../../src/overlay/collect";
 
@@ -224,9 +226,94 @@ describe("markupDefinitions / differingDuplicates", () => {
       <form toolname="wish"></form>`;
     const defs = markupDefinitions(doc);
     expect(defs).toHaveLength(9);
-    expect(differingDuplicates(defs)).toEqual([["add_to_cart", 2], ["docs", 2], ["find", 2]]);
+    expect(differingDuplicates(defs).map((d) => [d.name, d.count])).toEqual([["add_to_cart", 2], ["docs", 2], ["find", 2]]);
     expect(differingDuplicates([])).toEqual([]);
     window.happyDOM.close();
+  });
+
+  it("records a form's agent-visible fields, a stand-in for its input schema", () => {
+    const window = new Window();
+    const doc = window.document as unknown as Document;
+    doc.body.innerHTML = `
+      <form data-agent-action="contact">
+        <input name="email" type="email" required><input name="token" type="hidden"><input name="pw" type="password">
+        <select name="topic"><option value="a">A</option><option value="b">B</option></select>
+        <input type="radio" name="size" value="s"><textarea name="msg"></textarea><input name="go" type="submit"><input>
+      </form>
+      <button data-agent-action="buy"></button>`;
+    const [form, button] = markupDefinitions(doc);
+    expect(form!.fields).toEqual(["email:email!", "topic:select=a|b", "size:radio=s", "msg:textarea"]);
+    expect(button).not.toHaveProperty("fields");
+    window.happyDOM.close();
+  });
+});
+
+describe("duplicateNameWarnings", () => {
+  const def = (o: Partial<MarkupDefinition> = {}): MarkupDefinition => ({
+    name: "open-resume",
+    kind: "click",
+    description: "Open the resume",
+    destructive: false,
+    readOnly: false,
+    href: null,
+    ...o,
+  });
+  const warn = (...defs: MarkupDefinition[]) => duplicateNameWarnings("/contact", defs);
+
+  it("names each differing field with both values", () => {
+    expect(warn(def(), def({ kind: "link", readOnly: true }))).toEqual([
+      "/contact: 2 different actions named open-resume (differ in: kind click vs link, readOnly unset vs true); only the first is listed",
+    ]);
+    expect(warn(def({ readOnly: true }), def({ readOnly: false, destructive: true }))).toEqual([
+      "/contact: 2 different actions named open-resume (differ in: destructive unset vs true, readOnly true vs unset); only the first is listed",
+    ]);
+  });
+
+  it("quotes hrefs and descriptions, and shows an absent value as unset", () => {
+    expect(warn(def({ kind: "link", href: "/cv.pdf" }), def({ kind: "link", href: "/resume.pdf" }))).toEqual([
+      '/contact: 2 different actions named open-resume (differ in: href "/cv.pdf" vs "/resume.pdf"); only the first is listed',
+    ]);
+    expect(warn(def(), def({ description: "" }))).toEqual([
+      '/contact: 2 different actions named open-resume (differ in: description "Open the resume" vs unset); only the first is listed',
+    ]);
+    expect(warn(def({ kind: "" }), def())).toEqual([
+      "/contact: 2 different actions named open-resume (differ in: kind unset vs click); only the first is listed",
+    ]);
+  });
+
+  it("says input schema without printing it", () => {
+    expect(warn(def({ kind: "form", fields: ["email:email!"] }), def({ kind: "form", fields: ["email:email"] }))).toEqual([
+      "/contact: 2 different actions named open-resume (differ in: input schema); only the first is listed",
+    ]);
+    expect(warn(def({ kind: "form", fields: [] }), def({ kind: "form" }))).toEqual([
+      "/contact: 2 different actions named open-resume (differ in: input schema); only the first is listed",
+    ]);
+  });
+
+  it("compares 3 or more variants with the first, on one line", () => {
+    const out = warn(def({ description: "A" }), def({ description: "B" }), def({ description: "A" }), def({ description: "C", readOnly: true }));
+    expect(out).toEqual([
+      "/contact: 3 different actions named open-resume (differ in: description A vs B vs C, readOnly unset vs true); only the first is listed",
+    ]);
+    const many = warn(...["a", "b", "c", "d", "e"].map((d) => def({ description: d })));
+    expect(many).toEqual([
+      "/contact: 5 different actions named open-resume (differ in: description a vs b vs c vs d, +1 more); only the first is listed",
+    ]);
+  });
+
+  it("sanitizes and truncates values", () => {
+    const long = "x".repeat(60);
+    const [line] = warn(def({ description: "a\u001b[31m\n b\u202e" }), def({ description: long }));
+    expect(line).toBe(
+      `/contact: 2 different actions named open-resume (differ in: description "a [31m b" vs ${"x".repeat(39)}\u2026); only the first is listed`,
+    );
+    expect(line).not.toMatch(/[\u0000-\u001f\u202e]/);
+  });
+
+  it("stays silent for identical copies and reports each name once, in first-seen order", () => {
+    expect(warn(def(), def())).toEqual([]);
+    const two = duplicateNameWarnings("/p", [def({ name: "b", kind: "x" }), def({ name: "a" }), def({ name: "b" }), def({ name: "a", kind: "y" })]);
+    expect(two.map((w) => w.split(" ")[5])).toEqual(["b", "a"]);
   });
 });
 
