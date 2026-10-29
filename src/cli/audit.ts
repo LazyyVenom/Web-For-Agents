@@ -51,6 +51,93 @@ export interface AuditHooks {
   isPrivateHost?: (hostname: string) => Promise<boolean>;
 }
 
+/**
+ * State shared by the audits of one site: one private-host classification per host, and one fetch
+ * per site file URL (robots.txt, sitemap, llms.txt, agent map). Auditing many pages with one context
+ * fetches each site file once and scores every page exactly as a single-page audit would.
+ * @internal
+ */
+export interface AuditContext {
+  isPrivate: (host: string) => Promise<boolean>;
+  /** Site file fetches by URL. Page and markdown fetches are never cached. */
+  siteFiles: Map<string, Promise<FetchResult>>;
+}
+
+/** @internal */
+export function createAuditContext(hooks: AuditHooks = {}): AuditContext {
+  const classify = hooks.isPrivateHost ?? isPrivateHost;
+  const classified = new Map<string, Promise<boolean>>();
+  return {
+    isPrivate: (host) => {
+      let p = classified.get(host);
+      if (!p) classified.set(host, (p = classify(host)));
+      return p;
+    },
+    siteFiles: new Map(),
+  };
+}
+
+/** A fetch with the audit's options; `cached` reuses the context's site file fetches. @internal */
+export type AuditGet = (u: string, accept?: string, cached?: boolean) => Promise<FetchResult>;
+
+/**
+ * The audit's fetch: options from `opts`, hosts classified through `ctx`, and every public -> private
+ * redirect passed to `onWarning` (for cached results too, so each audit reports it).
+ * @internal
+ */
+export function auditFetcher(opts: AuditOptions, ctx: AuditContext, onWarning: (w: string) => void): AuditGet {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const fetchOne = (u: string, accept?: string): Promise<FetchResult> =>
+    fetchText(u, {
+      timeoutMs,
+      userAgent: opts.userAgent,
+      isPrivateHost: ctx.isPrivate,
+      ...(opts.blockPrivateRedirects ? { blockPrivateRedirects: true } : {}),
+      ...(accept ? { accept } : {}),
+    });
+  return async (u, accept, cached = false) => {
+    let p: Promise<FetchResult>;
+    if (cached) {
+      const key = `${accept ?? ""} ${u}`;
+      p = ctx.siteFiles.get(key) ?? fetchOne(u, accept);
+      ctx.siteFiles.set(key, p);
+    } else {
+      p = fetchOne(u, accept);
+    }
+    const r = await p;
+    if (r.privateRedirect) {
+      const { from, to } = r.privateRedirect;
+      const what = opts.blockPrivateRedirects ? "blocked a redirect" : "followed a redirect";
+      onWarning(`${what} from public ${new URL(from).host} to private address ${to}`);
+    }
+    return r;
+  };
+}
+
+/**
+ * The siteUrl mapping: an absolute URL on exactly `siteOrigin` becomes the same path on
+ * `auditedOrigin`. Anything else is returned untouched, so a mapping never leads to a third origin.
+ * The identity when there is no siteOrigin or it is the audited origin.
+ * @internal
+ */
+export function siteUrlMapper(siteOrigin: string | undefined, auditedOrigin: string): (u: string) => string {
+  if (siteOrigin === undefined || siteOrigin === auditedOrigin) return (u) => u;
+  return (u) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(u.trim());
+    } catch {
+      return u;
+    }
+    return parsed.origin === siteOrigin ? auditedOrigin + parsed.pathname + parsed.search + parsed.hash : u;
+  };
+}
+
+/** The note shown while the siteUrl mapping is in effect, else undefined. @internal */
+export function mappingNote(siteOrigin: string | undefined, auditedOrigin: string): string | undefined {
+  return siteOrigin !== undefined && siteOrigin !== auditedOrigin ? `mapped ${siteOrigin} → ${auditedOrigin}` : undefined;
+}
+
 export interface AuditReport {
   url: string;
   finalUrl: string;
@@ -129,16 +216,13 @@ export function audit(url: string, opts: AuditOptions = {}): Promise<AuditReport
  * `audit` with test hooks. Not exported from the package entry point.
  * @internal
  */
-export async function auditWithHooks(url: string, opts: AuditOptions = {}, hooks: AuditHooks = {}): Promise<AuditReport> {
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  // One classification per host for the whole audit; fetchText bounds each wait by its timeout.
-  const classify = hooks.isPrivateHost ?? isPrivateHost;
-  const classified = new Map<string, Promise<boolean>>();
-  const isPrivate = (host: string): Promise<boolean> => {
-    let p = classified.get(host);
-    if (!p) classified.set(host, (p = classify(host)));
-    return p;
-  };
+export async function auditWithHooks(
+  url: string,
+  opts: AuditOptions = {},
+  hooks: AuditHooks = {},
+  // One classification per host for the whole audit (or site); fetchText bounds each wait by its timeout.
+  ctx: AuditContext = createAuditContext(hooks),
+): Promise<AuditReport> {
   const report: AuditReport = { url, finalUrl: url, redirected: false, score: 0, maxScore: 100, checks: [] };
   let siteOrigin: string | undefined;
   if (opts.siteUrl !== undefined) {
@@ -150,22 +234,12 @@ export async function auditWithHooks(url: string, opts: AuditOptions = {}, hooks
     }
   }
   const warnings = new Set<string>();
-  const get = async (u: string, accept?: string): Promise<FetchResult> => {
-    const r = await fetchText(u, {
-      timeoutMs,
-      userAgent: opts.userAgent,
-      isPrivateHost: isPrivate,
-      ...(opts.blockPrivateRedirects ? { blockPrivateRedirects: true } : {}),
-      ...(accept ? { accept } : {}),
-    });
-    if (r.privateRedirect) {
-      const { from, to } = r.privateRedirect;
-      const what = opts.blockPrivateRedirects ? "blocked a redirect" : "followed a redirect";
-      warnings.add(`${what} from public ${new URL(from).host} to private address ${to}`);
-      report.warnings = [...warnings];
-    }
-    return r;
-  };
+  const get = auditFetcher(opts, ctx, (w) => {
+    warnings.add(w);
+    report.warnings = [...warnings];
+  });
+  /** Site files: fetched once per context, so a site audit fetches each one once. */
+  const getSite = (u: string): Promise<FetchResult> => get(u, undefined, true);
   try {
     const page = await get(url, "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5");
     report.finalUrl = page.finalUrl;
@@ -182,26 +256,14 @@ export async function auditWithHooks(url: string, opts: AuditOptions = {}, hooks
       return report;
     }
     const html = extractHtmlFacts(page.body);
-    // siteUrl mapping: an absolute URL on exactly the siteUrl origin becomes the same path on the
-    // audited origin. Anything else is returned untouched, so a mapping never leads to a third origin.
     const auditedOrigin = new URL(page.finalUrl).origin;
-    const mapping = siteOrigin !== undefined && siteOrigin !== auditedOrigin;
-    const mapUrl = (u: string): string => {
-      if (!mapping) return u;
-      const t = u.trim();
-      let parsed: URL;
-      try {
-        parsed = new URL(t);
-      } catch {
-        return u;
-      }
-      return parsed.origin === siteOrigin ? auditedOrigin + parsed.pathname + parsed.search + parsed.hash : u;
-    };
-    if (mapping) report.notes = [`mapped ${siteOrigin} \u2192 ${auditedOrigin}`];
+    const mapUrl = siteUrlMapper(siteOrigin, auditedOrigin);
+    const note = mappingNote(siteOrigin, auditedOrigin);
+    if (note !== undefined) report.notes = [note];
     const at = (path: string): string => new URL(path, page.finalUrl).href;
     /** Cross-origin site files are reported, not fetched: a local preview must not call production. */
-    const getSameOrigin = (u: string, accept?: string): Promise<FetchResult> =>
-      sameOrigin(u, page.finalUrl) ? get(u, accept) : Promise.resolve(notFetched(u));
+    const getSameOrigin = (u: string, accept?: string, cached = false): Promise<FetchResult> =>
+      sameOrigin(u, page.finalUrl) ? get(u, accept, cached) : Promise.resolve(notFetched(u));
 
     const alt = markdownAlternate(html);
     const altUrl = alt === null ? null : tryResolveUrl(mapUrl(alt), page.finalUrl);
@@ -223,19 +285,19 @@ export async function auditWithHooks(url: string, opts: AuditOptions = {}, hooks
     // Only the sitemap location depends on robots.txt; every other file is fetched alongside it,
     // so a slow or hanging robots.txt delays the sitemap alone. Created after the synchronous
     // URL work above, so a throw there cannot leave these promises unobserved.
-    const robotsP = get(at(ROBOTS_PATH));
+    const robotsP = getSite(at(ROBOTS_PATH));
     const sitemapP = robotsP.then((robots) => {
       const listed = isOk(robots) ? parseRobots(robots.body).sitemaps[0] : undefined;
-      return getSameOrigin((listed && tryResolveUrl(mapUrl(listed), page.finalUrl)) || at(SITEMAP_PATH));
+      return getSameOrigin((listed && tryResolveUrl(mapUrl(listed), page.finalUrl)) || at(SITEMAP_PATH), undefined, true);
     });
     const [robots, rawSitemap, llmsTxt, markdown, agentMap] = await Promise.all([
       robotsP,
       sitemapP,
-      probe(get, inDirs(LLMS_TXT_PATH.slice(1))),
+      probe(getSite, inDirs(LLMS_TXT_PATH.slice(1))),
       getSameOrigin(markdownUrl, `${MARKDOWN_MIME},*/*;q=0.5`),
-      probe(get, agentMapUrls),
+      probe(getSite, agentMapUrls),
     ]);
-    const sitemap = mapping ? { ...rawSitemap, body: mapSitemapLocs(rawSitemap.body, mapUrl) } : rawSitemap;
+    const sitemap = note !== undefined ? { ...rawSitemap, body: mapSitemapLocs(rawSitemap.body, mapUrl) } : rawSitemap;
     report.checks = runChecks({
       page,
       html,
