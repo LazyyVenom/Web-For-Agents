@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- `agentLinkProps({ name, description, register: true })` also exposes the link as a WebMCP tool while it is mounted, so a link can be both a site-wide action in `agents.json` and a browser tool. The attributes, and so `agents.json` and `site.actions`, are the same as without `register`; it only adds a `ref` (React 18 and 19, or plain DOM). The ref does nothing without `document.modelContext`; with it, the link tools load lazily through the same one runtime load as `AgentForm` and `useAgentAction`. Running the tool clicks the link (routers and `target` behave as for a user), or opens its `href` when the link is gone; a `destructive` link asks first. Links that share a name register one tool, removed when the last one unmounts. `/link` stays under 1 KB gzip eager with `register`. See [Links that are also browser tools](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/agent-actions.md#links-that-are-also-browser-tools).
+
+### Fixed
+
+- `/link` and `/schema` are each built as one file, with no static import of a chunk shared with `/form` and the root entry, so a page that imports only `/link` (a footer) no longer loads, or preloads, an extra file.
+
 ## 0.5.0 (2026-10-29)
 
 ### Possibly breaking

@@ -108,11 +108,13 @@ import { agentLinkProps } from "@anubhav-choubey/web-for-agents";
 
 `agentLinkProps({ name, description, destructive? })` only returns the `data-agent-action`, `data-agent-description`, `aria-description`, `data-agent-kind="link"` (and, when `destructive`, `data-agent-destructive="true"`) attributes, so it is safe in server rendering and works in hand-written HTML too: any `<a href data-agent-action="...">` is a link action. It throws on an invalid name, like `useAgentAction`.
 
-To keep React and the agent runtime out of a bundle that only marks links (a footer, a static page), import it from the `/link` entry, which imports nothing but a few constants and the name check (about 0.4 KB gzip when bundled):
+To keep React and the agent runtime out of a bundle that only marks links (a footer, a static page), import it from the `/link` entry (under 1 KB gzip when bundled, with or without `register`):
 
 ```ts
 import { agentLinkProps } from "@anubhav-choubey/web-for-agents/link";
 ```
+
+`/link` and `/schema` are each one file: they import no chunk shared with the other entries (the few constants they need are copied in), so a footer that imports `/link` adds one file to the page and no extra preloaded request. The only other file `/link` can load is the link tools chunk, with `import()`, and only when the browser has WebMCP and a link uses `register` (see [Links that are also browser tools](#links-that-are-also-browser-tools)). Vite, Rollup, webpack and esbuild with `--splitting` keep that chunk and the runtime it loads lazy, shared with `/form`; a bundle built without code splitting (esbuild without `--splitting`, a single IIFE) has to inline them, about 7.5 KB gzip.
 
 In `agents.json` a link action looks like this:
 
@@ -133,8 +135,25 @@ In `agents.json` a link action looks like this:
 - Only `http:`, `https:`, `mailto:` and `tel:` links are listed. Any other href (`javascript:`, `data:`, `blob:`, `file:` and so on) or one that cannot be parsed is left out, with a warning that names the action and the page. Links are never opened or followed at build time.
 - `readOnly` is `true` unless the link is marked `destructive`.
 - The plugin's prerender and `web-for-agents generate` apply the same rules. On a page that also registers an action of the same name (with `useAgentAction`, `AgentForm` or, for `generate`, a form or button in the markup), that action wins and the link is skipped. Among links, the first one with a name wins. A link with an invalid name is skipped with a warning that names the page and the action. The dev overlay shows the same winner for each name, and marks a skipped link "Not listed in agents.json" with the reason.
-- Link actions are not registered as WebMCP tools, even when the runtime is loaded: they only appear in `agents.json`. Use `useAgentAction` on the link if you also want a WebMCP tool; that registered action then wins in `agents.json` too.
+- Link actions are not registered as WebMCP tools unless you pass `register: true` (see [Links that are also browser tools](#links-that-are-also-browser-tools)), which keeps the link action in `agents.json`. `useAgentAction` on the link also makes a WebMCP tool, but that registered action then wins in `agents.json` as a `click` action.
 - The dev overlay lists link actions with their resolved href, as text, and says why a rejected link is left out.
+
+### Links that are also browser tools
+
+A link action is listed in `agents.json`, but on its own it is not a WebMCP tool. Pass `register: true` to make it both, without giving up the `agents.json` entry or `site.actions`:
+
+```tsx
+import { agentLinkProps } from "@anubhav-choubey/web-for-agents/link";
+
+<a href="mailto:sales@example.com" {...agentLinkProps({ name: "contact_sales", description: "Email the sales team", register: true })}>Contact sales</a>
+```
+
+- The attributes are the same as without `register` (`data-agent-kind="link"` included), so `agents.json` is byte for byte the same, and a footer link found on every page is still listed once in `site.actions`. `register` only adds a `ref` to the returned props.
+- The `ref` does nothing unless `document.modelContext` (or the older `navigator.modelContext`) exists, detected as for `useAgentAction`. When it does, it loads the link tools with `import()`, through the same lazy runtime load as `AgentForm` and `useAgentAction` (one load per page, shared by all of them), and registers a tool with the link's name and description, `readOnlyHint` true (unless `destructive`) and no input. Browsers without WebMCP, server rendering and prerendering without WebMCP load nothing.
+- Running the tool calls `element.click()` on the link, so a client-side router, `target="_blank"`, `download` and your own click handlers behave as they do for a user. If no link with that name is on the page any more, it falls back to `location.assign(href)` with the last link's `href`. A `destructive` link asks with `window.confirm` first; if the user declines, the agent gets `{ status: "cancelled", reason: "user-declined" }`.
+- The tool is unregistered when the link unmounts: React 19 calls the cleanup function the `ref` returns, React 18 calls the `ref` with `null`; both work. Outside React, call `ref(element)` and later the function it returns (or `ref(null)`). Use one `agentLinkProps` call per element. An element that unmounts before the runtime has loaded is never registered.
+- Several links with the same name and `register: true` (a footer link and a contact card, say) register one tool. It stays while any of them is mounted, is unregistered when the last one goes, and clicks the first one still on the page. Their attributes should match, as for any action name; the first one mounted gives the tool its description.
+- Links registered this way are not in `listAgentActions()` or `window.__WEB_FOR_AGENTS__`, so the prerender still lists them as link actions, not as `click` actions. If a `useAgentAction` on the page uses the same name, both try to register a tool of that name; give them different names.
 
 ## agents.json
 
