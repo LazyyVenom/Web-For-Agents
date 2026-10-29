@@ -19,9 +19,9 @@ export type JsonSchema = {
 };
 
 /** The input schema of an action that takes no input. Frozen: shared by every such action. */
-export const EMPTY_OBJECT_SCHEMA: JsonSchema = Object.freeze({
+export const EMPTY_OBJECT_SCHEMA: JsonSchema = /* @__PURE__ */ Object.freeze({
   type: "object",
-  properties: Object.freeze({}),
+  properties: /* @__PURE__ */ Object.freeze({}),
   additionalProperties: false,
 }) as JsonSchema;
 

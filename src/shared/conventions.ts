@@ -53,8 +53,11 @@ export const WEBMCP_TOOLNAME_ATTR = "toolname";
 export const WEBMCP_TOOLDESCRIPTION_ATTR = "tooldescription";
 export const WEBMCP_TOOLPARAMDESCRIPTION_ATTR = "toolparamdescription";
 export const AGENT_GLOBAL = "__WEB_FOR_AGENTS__";
-/** Markup for a link action: a plain link an agent can open without JavaScript. */
-export const LINK_ACTION_SELECTOR = `a[href][${ACTION_ATTR}]`;
+/**
+ * Markup for a link action: a plain link an agent can open without JavaScript. A plain literal
+ * (`a[href][` + ACTION_ATTR + `]`), so bundlers can drop it where it is unused.
+ */
+export const LINK_ACTION_SELECTOR = "a[href][data-agent-action]";
 /**
  * The true kind of an action, written by the runtime hint props so static HTML carries it:
  * "handler" | "form" | "click" | "link".
