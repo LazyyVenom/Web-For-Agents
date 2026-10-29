@@ -47,8 +47,6 @@ export interface FetchOptions {
    * This classifies hosts by name; `allowAddress` is what checks the addresses actually used.
    */
   blockPrivateRedirects?: boolean;
-  /** Refuse a redirect to an origin other than `url`'s, without requesting it. Default false. */
-  sameOriginRedirects?: boolean;
   /**
    * Refuse a redirect this returns false for, without requesting it: the result has an error,
    * `redirected` and the refused target as `finalUrl`.
@@ -258,9 +256,6 @@ export async function fetchText(url: string, opts: FetchOptions): Promise<FetchR
       }
       if (next.protocol !== "http:" && next.protocol !== "https:") {
         throw new FetchFailure(`redirect to unsupported URL scheme ${next.protocol}`);
-      }
-      if (opts.sameOriginRedirects && next.origin !== new URL(url).origin) {
-        throw new FetchFailure(`redirect to another origin not followed: ${next.href}`);
       }
       if (opts.followRedirect && !opts.followRedirect(next)) {
         result.redirected = true;

@@ -192,18 +192,32 @@ export type AuditGet = (u: string, how?: GetHow) => Promise<FetchResult>;
  */
 export function auditFetcher(opts: AuditOptions, ctx: AuditContext, onWarning: (w: string) => void): AuditGet {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const fetchOne = (u: string, how: GetHow): Promise<FetchResult> =>
-    fetchText(u, {
+  const fetchOne = async (u: string, how: GetHow): Promise<FetchResult> => {
+    // In a site audit, a page may only redirect within its origin. Its result keeps the page's URL.
+    const pageOrigin = ctx.samePageOrigin && how.page ? new URL(u).origin : undefined;
+    let followed = 0;
+    let refused: string | undefined;
+    const followRedirect =
+      pageOrigin === undefined
+        ? how.followRedirect
+        : (to: URL): boolean => {
+            if (to.origin !== pageOrigin) refused = to.href;
+            else followed++;
+            return refused === undefined;
+          };
+    const r = await fetchText(u, {
       timeoutMs,
       userAgent: opts.userAgent,
       isPrivateHost: ctx.isPrivate,
       ...(opts.blockPrivateRedirects || ctx.guard ? { blockPrivateRedirects: true } : {}),
-      ...(ctx.samePageOrigin && how.page ? { sameOriginRedirects: true } : {}),
       ...(how.accept ? { accept: how.accept } : {}),
-      ...(how.followRedirect ? { followRedirect: how.followRedirect } : {}),
+      ...(followRedirect ? { followRedirect } : {}),
       ...(ctx.guard ? { allowAddress: ctx.guard } : {}),
       ...(ctx.lookup ? { lookup: ctx.lookup } : {}),
     });
+    if (refused === undefined) return r;
+    return { ...r, finalUrl: u, redirected: followed > 0, error: `network error: redirect to another origin not followed: ${refused}` };
+  };
   return async (u, how = {}) => {
     let p: Promise<FetchResult>;
     const key = `${how.accept ?? ""} ${u}`;

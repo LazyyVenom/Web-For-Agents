@@ -26,19 +26,6 @@ describe("fetchText", () => {
     expect(r.finalUrl.startsWith(b.url)).toBe(true);
   });
 
-  it("sameOriginRedirects refuses a redirect to another origin without requesting it", async () => {
-    let hit = false;
-    const b = await serve({}, (_req, res) => ((hit = true), res.end("b")));
-    const a = await serve({
-      "/same": { status: 301, headers: { location: "/" } },
-      "/": { status: 302, headers: { location: b.url + "/" } },
-    });
-    const r = await fetchText(a.url + "/same", { timeoutMs: 2000, sameOriginRedirects: true });
-    expect(r.status).toBe(0);
-    expect(r.error).toBe(`network error: redirect to another origin not followed: ${b.url}/`);
-    expect(hit).toBe(false);
-  });
-
   it("followRedirect refuses a redirect without requesting it and reports the target", async () => {
     let hit = false;
     const b = await serve({}, (_req, res) => ((hit = true), res.end("b")));

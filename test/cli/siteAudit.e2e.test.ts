@@ -297,6 +297,7 @@ describe("audit --sitemap", () => {
     expect(report.pages[0]!.score).toBeGreaterThan(80);
     expect(report.pages[1]).toMatchObject({ url: `${s.url}/away`, score: 0 });
     expect(report.pages[1]!.error).toContain(`redirect to another origin not followed: ${other.url}/`);
+    expect(report.pages[1]!.redirectedTo).toBeUndefined();
     expect(other.hits.size).toBe(0);
     const text = await run(["audit", s.url, "--sitemap"]);
     expect(text.out).toMatch(/^\/old → \/new\s+\d+/m);
