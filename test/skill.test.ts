@@ -109,6 +109,14 @@ describe("SKILL.md content", () => {
     for (const id of ids) for (const part of id.split(".")) expect(words.has(part), `${id} (${part})`).toBe(true);
   });
 
+  it("covers share images, recipes and router links", () => {
+    // og:image can be a branded card; only JSON-LD images of products, recipes and articles must be photos of the item.
+    expect(body).toMatch(/og:image[^\n]*1200x630/);
+    expect(body).toMatch(/\|[^\n]*no default share image[^\n]*\|[^\n]*`defaults\.image`/i);
+    expect(body).toContain("schema.recipe");
+    expect(body).toMatch(/agentLinkProps[^\n]*<Link>/);
+  });
+
   it("documents the audit verify loop with the flags the CLI accepts", () => {
     expect(body).toMatch(/npx web-for-agents audit http:\/\/localhost:\d+ --sitemap --site-url \S.* --min-score 90/);
     expect(body).toContain("npx serve dist");

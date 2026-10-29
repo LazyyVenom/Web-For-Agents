@@ -5,7 +5,7 @@ description: Use when adding SEO, head tags, JSON-LD structured data, prerenderi
 
 # web-for-agents
 
-Read the shipped docs (see Docs), not the `.d.ts` files.
+Read the shipped docs (see Docs), not `.d.ts` files.
 
 ## Checklist
 
@@ -23,8 +23,8 @@ export default defineConfig({
 });
 ```
 
-3. One `SeoProvider` with `defaults`, mounted with `hydrateApp`.
-4. EVERY indexable page: `Seo` with title and description; a `JsonLd` graph of a page node (`webPage` or a fitting type) plus the shared `organization` and `webSite`, linked with `schema.ref`; real text in `<main>`.
+3. One `SeoProvider` with `defaults`, mounted with `hydrateApp`. `defaults.image` gives every page an `og:image`; a branded card or logo image is fine (1200x630).
+4. EVERY indexable page: `Seo` with title and description; a `JsonLd` graph of a page node (`webPage`, `schema.recipe` or a fitting type) plus the shared `organization` and `webSite`, linked with `schema.ref`; real text in `<main>`. Only JSON-LD `image` on products, recipes and articles must be photos of the item.
 
 ```tsx
 import { SeoProvider, Seo, JsonLd, schema, hydrateApp } from "@anubhav-choubey/web-for-agents";
@@ -45,13 +45,13 @@ const About = () => (
 
 hydrateApp(
   document.getElementById("root")!,
-  <SeoProvider defaults={{ siteName: "Example", siteUrl: site, titleTemplate: "%s | Example" }}>
+  <SeoProvider defaults={{ siteName: "Example", siteUrl: site, titleTemplate: "%s | Example", image: `${site}/og.png` }}>
     <About />
   </SeoProvider>,
 );
 ```
 
-5. Actions: `AgentForm` for forms, `useAgentAction` for buttons with a handler, `agentLinkProps` for links (`register: true` adds a WebMCP tool). Unique names per page.
+5. Actions: `AgentForm` for forms, `useAgentAction` for buttons with a handler, `agentLinkProps` for links, also on a router `<Link>` (it renders an `<a>`); `register: true` adds a WebMCP tool. Unique names per page.
 
 ```tsx
 import { AgentForm, agentParam, useAgentAction } from "@anubhav-choubey/web-for-agents";
@@ -76,10 +76,10 @@ export function Actions({ send, save }: { send: () => void; save: () => Promise<
 
 ## Routing
 
-- Client routers (BrowserRouter and others) work with `hydrateApp`.
-- Routes are found by crawling links from "/" (`prerender.crawl`): link each dynamic page (`/docs/:slug`) or list it in `routes`.
-- 404 or not-found view: `<Seo noindex />`.
-- Deploy with the host fallback serving `200.html` (SPA fallback in `prerendering.md`).
+- Client routers work with `hydrateApp`.
+- Routes are crawled from "/" (`prerender.crawl`): link dynamic pages (`/docs/:slug`) or list them in `routes`.
+- Not-found view: `<Seo noindex />`.
+- Host fallback: serve `200.html` (see `prerendering.md`).
 
 ## Which entry
 
@@ -87,7 +87,7 @@ export function Actions({ send, save }: { send: () => void; save: () => Promise<
 | --- | --- |
 | React app | `@anubhav-choubey/web-for-agents` |
 | Actions only, no react-dom | `@anubhav-choubey/web-for-agents/form` |
-| Footer or static links, no React | `@anubhav-choubey/web-for-agents/link` |
+| Static links, no React | `@anubhav-choubey/web-for-agents/link` |
 | JSON-LD in a Node script | `@anubhav-choubey/web-for-agents/schema` |
 | `vite.config` | `@anubhav-choubey/web-for-agents/vite` |
 | Own prerender, not the plugin's | `prerender: false` or no plugin, then `npx web-for-agents generate dist --site-url <url> --ai-training block --ai-search allow` |
@@ -97,20 +97,21 @@ export function Actions({ send, save }: { send: () => void; save: () => Promise<
 1. `npx vite build`
 2. `npx serve dist -l 4173` (serves `dir/index.html`)
 3. `npx web-for-agents audit http://localhost:4173 --sitemap --site-url <production URL> --min-score 90`
-4. The `--sitemap` table names only failing checks; for each check's Fix text, audit one page: `npx web-for-agents audit <page URL> --site-url <production URL>`.
-5. Fix every failing or warning check, then repeat.
+4. The `--sitemap` table names failing checks; for Fix text, audit one page: `npx web-for-agents audit <page URL> --site-url <production URL>`.
+5. Fix failing and warning checks; repeat.
 
 ## Common mistakes
 
 | Mistake | Fix |
 | --- | --- |
-| A page that is only a form | 200+ characters of text in `<main>` |
-| `schema.softwareApplication` without a real `aggregateRating` or `review` | Google needs one; the audit flags it. Use `schema.product` with `offers`, or `schema.webPage`. NEVER invent ratings or reviews |
-| SVG icon or placeholder as JSON-LD `image` | Crawlable JPEG, PNG or WebP photo (see `seo.md`) |
-| `noindex` on real pages, or missing on cart or account pages | `noindex` leaves the sitemap, `llms.txt` and `agents.json` |
-| One action name, different definitions | Only one is listed; rename or align |
-| Root entry in a Node script | Needs react and react-dom; use `/schema` |
-| Auditing `vite preview` | Sub-routes can get the home page; use `serve` |
+| A form-only page | 200+ characters of text in `<main>` |
+| `schema.softwareApplication` without a real `aggregateRating` or `review` | Use `schema.product` with `offers`, or `schema.webPage`. NEVER invent ratings or reviews |
+| SVG icon or placeholder as JSON-LD `image` | Crawlable JPEG, PNG or WebP photo (`seo.md`) |
+| No default share image | `SeoProvider` `defaults.image` |
+| `noindex` on real pages, or missing on cart or account pages | `noindex` drops a page from the sitemap, `llms.txt` and `agents.json` |
+| One action name, different definitions | Rename or align |
+| Root entry in a Node script | Use `/schema` |
+| Auditing `vite preview` | Use `serve` |
 
 ## Docs
 
