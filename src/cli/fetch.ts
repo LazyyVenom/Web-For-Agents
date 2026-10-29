@@ -47,6 +47,11 @@ export interface FetchOptions {
   blockPrivateRedirects?: boolean;
   /** Refuse a redirect to an origin other than `url`'s, without requesting it. Default false. */
   sameOriginRedirects?: boolean;
+  /**
+   * Refuse a redirect this returns false for, without requesting it: the result has an error,
+   * `redirected` and the refused target as `finalUrl`.
+   */
+  followRedirect?: (to: URL) => boolean;
   /** Classifies a URL hostname as private. Default: isPrivateHost. Callers may pass a cached one. */
   isPrivateHost?: (hostname: string) => Promise<boolean>;
   /**
@@ -218,6 +223,11 @@ export async function fetchText(url: string, opts: FetchOptions): Promise<FetchR
       }
       if (opts.sameOriginRedirects && next.origin !== new URL(url).origin) {
         throw new FetchFailure(`redirect to another origin not followed: ${next.href}`);
+      }
+      if (opts.followRedirect && !opts.followRedirect(next)) {
+        result.redirected = true;
+        result.finalUrl = next.href;
+        throw new FetchFailure(`redirect not followed: ${next.href}`);
       }
       if (
         result.privateRedirect === undefined &&

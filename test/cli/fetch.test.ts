@@ -39,6 +39,15 @@ describe("fetchText", () => {
     expect(hit).toBe(false);
   });
 
+  it("followRedirect refuses a redirect without requesting it and reports the target", async () => {
+    let hit = false;
+    const b = await serve({}, (_req, res) => ((hit = true), res.end("b")));
+    const a = await serve({ "/": { status: 302, headers: { location: b.url + "/x" } } });
+    const r = await fetchText(a.url + "/", { timeoutMs: 2000, followRedirect: (to) => to.origin === a.url });
+    expect(r).toMatchObject({ status: 0, redirected: true, finalUrl: b.url + "/x", error: `network error: redirect not followed: ${b.url}/x` });
+    expect(hit).toBe(false);
+  });
+
   it("redirect loop", async () => {
     const s = await serve({ "/loop": { status: 302, headers: { location: "/loop" } } });
     const r = await fetchText(s.url + "/loop", { timeoutMs: 2000 });
