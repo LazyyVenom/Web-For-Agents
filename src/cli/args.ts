@@ -28,10 +28,21 @@ export interface GenerateArgs {
   verbose: boolean;
 }
 
+export interface SkillArgs {
+  /** --dir: the skills root; the skill is written to <dir>/web-for-agents. Default .claude/skills. */
+  dir?: string;
+  /** --force: replace an existing copy that differs. */
+  force: boolean;
+  /** --print: write SKILL.md to stdout instead of copying the folder. */
+  print: boolean;
+}
+
 export interface CliArgs {
-  command: "audit" | "generate" | "help";
+  command: "audit" | "generate" | "skill" | "help";
   /** Set for the generate command. */
   generate?: GenerateArgs;
+  /** Set for the skill command. */
+  skill?: SkillArgs;
   url?: string;
   json: boolean;
   minScore?: number;
@@ -86,6 +97,7 @@ export function normalizeInputUrl(input: string): string {
 export const USAGE = `Usage: web-for-agents audit <url> [options]
        web-for-agents audit <url> --sitemap [options]
        web-for-agents generate <outDir> --site-url <url> [options]
+       web-for-agents skill [--dir <path>] [--force] [--print]
 
 audit: check how readable a page is for AI agents and crawlers.
 
@@ -129,8 +141,18 @@ Options:
   --verbose            also print the layout, the pages and every file written
   --json               print the result as JSON
 
+skill: copy this package's Agent Skill (SKILL.md) into your project, so your
+coding agent follows it while it builds.
+
+Options:
+  --dir <path>         skills root to write to (default .claude/skills); the skill
+                       goes in <path>/web-for-agents, for example --dir .agents/skills
+  --force              replace an existing copy that differs
+  --print              write SKILL.md to stdout instead
+
 Exit codes: 0 ok, 1 score below --min-score (with --sitemap: any page below it,
-            failing to load, or --max-time reached), 2 usage error or fatal error
+            failing to load, or --max-time reached), or for skill an existing
+            different copy was kept, 2 usage error or fatal error
 `;
 
 /** A whole number from 1 to `max`, written as plain digits. */
@@ -164,6 +186,9 @@ export function parseCliArgs(argv: string[]): CliArgs {
         overwrite: { type: "boolean" },
         "no-site-actions": { type: "boolean" },
         verbose: { type: "boolean" },
+        dir: { type: "string" },
+        force: { type: "boolean" },
+        print: { type: "boolean" },
         help: { type: "boolean", short: "h" },
       },
     });
@@ -175,6 +200,21 @@ export function parseCliArgs(argv: string[]): CliArgs {
   const [command, input, ...rest] = positionals;
   const GENERATE_FLAGS = ["ai-training", "ai-search", "config", "no-link-markdown", "overwrite", "no-site-actions", "verbose"] as const;
   const AUDIT_FLAGS = ["min-score", "timeout", "agent-map", "no-private-redirects", "sitemap", "max-pages", "concurrency", "max-time"] as const;
+  const SKILL_FLAGS = ["dir", "force", "print"] as const;
+  if (command === "skill") {
+    if (input !== undefined) return fail(`unexpected argument "${input}"`);
+    const wrong = [...AUDIT_FLAGS, ...GENERATE_FLAGS, "json", "site-url"].find((f) => values[f as keyof typeof values] !== undefined);
+    if (wrong) return fail(`--${wrong} is not an option of skill`);
+    const skill: SkillArgs = { force: values.force === true, print: values.print === true };
+    if (values.dir !== undefined) {
+      if (values.dir.trim() === "") return fail("--dir must be a directory path");
+      skill.dir = values.dir;
+    }
+    if (skill.print && (skill.dir !== undefined || skill.force)) return fail("--print writes no files; leave out --dir and --force");
+    return { command: "skill", skill, json: false, timeoutMs: DEFAULT_TIMEOUT_MS };
+  }
+  const skillFlag = SKILL_FLAGS.find((f) => values[f] !== undefined);
+  if (skillFlag && (command === "generate" || command === "audit")) return fail(`--${skillFlag} is an option of skill, not ${command}`);
   if (command === "generate") {
     if (input === undefined) return fail("generate requires an output directory");
     if (rest.length > 0) return fail(`unexpected argument "${rest[0]}"`);
