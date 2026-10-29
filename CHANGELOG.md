@@ -19,6 +19,11 @@
 - Markdown no longer glues the words of adjacent inline elements that have no whitespace between them: `<span>Slot 01</span><span>Featured</span>` gives `Slot 01 Featured`, not `Slot 01Featured`. Glue that looks intended is kept: an element next to plain text (`<b>Java</b>Script`), two text-formatting elements, single characters, opening or closing punctuation, and anything in `<pre>` or `<code>`. Known limit: `<strong>26K+</strong>YouTube subs`, an element next to bare text, stays joined. See [Content for agents](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/prerendering.md#content-for-agents).
 - Markdown does not split words inside running prose: when the parent also holds its own text, adjacent elements stay joined (`<p><span>Java</span><span>Script</span> is fun</p>` gives `JavaScript is fun`). Custom elements count as inline. A leading `/` (`$29/mo`), operator-only text (`**kwargs`), Chinese and Japanese text, fullwidth punctuation, two-letter drop caps and counter digits stay joined too.
 - `audit` no longer hangs on a sitemap with a long unclosed `<loc>`: the `<loc>` match is now linear.
+- Every entry point loads with `require()` too (Node 20.19+ runs the ESM build): `exports` use the `default` condition instead of `import`.
+- `generate` warns, once per action, about an unknown `data-agent-kind` value and infers the kind from the element. A `<form>` marked `"handler"` keeps its fields as the input schema.
+- Schema builders: an explicit `id` wins over `extra["@id"]`, `schema.ref` throws a `TypeError` on a missing or empty id, and the `extra` type rejects `@type` and `@context`.
+- The build summary mentions the sitemap and `llms.txt` only when they are written.
+- The published package.json has no `prepare` script, so npm no longer warns about an install script.
 - In prerendered `agents.json`, an `<a href>` marked `data-agent-kind="handler"` or `"click"` is no longer listed as a link action.
 
 ### Changed
