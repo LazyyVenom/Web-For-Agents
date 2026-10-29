@@ -80,6 +80,18 @@ If the user declines, the agent gets `{ status: "cancelled", reason: "user-decli
 
 WebMCP is feature-detected: when `document.modelContext` (or the older `navigator.modelContext`) exists, each exposed action is registered with `registerTool`; otherwise nothing is registered and nothing breaks. Nothing branches on the user agent. Tools are unregistered when their component unmounts, so the tool list follows what is on screen. The advertised `inputSchema` is captured when the tool is registered: a tool is registered again when its name, title, description, flags, `inputSchema` or handler presence changes, but not when a form's fields change. Execution never relies on that snapshot; it always validates against the current schema (for a form, its current fields). A failed registration is logged as a warning, does not affect the page, and is retried the next time the action list is updated. If `modelContext` appears after the page loads (for example, injected by an extension), actions are registered on the next mount, unmount or `refreshAgentActions()` call.
 
+### Lazy loading
+
+`AgentForm` and `useAgentAction` load only what they need to render hints and record which actions are mounted. The rest of the runtime (form schemas, input validation, form filling, the confirm dialog and WebMCP registration) is a separate chunk. It is loaded with `import()` the first time an action mounts while `modelContext` exists, or while the prerender is capturing the page (the capture waits for it, so `agents.json` is unchanged). All actions on the page share that one load. Browsers without WebMCP never download it, and server rendering never loads it. Tools are registered once it has loaded; an action that unmounts before then is never registered. The hint attributes are rendered as before, also on the server.
+
+Importing `listAgentActions` or `executeAgentAction` puts the runtime in the main bundle. Vite (Rollup) and other bundlers that honor `"sideEffects": false` split the chunk out of the root entry. esbuild keeps it in the main bundle when you import from the root, so import `AgentForm`, `useAgentAction`, `agentParam` and `refreshAgentActions` from the React-only `/form` entry instead. It has no `Seo`, `JsonLd` or `hydrateApp` and no react-dom, and keeps the runtime lazy with any bundler:
+
+```tsx
+import { AgentForm, agentParam } from "@anubhav-choubey/web-for-agents/form";
+```
+
+Before the runtime has loaded, the `window.__WEB_FOR_AGENTS__` global (read by the dev overlay) lists form actions with an empty `{ "type": "object" }` input schema, and asking for the list starts the load.
+
 ## Link actions (no JavaScript)
 
 Some actions are just links: download a price sheet, open a status page, email sales, call a store. Mark a plain `<a href>` with `agentLinkProps` and it is listed in `agents.json` as a link action, with no handler, no registration and no JavaScript needed at runtime:

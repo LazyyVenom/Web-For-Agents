@@ -19,6 +19,12 @@
 - `agentMap.siteActions` (default `true`), `generate --no-site-actions` and `--verbose`.
 - The audit's agent map check accepts version 1 and 2 and counts pages and actions, site-wide ones included.
 - The plugin's build summary counts the actions in the agent map.
+- `@anubhav-choubey/web-for-agents/form` exports `AgentForm`, `useAgentAction`, `agentParam` and `refreshAgentActions` without `Seo`, `JsonLd`, `hydrateApp` or react-dom. With esbuild, which keeps the runtime eager when it is imported from the root entry, `/form` keeps it lazy (about 2.4 KB gzip eager).
+
+### Changed
+
+- The agent runtime behind `AgentForm` and `useAgentAction` loads lazily. Pages load only the hint attributes and a small registration shim, about 3 KB gzip instead of about 6.5 KB. Form schemas, validation, form filling, the confirm dialog and WebMCP registration are a separate chunk, loaded with `import()` once an action mounts while `document.modelContext` (or `navigator.modelContext`) exists, or while the prerender captures the page. Browsers without WebMCP never download it. The API, the hint attributes and `agents.json` are unchanged; tools are registered once the chunk has loaded. See [Lazy loading](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/agent-actions.md#lazy-loading).
+
 
 ## 0.4.0 (2026-10-29)
 

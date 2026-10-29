@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, type ComponentPropsWit
 import { ACTION_KIND_ATTR, ACTION_PARAM_ATTR } from "../../shared/conventions";
 import { assertValidActionName } from "../../shared/actionName";
 import { hintProps as buildHintProps, type AgentHintProps } from "./link";
-import { refreshAgentActions, registerAgentAction } from "./registry";
+import { refreshAgentActions, registerAgentAction } from "./core";
 import type { AgentActionSpec } from "./types";
 
 export type { AgentHintProps };

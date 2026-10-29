@@ -61,6 +61,9 @@
       ],
       "link": [
         "dist/link.d.ts"
+      ],
+      "form": [
+        "dist/form.d.ts"
       ]
     }
   },
@@ -88,6 +91,10 @@
     "./link": {
       "types": "./dist/link.d.ts",
       "default": "./dist/link.js"
+    },
+    "./form": {
+      "types": "./dist/form.d.ts",
+      "default": "./dist/form.js"
     },
     "./package.json": "./package.json"
   },
