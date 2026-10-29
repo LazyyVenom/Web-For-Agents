@@ -14,14 +14,30 @@ describe("parseCliArgs", () => {
 
   it("parses generate with flags", () => {
     expect(
-      parseCliArgs(["generate", "dist", "--site-url", "https://a.com", "--ai-training", "block", "--ai-search", "allow", "--config", "c.mjs", "--no-link-markdown", "--overwrite", "--json"]),
+      parseCliArgs(["generate", "dist", "--site-url", "https://a.com", "--ai-training", "block", "--ai-search", "allow", "--config", "c.mjs", "--no-link-markdown", "--overwrite", "--no-site-actions", "--verbose", "--json"]),
     ).toEqual({
       command: "generate",
-      generate: { outDir: "dist", siteUrl: "https://a.com", aiTraining: "block", aiSearch: "allow", config: "c.mjs", linkMarkdown: false, overwrite: true },
+      generate: {
+        outDir: "dist",
+        siteUrl: "https://a.com",
+        aiTraining: "block",
+        aiSearch: "allow",
+        config: "c.mjs",
+        linkMarkdown: false,
+        overwrite: true,
+        siteActions: false,
+        verbose: true,
+      },
       json: true,
       timeoutMs: 10000,
     });
-    expect(parseCliArgs(["generate", "out"]).generate).toEqual({ outDir: "out", linkMarkdown: true, overwrite: false });
+    expect(parseCliArgs(["generate", "out"]).generate).toEqual({
+      outDir: "out",
+      linkMarkdown: true,
+      overwrite: false,
+      siteActions: true,
+      verbose: false,
+    });
   });
 
   it("rejects bad generate input and mixed-up flags", () => {
@@ -32,6 +48,8 @@ describe("parseCliArgs", () => {
       [["generate", "a", "--min-score", "5"], "--min-score is not an option of generate"],
       [["generate", "a", "--config", " "], "--config must be a file path"],
       [["audit", "u", "--ai-search", "allow"], "--ai-search is an option of generate, not audit"],
+      [["audit", "u", "--verbose"], "--verbose is an option of generate, not audit"],
+      [["audit", "u", "--no-site-actions"], "--no-site-actions is an option of generate, not audit"],
     ] as const) {
       expect(() => parseCliArgs([...argv]), argv.join(" ")).toThrow(msg);
     }

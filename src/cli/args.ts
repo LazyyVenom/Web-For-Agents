@@ -14,6 +14,10 @@ export interface GenerateArgs {
   /** False with --no-link-markdown. */
   linkMarkdown: boolean;
   overwrite: boolean;
+  /** False with --no-site-actions: repeat site-wide actions on every page of agents.json. */
+  siteActions: boolean;
+  /** --verbose: print the layout, the pages and every file written after the summary line. */
+  verbose: boolean;
 }
 
 export interface CliArgs {
@@ -93,6 +97,9 @@ Options:
   --no-link-markdown   do not add the markdown <link> to each page's <head>
   --overwrite          replace an existing robots.txt, sitemap.xml, llms.txt,
                        llms-full.txt or agents.json that differs
+  --no-site-actions    list actions found on every page on each page of agents.json,
+                       instead of once in site.actions
+  --verbose            also print the layout, the pages and every file written
   --json               print the result as JSON
 
 Exit codes: 0 ok, 1 score below --min-score, 2 usage error or fatal error
@@ -116,6 +123,8 @@ export function parseCliArgs(argv: string[]): CliArgs {
         config: { type: "string" },
         "no-link-markdown": { type: "boolean" },
         overwrite: { type: "boolean" },
+        "no-site-actions": { type: "boolean" },
+        verbose: { type: "boolean" },
         help: { type: "boolean", short: "h" },
       },
     });
@@ -125,7 +134,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
   const { values, positionals } = parsed;
   if (values.help || positionals.length === 0) return { command: "help", json: false, timeoutMs: DEFAULT_TIMEOUT_MS };
   const [command, input, ...rest] = positionals;
-  const GENERATE_FLAGS = ["ai-training", "ai-search", "config", "no-link-markdown", "overwrite"] as const;
+  const GENERATE_FLAGS = ["ai-training", "ai-search", "config", "no-link-markdown", "overwrite", "no-site-actions", "verbose"] as const;
   const AUDIT_FLAGS = ["min-score", "timeout", "agent-map", "no-private-redirects"] as const;
   if (command === "generate") {
     if (input === undefined) return fail("generate requires an output directory");
@@ -136,6 +145,8 @@ export function parseCliArgs(argv: string[]): CliArgs {
       outDir: input,
       linkMarkdown: values["no-link-markdown"] !== true,
       overwrite: values.overwrite === true,
+      siteActions: values["no-site-actions"] !== true,
+      verbose: values.verbose === true,
     };
     for (const [flag, key] of [["ai-training", "aiTraining"], ["ai-search", "aiSearch"]] as const) {
       const v = values[flag];

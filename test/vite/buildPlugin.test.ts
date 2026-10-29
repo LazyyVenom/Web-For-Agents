@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it, vi } from "vitest";
+import { agentMapExtension } from "../../src/vite/agentMap";
 import { createBuildPlugin } from "../../src/vite/buildPlugin";
 import { resolveOptions, type WebForAgentsOptions } from "../../src/vite/options";
 import type { PrerenderExtension } from "../../src/vite/prerender/extensions";
@@ -493,7 +494,7 @@ describe("createBuildPlugin", () => {
 
   it("the summary names only the files written", async () => {
     const summary = async (opts: Parameters<typeof make>[0]) => {
-      const t = make(opts);
+      const t = make(opts, opts.agentMap === false ? [] : [agentMapExtension({ siteUrl: "https://a.com", fileName: "agents.json" })]);
       t.configure();
       await t.run();
       return t.info.mock.calls.map((c) => String(c[0])).find((m) => /prerendered \d+ routes/.test(m))!;
@@ -501,8 +502,9 @@ describe("createBuildPlugin", () => {
     expect(await summary({ prerender: { crawl: false } })).toMatch(/listed in llms\.txt and the sitemap; the sitemap also keeps/);
     const noSitemap = await summary({ sitemap: false, prerender: { crawl: false } });
     expect(noSitemap).not.toContain("sitemap");
-    expect(noSitemap).toMatch(/prerendered \d+ routes \(\d+ listed in llms\.txt\)/);
-    expect(await summary({ sitemap: false, llms: false, prerender: { crawl: false } })).toMatch(/prerendered \d+ routes$/);
+    expect(noSitemap).toMatch(/prerendered \d+ routes, \d+ actions? \(\d+ listed in llms\.txt\)/);
+    expect(await summary({ sitemap: false, llms: false, prerender: { crawl: false } })).toMatch(/prerendered \d+ routes, \d+ actions?$/);
+    expect(await summary({ sitemap: false, llms: false, agentMap: false, prerender: { crawl: false } })).toMatch(/prerendered \d+ routes$/);
   }, 30_000);
 
   it("skips a crawled link with a too-long name and still writes the site", async () => {

@@ -50,6 +50,11 @@ export function inPageExpression(fn: (arg: never) => unknown, arg?: unknown): st
   return `JSON.stringify((${fn.toString()})(${args}))`;
 }
 
+/** Each extension's summary phrase, in order, for the one-line build summary. */
+export function extensionSummaries(exts: PrerenderExtension[]): string[] {
+  return exts.map((e) => e.summary?.()).filter((x): x is string => !!x);
+}
+
 const NAME = /^[a-z0-9-]+$/;
 
 export function assertExtensionNames(exts: PrerenderExtension[]): void {

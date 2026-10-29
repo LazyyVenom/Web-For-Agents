@@ -7,7 +7,7 @@ import { createFileStager, type FileStager } from "./fileStager";
 import type { ResolvedOptions } from "./options";
 import { NO_PERMISSION_MODEL_WARNING, hasPermissionModel } from "./prerender/happyDomProcess";
 import { mayUseHappyDom, prerenderSite, type CrawlResult } from "./prerender/index";
-import type { PrerenderExtension } from "./prerender/extensions";
+import { extensionSummaries, type PrerenderExtension } from "./prerender/extensions";
 import { MAX_ROUTE_BYTES, MAX_SEGMENT_BYTES, publicUrl, routeHtmlFile, routeMdFile, shortRoute } from "./prerender/paths";
 import { buildRobots } from "./robots";
 import { buildSitemap, sitemapLastmods } from "./sitemap";
@@ -171,7 +171,8 @@ export function createBuildPlugin(resolved: ResolvedOptions, extensions: Prerend
     const detail = listedIn
       ? ` (${listed.length} listed in ${listedIn}${resolved.sitemap ? "; the sitemap also keeps configured routes served from publicDir" : ""})`
       : "";
-    logger.info(`${LOG_PREFIX} prerendered ${result.pages.length} routes${detail}`);
+    const counts = extensionSummaries(extensions).map((c) => `, ${c}`).join("");
+    logger.info(`${LOG_PREFIX} prerendered ${result.pages.length} routes${counts}${detail}`);
   };
 
   return {
