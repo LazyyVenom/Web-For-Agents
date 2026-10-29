@@ -445,7 +445,7 @@ describe("0.5: product rich results", () => {
       review: [
         { author: "Ann", reviewRating: { ratingValue: 5, bestRating: 5 }, reviewBody: "Great", datePublished: "2026-01-02", name: "Love it" },
         { author: { name: "Bo", url: "https://bo.dev" }, reviewRating: { ratingValue: 3, worstRating: 1 } },
-        { author: schema.ref("#me") },
+        { author: schema.ref("#me"), reviewRating: { ratingValue: 4 } },
       ],
     });
     expect(n.aggregateRating).toEqual({
@@ -470,9 +470,9 @@ describe("0.5: product rich results", () => {
         author: { "@type": "Person", name: "Bo", url: "https://bo.dev" },
         reviewRating: { "@type": "Rating", ratingValue: 3, worstRating: 1 },
       },
-      { "@type": "Review", author: { "@id": "#me" } },
+      { "@type": "Review", author: { "@id": "#me" }, reviewRating: { "@type": "Rating", ratingValue: 4 } },
     ]);
-    expect(schema.product({ name: "p", review: { author: "Ann" } }).review).toEqual({
+    expect(schema.product({ name: "p", review: { author: "Ann" } as any }).review).toEqual({
       "@type": "Review",
       author: { "@type": "Person", name: "Ann" },
     });
@@ -518,8 +518,25 @@ describe("0.5: product rich results", () => {
   });
 
   it("softwareApplication takes the same aggregateRating fields", () => {
-    const n = schema.softwareApplication({ name: "s", aggregateRating: { ratingValue: "4.5", bestRating: "5", worstRating: 1 } });
-    expect(n.aggregateRating).toEqual({ "@type": "AggregateRating", ratingValue: "4.5", bestRating: "5", worstRating: 1 });
+    const n = schema.softwareApplication({ name: "s", aggregateRating: { ratingValue: "4.5", bestRating: "5", worstRating: 1, ratingCount: 8 } });
+    expect(n.aggregateRating).toEqual({ "@type": "AggregateRating", ratingValue: "4.5", bestRating: "5", worstRating: 1, ratingCount: 8 });
+  });
+
+  it("types require a rating count and a review rating, as Google does", () => {
+    // @ts-expect-error an AggregateRating needs ratingCount or reviewCount
+    schema.product({ name: "p", aggregateRating: { ratingValue: 4 } });
+    // @ts-expect-error an AggregateRating needs ratingCount or reviewCount
+    schema.softwareApplication({ name: "s", aggregateRating: { ratingValue: 4 } });
+    // @ts-expect-error an AggregateRating needs ratingCount or reviewCount
+    schema.aggregateRating({ ratingValue: 4, bestRating: 5 });
+    // @ts-expect-error a Review needs reviewRating
+    schema.product({ name: "p", review: { author: "Ann" } });
+    // @ts-expect-error a Review needs reviewRating
+    schema.review({ author: "Ann", reviewBody: "Great" });
+    // Either count, or both, is enough.
+    schema.product({ name: "p", aggregateRating: { ratingValue: 4, ratingCount: 9 } });
+    schema.product({ name: "p", aggregateRating: { ratingValue: 4, reviewCount: 3 } });
+    schema.product({ name: "p", aggregateRating: { ratingValue: 4, ratingCount: 9, reviewCount: 3 } });
   });
 });
 

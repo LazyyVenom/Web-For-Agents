@@ -196,13 +196,14 @@ const offers = (v: OffersInput | null | undefined) => each(v, (o) => build(o, of
 
 type RatingInput = { ratingValue: number | string; bestRating?: number | string; worstRating?: number | string };
 
-/** The overall rating from many reviews, written as an `AggregateRating`. */
-export type AggregateRatingInput = RatingInput & { reviewCount?: number; ratingCount?: number };
+/** The overall rating from many reviews, written as an `AggregateRating`. Google needs `ratingCount` or `reviewCount`. */
+export type AggregateRatingInput = RatingInput &
+  ({ ratingCount: number; reviewCount?: number } | { ratingCount?: number; reviewCount: number });
 
-/** One review, written as a `Review` with a `Rating`. A string `author` is a person's name. */
+/** One review, written as a `Review` with a `Rating`. A string `author` is a person's name. Google needs both. */
 export type ReviewInput = {
   author: string | Author;
-  reviewRating?: RatingInput;
+  reviewRating: RatingInput;
   reviewBody?: string;
   datePublished?: string;
   name?: string;
