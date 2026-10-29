@@ -58,6 +58,36 @@ describe("htmlToMarkdown: adjacent inline elements", () => {
     expect(htmlToMarkdown('<div class="flex"><span>Name</span><span>Email</span></div>')).toBe("Name Email\n");
   });
 
+  it("attaches a leading / to what comes before it", () => {
+    expect(htmlToMarkdown("<p><span>$29</span><span>/mo</span></p>")).toBe("$29/mo\n");
+    expect(htmlToMarkdown("<div><span>4.5</span><span>/5</span></div>")).toBe("4.5/5\n");
+    expect(htmlToMarkdown("<div><span>https://</span><span>example.com</span><span>/path</span></div>")).toBe("https://example.com/path\n");
+    expect(htmlToMarkdown("<div><span>$0.35</span><span>/each</span></div>")).toBe("$0.35/each\n");
+  });
+
+  it("attaches operator-only text such as ** to the next element (Sphinx signatures)", () => {
+    const sig = '<p>dict(<em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em>)</p>';
+    expect(htmlToMarkdown(sig)).toBe("dict(_\\*\\*kwargs_)\n");
+    expect(htmlToMarkdown("<div><span>&amp;&amp;</span><span>next</span></div>")).toBe("&&next\n");
+  });
+
+  it("does not separate at a CJK or fullwidth boundary; Hangul keeps its space", () => {
+    expect(htmlToMarkdown('<div class="flex"><span>カートに追加</span><span>¥</span><span>1,980</span><span>（税込）</span></div>')).toBe("カートに追加¥1,980（税込）\n");
+    expect(
+      htmlToMarkdown('<span class="ilh-all"><span class="ilh-page"><a href="/w/x">传动带机器</a></span><span class="ilh-comment"><span>（</span><span>英语</span></span></span>'),
+    ).toBe("[传动带机器](/w/x)（英语\n");
+    expect(htmlToMarkdown("<div><span>你好</span><span>世界</span></div>")).toBe("你好世界\n");
+    expect(htmlToMarkdown("<div><span>안녕하세요</span><span>세계</span></div>")).toBe("안녕하세요 세계\n");
+  });
+
+  it("keeps two-letter drop caps and counter digit groups joined", () => {
+    expect(htmlToMarkdown('<div><span class="dropcap">Wh</span><span>en I was young</span></div>')).toBe("When I was young\n");
+    expect(htmlToMarkdown("<div><span>12</span><span>34</span><span>56</span></div>")).toBe("123456\n");
+    // Not drop caps: a capitalized right side, or a longer left word.
+    expect(htmlToMarkdown("<div><span>Rate</span><span>limit</span></div>")).toBe("Rate limit\n");
+    expect(htmlToMarkdown("<div><span>Revenue</span><span>$12.4K</span></div>")).toBe("Revenue $12.4K\n");
+  });
+
   it("treats custom elements as inline", () => {
     expect(htmlToMarkdown("<div><x-label>Name</x-label><span>Value</span></div>")).toBe("Name Value\n");
     expect(htmlToMarkdown("<div><span>Mail</span><x-icon></x-icon><span>Me</span></div>")).toBe("Mail Me\n");

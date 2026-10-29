@@ -34,9 +34,19 @@ const FORMATTING_ELEMENTS = new Set([
   "ABBR", "B", "BDI", "BDO", "CITE", "CODE", "DEL", "DFN", "EM", "I", "INS", "KBD", "MARK", "Q", "S", "SAMP",
   "SMALL", "STRONG", "SUB", "SUP", "U", "VAR",
 ]);
-/** Text that ends with an opening character or starts with a closing one attaches to its neighbour. */
+/**
+ * Text that ends with an opening character or starts with a closing one attaches to its neighbour.
+ * A leading "/" closes too ("$29" + "/mo", "4.5" + "/5", a URL split before its path). Fullwidth
+ * brackets and CJK punctuation are covered by CJK_BOUNDARY.
+ */
 const OPENS = /[([{$#@/\u2018\u201c]$/;
-const CLOSES = /^[.,;:!?%)\]}\u2019\u201d\u2026]/;
+const CLOSES = /^[.,;:!?%)\]}/\u2019\u201d\u2026]/;
+/** Text made only of ASCII operators or sigils (`**`, `&&`, `->`) attaches to the next element: `**kwargs`. */
+const OPERATOR_ONLY = /^[!-/:-@[-`{-~]+$/;
+/** Han, Hiragana, Katakana, CJK punctuation and fullwidth forms: written without spaces between words. Hangul is not included. */
+const CJK_BOUNDARY = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303f\uff00-\uffef]/u;
+/** A one- or two-letter drop cap ("W", "Wh") before a word that goes on in lowercase ("hen", "en"). */
+const DROP_CAP = /^\p{Lu}\p{Ll}?$/u;
 
 /** Whether a node is an inline element: a listed one, or a custom element (a tag name with "-"). */
 function isInline(node: Node): boolean {
@@ -82,7 +92,12 @@ function previousContentSibling(node: Node): Node | null {
  * - both are text-formatting elements (`<b>Java</b><i>Script</i>`);
  * - either side's text is a single character (letter-by-letter animations, drop caps);
  * - the left text ends with an opening character ( `( [ { $ # @ /` or an opening quote) or the
- *   right text starts with closing punctuation (`. , ; : ! ? % ) ] }`, a closing quote, an ellipsis);
+ *   right text starts with closing punctuation (`. , ; : ! ? % ) ] } /`, a closing quote, an ellipsis);
+ * - the left text is only ASCII operators or sigils (`**` before `kwargs`);
+ * - the boundary character on either side is Han, Hiragana, Katakana, CJK punctuation or a
+ *   fullwidth form (those scripts put no spaces between words; Hangul does, so it is not included);
+ * - a one- or two-letter drop cap before lowercase text (`Wh` + `en`), or two digit-only texts
+ *   (counter widgets: `12` + `34`);
  * - they are inside `<pre>` or `<code>`.
  * An element next to a text node (`<b>Java</b>Script`, `H<sub>2</sub>O`) is never separated.
  * The limit: two elements alone in a parent, such as a logo `<span>Web</span><span>ForAgents</span>`,
@@ -99,6 +114,12 @@ function needsSeparator(node: Node): boolean {
   if (!left.trim() || !right.trim() || /\s$/.test(left) || /^\s/.test(right)) return false;
   if (left.trim().length === 1 || right.trim().length === 1) return false;
   if (OPENS.test(left) || CLOSES.test(right)) return false;
+  const l = left.trim();
+  const r = right.trim();
+  if (OPERATOR_ONLY.test(l)) return false;
+  if (CJK_BOUNDARY.test(l.slice(-1)) || CJK_BOUNDARY.test(r[0] ?? "")) return false;
+  if (DROP_CAP.test(l) && /^\p{Ll}/u.test(r)) return false;
+  if (/^\d+$/.test(l) && /^\d+$/.test(r)) return false;
   for (let p = node.parentNode; p; p = p.parentNode) if (p.nodeName === "PRE" || p.nodeName === "CODE") return false;
   return true;
 }
