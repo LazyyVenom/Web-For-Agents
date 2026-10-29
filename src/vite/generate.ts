@@ -209,6 +209,15 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
     new Map(),
     (m) => logger.warn(m),
   );
+  // Once per action name: a footer action appears on every page.
+  const unknownKindWarned = new Set<string>();
+  const warnUnknownKind = (name: string, value: string, kind: string): void => {
+    if (unknownKindWarned.has(name)) return;
+    unknownKindWarned.add(name);
+    logger.warn(
+      `${LOG_PREFIX} action "${name}" has an unknown data-agent-kind "${value}" (expected handler, form, click or link); using "${kind}"`,
+    );
+  };
   for (const { route, file } of routes) {
     mtimeByRoute.set(route, fs.statSync(path.join(outDir, file)).mtime);
     const bytes = fs.readFileSync(path.join(outDir, file));
@@ -217,7 +226,7 @@ export async function generateAgentFiles(options: GenerateOptions): Promise<Gene
     const { document, dispose } = parseHtml(html);
     let page: SitePage;
     try {
-      const actions = resolved.agentMap ? staticActions(document) : [];
+      const actions = resolved.agentMap ? staticActions(document, warnUnknownKind) : [];
       const links = resolved.agentMap ? markupLinks(document) : [];
       const info = analyzeDocument(document, {
         pageUrl: url,

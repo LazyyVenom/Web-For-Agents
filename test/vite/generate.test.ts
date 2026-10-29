@@ -233,6 +233,18 @@ describe("generateAgentFiles", () => {
     expect(r.warnings).toContain("[web-for-agents] a\\b.html cannot be a page URL (its name has a backslash or similar); skipped");
   });
 
+  it("warns once per action name about an unknown data-agent-kind and falls back to the element's kind", async () => {
+    const bogus = '<button data-agent-action="teleport" data-agent-kind="teleport">Go</button>';
+    const t = setup({ "index.html": page("Home", `<h1>Home</h1>${bogus}`), "about.html": page("About", `<h1>About</h1>${bogus}`) });
+    const r = await t.run();
+    const unknown = r.warnings.filter((w) => w.includes("data-agent-kind"));
+    expect(unknown).toEqual([
+      '[web-for-agents] action "teleport" has an unknown data-agent-kind "teleport" (expected handler, form, click or link); using "click"',
+    ]);
+    const map = JSON.parse(t.read("agents.json")) as { pages: Array<{ actions?: Array<{ name: string; kind: string }> }> };
+    expect(map.pages.flatMap((p) => p.actions ?? []).map((a) => [a.name, a.kind])).toContainEqual(["teleport", "click"]);
+  });
+
   it("validates options", async () => {
     const t = setup({ "index.html": SITE["index.html"]! });
     await expect(t.run({ robots: undefined as never })).rejects.toThrow("robots.ai.training and robots.ai.search are required");

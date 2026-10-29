@@ -60,6 +60,8 @@ With a `handler`, the agent's input is validated against `inputSchema` (an objec
 
 `hintProps` puts `data-agent-action`, `data-agent-description`, `aria-description`, `data-agent-kind` and, for destructive actions, `data-agent-destructive="true"` on the element, so the hints are also in the prerendered HTML. `data-agent-kind` is how the action runs, decided from the spec at render time (also during server rendering): `"handler"` with a `handler`, otherwise `"click"`; `AgentForm` writes `"form"` (or `"handler"` with a `handler`) and `agentLinkProps` writes `"link"`. So an `<a href>` that is a WebMCP tool is not mistaken for a link action. Without a `handler`, use `AgentForm` for a form: a `<form>` given a handler-less `useAgentAction`'s `hintProps` runs as a form but is marked `"click"`. `agentParam(description)` adds `data-agent-param` to a form field; it is used as that field's description in the schema (otherwise its `<label>`, `aria-label` or `placeholder`).
 
+In hand-written HTML read by `generate`, an unknown `data-agent-kind` value is ignored with a warning (once per action name), and the kind is inferred from the element: `"form"` for a `<form>`, `"link"` for an `<a href>`, else `"click"`. A `<form>` marked `"handler"` is listed with the schema of its fields, since its code-side `inputSchema` is not in the HTML.
+
 `listAgentActions()` and `executeAgentAction(name, input)` give you the same registry directly. `refreshAgentActions()` re-checks the registry; pass `{ force: true }` to also re-describe actions that are already registered with WebMCP and re-register any whose schema changed.
 
 ## Names and duplicates

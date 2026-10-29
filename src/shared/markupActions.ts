@@ -21,6 +21,17 @@ export interface MarkupAction {
   source: "markup" | "webmcp-declarative";
   /** Link actions only: the raw href attribute, not yet checked (see resolveLinkHref). */
   href?: string;
+  /** A `data-agent-kind` value that is not one of KNOWN_KINDS (`kind` was then inferred). */
+  unknownKind?: string;
+}
+
+/** The `data-agent-kind` values markupKind understands. */
+export const KNOWN_KINDS: readonly ActionKind[] = ["handler", "form", "click", "link"];
+
+/** The trimmed `data-agent-kind` value when it is present, non-empty and not a known kind. */
+function unknownKindOf(el: Element): string | undefined {
+  const v = el.getAttribute(ACTION_KIND_ATTR)?.trim();
+  return v && !(KNOWN_KINDS as readonly string[]).includes(v) ? v : undefined;
 }
 
 /**
@@ -63,6 +74,7 @@ export function markupActions(doc: ParentNode): MarkupAction[] {
     if (!name) return;
     const kind = markupKind(el);
     const link = kind === "link";
+    const unknownKind = unknownKindOf(el);
     out.push({
       element: el,
       name,
@@ -71,6 +83,7 @@ export function markupActions(doc: ParentNode): MarkupAction[] {
       destructive: el.getAttribute(ACTION_DESTRUCTIVE_ATTR) === "true",
       source: "markup",
       ...(link ? { href: el.getAttribute("href") ?? "" } : {}),
+      ...(unknownKind === undefined ? {} : { unknownKind }),
     });
   });
   doc.querySelectorAll(`form[${WEBMCP_TOOLNAME_ATTR}]`).forEach((el) => {

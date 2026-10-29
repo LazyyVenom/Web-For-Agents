@@ -83,7 +83,8 @@ describe("markupKind", () => {
     expect(staticActions(doc).map((a) => [a.name, a.kind, Object.keys(a.inputSchema.properties ?? {})])).toEqual([
       ["contact", "form", ["email"]],
       ["share", "handler", []],
-      ["subscribe", "handler", []],
+      // A handler form keeps the fields its markup shows.
+      ["subscribe", "handler", ["email"]],
     ]);
     expect(markupLinks(doc).map((l) => l.name)).toEqual(["resume"]);
     window.happyDOM.close();
