@@ -50,6 +50,12 @@ export function buildEntryTags(props: SeoProps, defaults: SeoDefaults = {}): Hea
   if (props.canonical === false) {
     tags.push({ kind: "remove", key: "rel:canonical" }, { kind: "remove", key: "property:og:url" });
   }
+  // A page's alternateLocales replace the provider's list rather than add to it.
+  if (props.alternateLocales !== undefined) {
+    for (const alt of defaults.alternateLocales ?? []) {
+      if (!props.alternateLocales.includes(alt)) tags.push({ kind: "remove", key: `alternate-locale:${alt}` });
+    }
+  }
   // The page's own locale is not also an alternate of it.
   if (props.locale !== undefined) tags.push({ kind: "remove", key: `alternate-locale:${props.locale}` });
   return tags;

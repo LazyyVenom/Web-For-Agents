@@ -303,6 +303,18 @@ describe("Seo languages", () => {
     expect([root.getAttribute("lang"), root.hasAttribute("dir")]).toEqual(["en", false]);
   });
 
+  it("a page's alternateLocales replace the provider's list", () => {
+    const tree = (alternateLocales: string[]) => (
+      <SeoProvider defaults={{ locale: "en_US", alternateLocales: ["de_DE", "fr_FR"] }}>
+        <Seo title="Page" alternateLocales={alternateLocales} />
+      </SeoProvider>
+    );
+    const { rerender } = render(tree(["de_DE"]));
+    expect(altLocales()).toEqual(["de_DE"]);
+    rerender(tree([]));
+    expect(altLocales()).toEqual([]);
+  });
+
   it("unmounting everything restores the document's own lang and dir", () => {
     const { unmount } = render(<Page lang="ar" />);
     expect(root.getAttribute("dir")).toBe("rtl");
