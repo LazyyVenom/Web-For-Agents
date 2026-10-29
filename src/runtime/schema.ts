@@ -120,22 +120,103 @@ function authors(a: Author | Author[] | null | undefined) {
   return Array.isArray(a) ? a.map(person).filter((p) => p !== undefined) : person(a);
 }
 
-type Offer = {
-  price: number | string;
+/** A name as a node of `type` (`{ "@type": type, name }`); nodes, refs, null and undefined pass through. */
+const named = <T>(type: string, v: string | T) => (typeof v === "string" ? { "@type": type, name: v } : v);
+
+/** Applies `f` to a value or to each element of an array. */
+const each = <T, R>(v: T | T[], f: (x: T) => R) => (Array.isArray(v) ? v.map(f) : f(v));
+
+/** Builds `v` with `f` unless it already is a node or a ref. Null and undefined give undefined. */
+function build<T extends object>(v: T | Embeddable | null | undefined, f: (x: T) => JsonLdNode): Embeddable | undefined {
+  if (v === undefined || v === null) return undefined;
+  return isEmbeddable(v) ? v : f(v as T);
+}
+
+/** schema.org `ItemAvailability` values, written as `https://schema.org/<value>`. */
+export type ItemAvailability =
+  | "InStock"
+  | "OutOfStock"
+  | "PreOrder"
+  | "BackOrder"
+  | "Discontinued"
+  | "InStoreOnly"
+  | "LimitedAvailability"
+  | "OnlineOnly"
+  | "SoldOut"
+  | "PreSale"
+  | "MadeToOrder"
+  | "Reserved";
+
+/** schema.org `OfferItemCondition` values, written as `https://schema.org/<value>Condition`. */
+export type ItemCondition = "New" | "Used" | "Refurbished" | "Damaged";
+
+type OfferCommon = {
   priceCurrency: string;
-  availability?: "InStock" | "OutOfStock" | "PreOrder";
+  availability?: ItemAvailability;
   url?: string;
+  priceValidUntil?: string;
+  itemCondition?: ItemCondition;
+  /** An organization name, or a node or a ref. */
+  seller?: string | Embeddable;
 };
 
-function offer(o: Offer | null | undefined) {
+/** One price, written as an `Offer`. */
+export type OfferInput = OfferCommon & { price: number | string };
+
+/** A price range over several offers, written as an `AggregateOffer`. */
+export type AggregateOfferInput = OfferCommon & { lowPrice: number | string; highPrice?: number | string; offerCount?: number };
+
+function offer(o: OfferInput | AggregateOfferInput | null | undefined) {
   if (o === undefined || o === null) return undefined;
+  const all = o as Partial<OfferInput & AggregateOfferInput>;
   return definedOnly({
-    "@type": "Offer",
-    price: o.price,
+    "@type": "lowPrice" in o ? "AggregateOffer" : "Offer",
+    price: all.price,
+    lowPrice: all.lowPrice,
+    highPrice: all.highPrice,
+    offerCount: all.offerCount,
     priceCurrency: o.priceCurrency,
     availability: o.availability && `https://schema.org/${o.availability}`,
     url: o.url,
+    priceValidUntil: o.priceValidUntil,
+    itemCondition: o.itemCondition && `https://schema.org/${o.itemCondition}Condition`,
+    seller: named("Organization", o.seller),
   });
+}
+
+type RatingInput = { ratingValue: number | string; bestRating?: number | string; worstRating?: number | string };
+
+/** The overall rating from many reviews, written as an `AggregateRating`. */
+export type AggregateRatingInput = RatingInput & { reviewCount?: number; ratingCount?: number };
+
+/** One review, written as a `Review` with a `Rating`. A string `author` is a person's name. */
+export type ReviewInput = {
+  author: string | Author;
+  reviewRating?: RatingInput;
+  reviewBody?: string;
+  datePublished?: string;
+  name?: string;
+};
+
+/** What the standalone rating and review builders add: the item reviewed and the common options. */
+type Standalone = { itemReviewed?: Embeddable } & JsonLdNodeOptions;
+
+function aggregateRating(i: AggregateRatingInput & Standalone): JsonLdNode {
+  const [rest, options] = split(i);
+  return node("AggregateRating", rest, options);
+}
+
+function review(i: ReviewInput & Standalone): JsonLdNode {
+  const [{ author, reviewRating, ...rest }, options] = split(i);
+  return node(
+    "Review",
+    {
+      ...rest,
+      author: typeof author === "string" ? named("Person", author) : person(author),
+      reviewRating: reviewRating === undefined || reviewRating === null ? undefined : { "@type": "Rating", ...reviewRating },
+    },
+    options,
+  );
 }
 
 /** Splits the common options off a builder's input. */
@@ -171,16 +252,29 @@ export const schema = {
       image?: string | string[];
       sku?: string;
       brand?: string | Embeddable;
-      offers?: Offer;
+      /** One offer, several, or an `AggregateOffer` (`lowPrice`, `highPrice`, `offerCount`). */
+      offers?: OfferInput | AggregateOfferInput | Array<OfferInput | AggregateOfferInput>;
+      aggregateRating?: AggregateRatingInput | Embeddable;
+      review?: ReviewInput | Embeddable | Array<ReviewInput | Embeddable>;
     } & JsonLdNodeOptions,
   ): JsonLdNode {
-    const [{ brand, offers, ...rest }, options] = split(i);
+    const [{ brand, offers, aggregateRating: rating, review: reviews, ...rest }, options] = split(i);
     return node(
       "Product",
-      { ...rest, brand: typeof brand === "string" ? { "@type": "Brand", name: brand } : brand, offers: offer(offers) },
+      {
+        ...rest,
+        brand: named("Brand", brand),
+        offers: each(offers, offer),
+        aggregateRating: build(rating, aggregateRating),
+        review: each(reviews, (r) => build(r, review)),
+      },
       options,
     );
   },
+  /** A standalone `AggregateRating`, for example one a product points at with `schema.ref`. */
+  aggregateRating,
+  /** A standalone `Review`, for example one a product points at with `schema.ref`. */
+  review,
   faqPage(items: Array<{ question: string; answer: string }>, options?: JsonLdNodeOptions): JsonLdNode {
     return node(
       "FAQPage",
@@ -267,21 +361,18 @@ export const schema = {
       operatingSystem?: string;
       url?: string;
       image?: string | string[];
-      offers?: Offer;
-      aggregateRating?: { ratingValue: number | string; ratingCount?: number; reviewCount?: number; bestRating?: number };
+      offers?: OfferInput;
+      aggregateRating?: AggregateRatingInput;
       author?: Author;
     } & JsonLdNodeOptions,
   ): JsonLdNode {
-    const [{ offers, aggregateRating, author, ...rest }, options] = split(i);
+    const [{ offers, aggregateRating: rating, author, ...rest }, options] = split(i);
     return node(
       "SoftwareApplication",
       {
         ...rest,
         offers: offer(offers),
-        aggregateRating:
-          aggregateRating === undefined || aggregateRating === null
-            ? undefined
-            : { "@type": "AggregateRating", ...definedOnly(aggregateRating) },
+        aggregateRating: build(rating, aggregateRating),
         author: person(author),
       },
       options,

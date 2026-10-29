@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { jsonLdNodes } from "../../src/shared/jsonLd";
 import { checkSchemaNodes, SCHEMA_RULES } from "../../src/shared/schemaRules";
+import { schema } from "../../src/runtime/schema";
 
 /** Issue paths as "Type path" for a parsed JSON-LD value. */
 const missing = (value: unknown): string[] => checkSchemaNodes(jsonLdNodes(value)).issues.map((i) => `${i.type} ${i.path}`);
@@ -80,6 +81,14 @@ describe("schemaRules", () => {
     expect(
       missing({ "@type": "Product", name: "P", offers: [{ "@type": "Offer", price: 5 }, { "@type": "AggregateOffer", lowPrice: 1 }] }),
     ).toEqual(["Product offers[1].priceCurrency"]);
+  });
+
+  it("Product from schema.product with offers, an AggregateOffer, aggregateRating or review passes", () => {
+    const offers = [{ price: 5, priceCurrency: "USD", availability: "BackOrder", itemCondition: "Used", seller: "Acme" }] as const;
+    expect(missing(schema.product({ name: "P", offers: [...offers] }))).toEqual([]);
+    expect(missing(schema.product({ name: "P", offers: { lowPrice: 5, highPrice: 9, offerCount: 2, priceCurrency: "USD" } }))).toEqual([]);
+    expect(missing(schema.product({ name: "P", aggregateRating: { ratingValue: 4.6, reviewCount: 212 } }))).toEqual([]);
+    expect(missing(schema.product({ name: "P", review: { author: "Ann", reviewRating: { ratingValue: 5 } } }))).toEqual([]);
   });
 
   it("SoftwareApplication and subtypes: name, offers.price, aggregateRating or review", () => {

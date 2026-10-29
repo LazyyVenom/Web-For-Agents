@@ -364,3 +364,161 @@ describe("0.4: @id, refs and extra fields", () => {
     expect(entry.serializeJsonLd).toBe(serializeJsonLd);
   });
 });
+
+describe("0.5: product rich results", () => {
+  const C = "https://schema.org";
+  it("product: offers array, AggregateOffer, condition and seller", () => {
+    const n = schema.product({
+      name: "p",
+      offers: [
+        {
+          price: 5,
+          priceCurrency: "USD",
+          availability: "BackOrder",
+          url: "https://a.com/p",
+          priceValidUntil: "2026-12-31",
+          itemCondition: "Refurbished",
+          seller: "Acme",
+        },
+        { price: "6.50", priceCurrency: "USD", availability: "SoldOut", itemCondition: "New", seller: schema.ref("#org") },
+      ],
+    });
+    expect(n.offers).toEqual([
+      {
+        "@type": "Offer",
+        price: 5,
+        priceCurrency: "USD",
+        availability: "https://schema.org/BackOrder",
+        url: "https://a.com/p",
+        priceValidUntil: "2026-12-31",
+        itemCondition: "https://schema.org/RefurbishedCondition",
+        seller: { "@type": "Organization", name: "Acme" },
+      },
+      {
+        "@type": "Offer",
+        price: "6.50",
+        priceCurrency: "USD",
+        availability: "https://schema.org/SoldOut",
+        itemCondition: "https://schema.org/NewCondition",
+        seller: { "@id": "#org" },
+      },
+    ]);
+    expect(schema.product({ name: "p", offers: { lowPrice: 10, highPrice: 20, offerCount: 3, priceCurrency: "EUR" } }).offers).toEqual({
+      "@type": "AggregateOffer",
+      lowPrice: 10,
+      highPrice: 20,
+      offerCount: 3,
+      priceCurrency: "EUR",
+    });
+  });
+
+  it("availability: every ItemAvailability value expands to a schema.org URL; the 0.4 offer is unchanged", () => {
+    const values = [
+      "InStock",
+      "OutOfStock",
+      "PreOrder",
+      "BackOrder",
+      "Discontinued",
+      "InStoreOnly",
+      "LimitedAvailability",
+      "OnlineOnly",
+      "SoldOut",
+      "PreSale",
+      "MadeToOrder",
+      "Reserved",
+    ] as const;
+    for (const availability of values) {
+      const n = schema.product({ name: "p", offers: { price: 1, priceCurrency: "USD", availability } });
+      expect((n.offers as any).availability).toBe(`https://schema.org/${availability}`);
+    }
+    expect(
+      serializeJsonLd(schema.product({ name: "p", offers: { price: 5, priceCurrency: "USD", availability: "InStock", url: "u" } })),
+    ).toBe(
+      '{"@context":"https://schema.org","@type":"Product","name":"p","offers":{"@type":"Offer","price":5,"priceCurrency":"USD","availability":"https://schema.org/InStock","url":"u"}}',
+    );
+  });
+
+  it("product: aggregateRating and review", () => {
+    const n = schema.product({
+      name: "p",
+      aggregateRating: { ratingValue: 4.6, reviewCount: 212, ratingCount: 300, bestRating: 5, worstRating: "1" },
+      review: [
+        { author: "Ann", reviewRating: { ratingValue: 5, bestRating: 5 }, reviewBody: "Great", datePublished: "2026-01-02", name: "Love it" },
+        { author: { name: "Bo", url: "https://bo.dev" }, reviewRating: { ratingValue: 3, worstRating: 1 } },
+        { author: schema.ref("#me") },
+      ],
+    });
+    expect(n.aggregateRating).toEqual({
+      "@type": "AggregateRating",
+      ratingValue: 4.6,
+      reviewCount: 212,
+      ratingCount: 300,
+      bestRating: 5,
+      worstRating: "1",
+    });
+    expect(n.review).toEqual([
+      {
+        "@type": "Review",
+        reviewBody: "Great",
+        datePublished: "2026-01-02",
+        name: "Love it",
+        author: { "@type": "Person", name: "Ann" },
+        reviewRating: { "@type": "Rating", ratingValue: 5, bestRating: 5 },
+      },
+      {
+        "@type": "Review",
+        author: { "@type": "Person", name: "Bo", url: "https://bo.dev" },
+        reviewRating: { "@type": "Rating", ratingValue: 3, worstRating: 1 },
+      },
+      { "@type": "Review", author: { "@id": "#me" } },
+    ]);
+    expect(schema.product({ name: "p", review: { author: "Ann" } }).review).toEqual({
+      "@type": "Review",
+      author: { "@type": "Person", name: "Ann" },
+    });
+    expect(serializeJsonLd(n).match(/@context/g)).toHaveLength(1);
+  });
+
+  it("product: missing new fields are omitted", () => {
+    const missing = null as any;
+    expect(schema.product({ name: "p", aggregateRating: missing, review: missing, offers: [missing] })).toEqual({
+      "@context": C,
+      "@type": "Product",
+      name: "p",
+      offers: [],
+    });
+    expect(
+      schema.product({ name: "p", offers: { price: 1, priceCurrency: "USD", itemCondition: missing, seller: missing } }).offers,
+    ).toEqual({ "@type": "Offer", price: 1, priceCurrency: "USD" });
+  });
+
+  it("standalone aggregateRating and review builders, linkable by @id", () => {
+    expect(schema.aggregateRating({ ratingValue: 4, reviewCount: 2, itemReviewed: schema.ref("#p"), id: "#r" })).toEqual({
+      "@context": C,
+      "@type": "AggregateRating",
+      "@id": "#r",
+      ratingValue: 4,
+      reviewCount: 2,
+      itemReviewed: { "@id": "#p" },
+    });
+    const review = schema.review({ author: "Ann", reviewRating: { ratingValue: 5 }, id: "#rev" });
+    expect(review).toEqual({
+      "@context": C,
+      "@type": "Review",
+      "@id": "#rev",
+      author: { "@type": "Person", name: "Ann" },
+      reviewRating: { "@type": "Rating", ratingValue: 5 },
+    });
+    const p = schema.product({ name: "p", review: [review, schema.ref("#rev2")], aggregateRating: schema.ref("#r") });
+    expect(p.review).toEqual([
+      { "@type": "Review", "@id": "#rev", author: { "@type": "Person", name: "Ann" }, reviewRating: { "@type": "Rating", ratingValue: 5 } },
+      { "@id": "#rev2" },
+    ]);
+    expect(p.aggregateRating).toEqual({ "@id": "#r" });
+  });
+
+  it("softwareApplication takes the same aggregateRating fields", () => {
+    const n = schema.softwareApplication({ name: "s", aggregateRating: { ratingValue: "4.5", bestRating: "5", worstRating: 1 } });
+    expect(n.aggregateRating).toEqual({ "@type": "AggregateRating", ratingValue: "4.5", bestRating: "5", worstRating: 1 });
+  });
+});

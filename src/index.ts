@@ -4,6 +4,14 @@ export { JsonLd } from "./runtime/JsonLd";
 export { schema, serializeJsonLd } from "./runtime/schema";
 export type { SeoProps, SeoDefaults, HeadTag } from "./runtime/types";
 export type { JsonLdNode, JsonLdGraph, JsonLdRef, JsonLdNodeOptions, JsonLdExtra } from "./runtime/schema";
+export type {
+  ItemAvailability,
+  ItemCondition,
+  OfferInput,
+  AggregateOfferInput,
+  AggregateRatingInput,
+  ReviewInput,
+} from "./runtime/schema";
 export { ContentRegion, ExcludeFromContent } from "./runtime/content";
 export { holdPrerender } from "./runtime/prerender";
 export { hydrateApp } from "./runtime/hydrate";
