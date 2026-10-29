@@ -361,17 +361,46 @@ describe("packed package without vite", () => {
     expect(out.link["data-agent-kind"]).toBe("link");
   });
 
-  it("a footer using only agentLinkProps from /link bundles to under 1 KB gzip, with no imports left", async () => {
-    const entry = path.join(bare, "footer.mjs");
+  it("a footer using only agentLinkProps from /link bundles to under 1 KB gzip eager, with or without register", async () => {
+    // Measured with esbuild: 876 and 881 bytes. The link tools and the engine are only in lazy chunks.
+    for (const register of [false, true]) {
+      const name = register ? "footer-register" : "footer";
+      const entry = path.join(bare, `${name}.mjs`);
+      writeFileSync(
+        entry,
+        `import { agentLinkProps } from "@anubhav-choubey/web-for-agents/link";\nexport const footer = agentLinkProps({ name: "email", description: "Email me"${register ? ", register: true" : ""} });\n`,
+      );
+      const outdir = path.join(bare, `${name}-split`);
+      await sh(esbuildBin, [entry, "--bundle", "--minify", "--format=esm", "--splitting", `--outdir=${outdir}`, "--log-level=error"], bare);
+      const code = readFileSync(path.join(outdir, `${name}.js`), "utf8");
+      expect(code, name).not.toMatch(/\bfrom\s*["']/);
+      const { eager, lazy } = splitSizes(outdir, `${name}.js`);
+      expect(eager, name).toBeLessThan(1024);
+      expect(lazy, name).toBeGreaterThan(4000);
+    }
+  });
+
+  it("a page using /link (register) and /form loads one engine, lazily, shared by both", async () => {
+    const entry = path.join(bare, "link-form.mjs");
     writeFileSync(
       entry,
-      'import { agentLinkProps } from "@anubhav-choubey/web-for-agents/link";\nexport const footer = agentLinkProps({ name: "email", description: "Email me" });\n',
+      [
+        'import { agentLinkProps } from "@anubhav-choubey/web-for-agents/link";',
+        'import { AgentForm, useAgentAction } from "@anubhav-choubey/web-for-agents/form";',
+        'export const footer = agentLinkProps({ name: "email", description: "Email me", register: true });',
+        "export { AgentForm, useAgentAction };",
+      ].join("\n") + "\n",
     );
-    const outfile = path.join(bare, "footer.bundle.js");
-    await sh(esbuildBin, [entry, "--bundle", "--minify", "--format=esm", `--outfile=${outfile}`], bare);
-    const code = readFileSync(outfile);
-    expect(code.toString()).not.toMatch(/\bfrom\s*["']|\bimport\s*\(/);
-    expect(gzipSync(code).length).toBeLessThan(1024);
+    const outdir = path.join(bare, "link-form-split");
+    const externals = ["react", "react/jsx-runtime"].map((m) => `--external:${m}`);
+    await sh(esbuildBin, [entry, "--bundle", "--minify", "--format=esm", "--splitting", `--outdir=${outdir}`, "--log-level=error", ...externals], bare);
+    const files = readdirSync(outdir).filter((f) => f.endsWith(".js"));
+    // The engine's form automation (requestSubmit) is in exactly one file, which is not eager.
+    const engine = files.filter((f) => readFileSync(path.join(outdir, f), "utf8").includes("requestSubmit"));
+    expect(engine).toHaveLength(1);
+    const { eager } = splitSizes(outdir, "link-form.js");
+    // Measured at 3266 bytes gzip: /form (2516) plus /link's register code.
+    expect(eager).toBeLessThan(3600);
   });
 
   it("an AgentForm + useAgentAction page bundled by esbuild loads the agent engine lazily, from /form and the root", async () => {

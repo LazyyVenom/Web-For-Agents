@@ -159,19 +159,29 @@ describe("import boundaries", () => {
     expect(specifiers(readFileSync(join(SRC, "shared", "text.ts"), "utf8"))).toEqual([]);
   });
 
-  it("agentLinkProps (runtime/agent/link) imports only shared modules and types", () => {
+  it("agentLinkProps (runtime/agent/link) imports only shared modules, the WebMCP detection and types; linkTools only lazily", () => {
     const file = join(SRC, "runtime", "agent", "link.ts");
-    for (const line of readFileSync(file, "utf8").split("\n")) {
-      const spec = specifiers(line)[0];
+    const detect = join(SRC, "runtime", "agent", "detect");
+    const src = readFileSync(file, "utf8");
+    for (const line of src.split("\n")) {
+      const spec = specifiers(line, false)[0];
       if (!spec || line.startsWith("import type")) continue;
-      expect(inDir(resolved(file, spec), join(SRC, "shared")), `link.ts -> ${spec}`).toBe(true);
+      const to = resolved(file, spec);
+      expect(inDir(to, join(SRC, "shared")) || to === detect, `link.ts -> ${spec}`).toBe(true);
     }
+    const eager = specifiers(src, false);
+    expect([...new Set(specifiers(src).filter((s) => !eager.includes(s)))]).toEqual(["./linkTools"]);
+    // detect.ts imports only types.
+    expect(specifiers(readFileSync(sourceFile(detect), "utf8").replace(/^import type .*$/gm, ""))).toEqual([]);
   });
 
-  it("the /schema and /link entries never load react, react-dom or the agent runtime", () => {
-    const forbidden = ["registry", "webmcp", "react", "formAutomation", "formSchema", "dom"].map((n) => join(SRC, "runtime", "agent", n));
+  it("the /schema and /link entries never load react, react-dom or the agent runtime eagerly", () => {
+    const forbidden = ["registry", "webmcp", "react", "formAutomation", "formSchema", "dom", "core", "linkTools"].map((n) =>
+      join(SRC, "runtime", "agent", n),
+    );
     for (const name of ["schema", "link"]) {
-      const { files, bare } = runtimeGraph(join(SRC, "entries", `${name}.ts`));
+      // /schema imports nothing lazily either; /link reaches the runtime only through import("./linkTools").
+      const { files, bare } = runtimeGraph(join(SRC, "entries", `${name}.ts`), name === "schema");
       expect([...bare], `entries/${name}`).toEqual([]);
       for (const f of files) {
         expect(forbidden, `entries/${name} -> ${relative(SRC, f)}`).not.toContain(stripExt(f));
@@ -180,6 +190,11 @@ describe("import boundaries", () => {
     }
     // The walker does see react where it is used.
     expect(runtimeGraph(join(SRC, "index.ts")).bare).toContain("react-dom/client");
+    // /link reaches the engine only lazily (linkTools, then core's import()), and never react.
+    const lazy = runtimeGraph(join(SRC, "entries", "link.ts"));
+    expect([...lazy.bare], "entries/link, lazily").toEqual([]);
+    expect(lazy.files.has(join(SRC, "runtime", "agent", "registry.ts"))).toBe(true);
+    expect(specifiers(readFileSync(join(SRC, "runtime", "agent", "linkTools.ts"), "utf8")).filter((s) => s.includes("registry"))).toEqual([]);
   });
 
   it("the /form entry loads only react, and the agent engine only lazily", () => {

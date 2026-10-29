@@ -12,6 +12,11 @@
 - The package ships `schemas/agents.v2.schema.json`, a JSON Schema (draft 2020-12) of `agents.json` version 2: `site.actions`, `pages[].actions`, every action field and kind, and the optional fields. The `$schema` URL pins the major version, so it stays valid across minor and patch releases. The audit's agent map check accepts and ignores `$schema`.
 - The duplicate action name warning names what differs, with both values: `/contact: 2 different actions named open-resume (differ in: kind click vs link, readOnly true vs unset); only the first is listed`. It compares kind, `href`, description, flags and form fields (shown as `input schema`); values are sanitized and cut to 40 characters, and 3 or more definitions stay on one line.
 - The build summary counts the routes left out of `llms.txt`, the sitemap and `agents.json`: `prerendered 21 routes (20 listed in llms.txt and the sitemap, 1 noindex), ...`, with `redirected` for routes that redirect to another route. The listed number is the page count the audit reports for `agents.json`.
+- `agentLinkProps({ name, description, register: true })` also exposes the link as a WebMCP tool while it is mounted, so a link can be both a site-wide action in `agents.json` and a browser tool. The attributes, and so `agents.json` and `site.actions`, are the same as without `register`; it only adds a `ref` (React 18 and 19, or plain DOM). The ref does nothing without `document.modelContext`; with it, the link tools load lazily through the same one runtime load as `AgentForm` and `useAgentAction`. Running the tool clicks the link (routers and `target` behave as for a user), or opens its `href` when the link is gone; a `destructive` link asks first. Links that share a name register one tool, removed when the last one unmounts. `/link` stays under 1 KB gzip eager with `register`. See [Links that are also browser tools](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/agent-actions.md#links-that-are-also-browser-tools).
+
+### Fixed
+
+- `/link` and `/schema` are each built as one file, with no static import of a chunk shared with `/form` and the root entry, so a page that imports only `/link` (a footer) no longer loads, or preloads, an extra file.
 
 ## 0.5.0 (2026-10-29)
 

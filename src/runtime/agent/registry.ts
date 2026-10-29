@@ -313,7 +313,7 @@ function sync(force: boolean): void {
  * Installed by core.ts once this module has loaded. Not installed here at the top level: a module
  * side effect would make bundlers keep this file in every bundle that imports the root entry.
  */
-export const engine: Engine = { sync, list: listRegistered, execute: executeRegistered };
+export const engine: Engine = { sync, list: listRegistered, execute: executeRegistered, expose: exposeTool };
 
 /** Test-only: drop all registrations and module state, and install the engine without a lazy load. */
 export function __resetForTests(): void {
