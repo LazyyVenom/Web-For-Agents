@@ -6,6 +6,10 @@
 
 - `agents.json` is now version 2. Actions found on every listed page with the same definition (name, kind, `href`, input schema, description and flags), such as footer links or a site search, are listed once in a new `site.actions` and left out of each page's `actions`. The actions on a page are now `site.actions` plus the page's `actions`. Tools that read only `pages[].actions` will miss site-wide actions. `agentMap: { siteActions: false }` (or `generate --no-site-actions`) keeps the per-page layout, byte for byte apart from `version`. See [agents.json](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/agent-actions.md#agentsjson).
 - `generate` prints one summary line, such as `[web-for-agents] wrote 47 files (20 pages, 207 actions; 9 site-wide)`, instead of the layout, the page list and every file written. Warnings are unchanged. Use `--verbose` for the full lists; `--json` is unchanged.
+- The audit checks ratings and reviews as Google's review snippet does, on `Product` and `SoftwareApplication` (and its subtypes): an `aggregateRating` needs `ratingValue` and `ratingCount` or `reviewCount`, and each `review` needs an `author` with a `name` and a `reviewRating` with a `ratingValue`. A `SoftwareApplication` `AggregateOffer` needs `lowPrice` and `priceCurrency`. Pages that passed with incomplete ratings or reviews can score lower.
+- `AggregateRatingInput` requires `ratingCount` or `reviewCount`, and `ReviewInput` requires `reviewRating`, so `schema.softwareApplication({ aggregateRating: { ratingValue: 4 } })`, which type-checked in 0.4, is now a type error.
+- Title and description lengths count East Asian wide characters (Chinese, Japanese, Korean, CJK punctuation and fullwidth forms) as 2, in the development warnings, the build warnings and the audit. A CJK title over 30 characters now gets a warning and can lower the audit score; short CJK descriptions no longer do.
+- The exported `HeadTag` type has a new `kind: "html"` (an `<html>` attribute, for `lang` and `dir`); code that switches over every `kind` needs a case for it.
 
 ### New
 
@@ -20,6 +24,17 @@
 - The audit's agent map check accepts version 1 and 2 and counts pages and actions, site-wide ones included.
 - The plugin's build summary counts the actions in the agent map.
 - `@anubhav-choubey/web-for-agents/form` exports `AgentForm`, `useAgentAction`, `agentParam` and `refreshAgentActions` without `Seo`, `JsonLd`, `hydrateApp` or react-dom. With esbuild, which keeps the runtime eager when it is imported from the root entry, `/form` keeps it lazy (about 2.4 KB gzip eager).
+- `Seo` and `useSeo` take `lang` (`<html lang>`, which also sets `<html dir>`: `"rtl"` for right-to-left languages and scripts), `dir`, `locale` (`og:locale`), `alternateLocales` (`og:locale:alternate`) and `alternates` (`{ hrefLang, href }[]`, written as `<link rel="alternate" hreflang>` with absolute URLs under `siteUrl`, `x-default` included). `SeoProvider` defaults take `lang`, `dir` and `alternateLocales`. The prerender captures them, so each static page ships its own `lang`, `dir` and hreflang links, and client-side navigation removes the previous page's. See [Languages](https://github.com/LazyyVenom/Web-For-Agents/blob/master/docs/seo.md#languages).
+- `schema.softwareApplication` `offers` takes the same input as `schema.product`: one offer, an array (such as pricing tiers) or an `AggregateOffer`.
+- `offers` on `schema.product` and `schema.softwareApplication` also take nodes and refs, kept as they are, so fields such as `priceSpecification` survive.
+
+### Fixed
+
+- `schema.softwareApplication` no longer drops an array of offers and writes an empty `{"@type":"Offer"}`.
+- An offer is written as an `AggregateOffer` only when `lowPrice` or `highPrice` has a value; `lowPrice: undefined` gives an `Offer`.
+- An empty `breadcrumb` array on a page builder writes no `breadcrumb` instead of an empty `BreadcrumbList`.
+- A `__proto__` key anywhere in schema builder input, such as parsed JSON, is dropped and no longer replaces a node's prototype.
+- Japanese, Chinese and Korean descriptions of a full snippet are no longer reported as shorter than 50 characters.
 
 ### Changed
 
