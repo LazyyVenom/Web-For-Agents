@@ -155,6 +155,10 @@ export type ItemAvailability =
 export type ItemCondition = "New" | "Used" | "Refurbished" | "Damaged";
 
 type OfferCommon = {
+  /** The offer's name, such as a plan ("Free", "Pro", "Team"). */
+  name?: string;
+  /** What the offer includes. */
+  description?: string;
   priceCurrency: string;
   availability?: ItemAvailability;
   url?: string;
@@ -179,6 +183,8 @@ function offer(o: OfferInput | AggregateOfferInput): JsonLdNode {
   const all = o as Partial<OfferInput & AggregateOfferInput>;
   return definedOnly({
     "@type": given(all.lowPrice) || given(all.highPrice) ? "AggregateOffer" : "Offer",
+    name: o.name,
+    description: o.description,
     price: all.price,
     lowPrice: all.lowPrice,
     highPrice: all.highPrice,
@@ -468,9 +474,10 @@ export const schema = {
   },
   /**
    * One `@graph` document from several nodes; each node's own `@context` is dropped in favour of a
-   * single top-level one. `null`, `undefined` and `false` entries are skipped, so `cond && node` works.
+   * single top-level one. `null`, `undefined`, `false`, `""` and `0` entries are skipped, so
+   * `cond && node` works. A readonly array is accepted.
    */
-  graph(nodes: Array<JsonLdNode | null | undefined | false>): JsonLdGraph {
+  graph(nodes: readonly (JsonLdNode | null | undefined | false | "" | 0)[]): JsonLdGraph {
     return {
       "@context": "https://schema.org",
       "@graph": (nodes ?? []).filter((n): n is JsonLdNode => Boolean(n)).map((n) => nested(n) as JsonLdNode),

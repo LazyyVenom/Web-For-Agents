@@ -710,3 +710,49 @@ describe("0.5: offers, breadcrumbs and unsafe keys", () => {
     expect(({} as any).polluted).toBeUndefined();
   });
 });
+
+describe("offer name and description", () => {
+  it("writes name and description on an Offer, for per-plan pricing", () => {
+    const n = schema.softwareApplication({
+      name: "App",
+      offers: [
+        { name: "Free", description: "For one person", price: 0, priceCurrency: "USD" },
+        { name: "Pro", price: 12, priceCurrency: "USD" },
+      ],
+    });
+    expect(n.offers).toEqual([
+      { "@type": "Offer", name: "Free", description: "For one person", price: 0, priceCurrency: "USD" },
+      { "@type": "Offer", name: "Pro", price: 12, priceCurrency: "USD" },
+    ]);
+  });
+
+  it("writes name and description on an AggregateOffer", () => {
+    const n = schema.product({ name: "p", offers: { name: "Team", description: "Per seat", lowPrice: 10, highPrice: 20, priceCurrency: "USD" } });
+    expect(n.offers).toEqual({ "@type": "AggregateOffer", name: "Team", description: "Per seat", lowPrice: 10, highPrice: 20, priceCurrency: "USD" });
+  });
+});
+
+describe("graph input types", () => {
+  it("accepts readonly arrays, spreads of builder results and falsy cond && node entries", () => {
+    const org = schema.organization({ name: "O", url: "https://a.com" });
+    const site = schema.webSite({ name: "S", url: "https://a.com" });
+    const extra: Array<ReturnType<typeof schema.webPage>> = [schema.webPage({ name: "P", url: "https://a.com/p" })];
+    const shared = [org, site] as const;
+    const label = "" as string;
+    const count = 0 as number;
+    expect(schema.graph([org, site, ...extra])["@graph"]).toHaveLength(3);
+    expect(schema.graph(shared)["@graph"]).toHaveLength(2);
+    expect(schema.graph(Object.freeze([org, null, undefined, false]))["@graph"]).toHaveLength(1);
+    expect(schema.graph([org, label && site, count && site])["@graph"]).toHaveLength(1);
+  });
+
+  it("still rejects values that are not nodes", () => {
+    const loose: unknown[] = [];
+    // @ts-expect-error unknown[] is not a list of nodes
+    schema.graph(loose);
+    // @ts-expect-error a string is not a node
+    schema.graph(["https://a.com"]);
+    // @ts-expect-error true is not a node
+    schema.graph([true]);
+  });
+});
