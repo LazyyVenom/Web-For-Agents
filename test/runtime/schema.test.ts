@@ -302,11 +302,32 @@ describe("0.4: @id, refs and extra fields", () => {
       name: "P",
       url: "u",
       id: "#p",
-      extra: { "@type": "Hack", "@context": "x", name: "Q", inLanguage: "en", description: undefined, primaryImageOfPage: null },
+      // Untyped (CMS) data can still carry them at runtime; the type rejects them (see below).
+      extra: JSON.parse('{"@type":"Hack","@context":"x","name":"Q","inLanguage":"en","primaryImageOfPage":null}') as Record<string, unknown>,
     });
     expect(n).toEqual({ "@context": C, "@type": "WebPage", "@id": "#p", name: "Q", url: "u", inLanguage: "en" });
+    // @ts-expect-error extra cannot set @type
     expect(schema.faqPage([], { extra: { "@type": "X", about: "y" } })).toEqual({ "@context": C, "@type": "FAQPage", mainEntity: [], about: "y" });
     expect(schema.profilePage({ name: "N", extra: { name: undefined } })).toEqual({ "@context": C, "@type": "ProfilePage" });
+  });
+
+  it("extra cannot override an explicit id; without id, extra @id is used", () => {
+    expect(schema.person({ name: "A", id: "#a", extra: { "@id": "#b" } })["@id"]).toBe("#a");
+    expect(schema.person({ name: "A", extra: { "@id": "#b" } })["@id"]).toBe("#b");
+  });
+
+  it("ref throws a TypeError on a missing or empty id", () => {
+    expect(() => schema.ref("")).toThrow(TypeError);
+    expect(() => schema.ref(undefined as unknown as string)).toThrow(TypeError);
+    expect(() => schema.ref("   ")).toThrow(TypeError);
+    expect(schema.ref("#me")).toEqual({ "@id": "#me" });
+  });
+
+  it("the extra type rejects @type and @context keys", () => {
+    // @ts-expect-error @context is not allowed in extra
+    schema.person({ name: "A", extra: { "@context": "x" } });
+    const ok: Record<string, unknown> = { knowsAbout: ["x"] };
+    expect(schema.person({ name: "A", extra: ok }).knowsAbout).toEqual(["x"]);
   });
 
   it("extra skips __proto__, so the node keeps Object.prototype", () => {

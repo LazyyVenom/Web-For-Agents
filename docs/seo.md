@@ -73,14 +73,14 @@ Search engines truncate long titles and descriptions, and very short description
 - `schema.creativeWork`: `name`, `description`, `url`, `image`, `author`, `dateCreated`, `keywords` (a string or array, written comma-separated), `genre` (a string or array)
 - `schema.webPage`: `name`, `url`, `description`, `breadcrumb` (a `schema.breadcrumbList` node or a ref), `isPartOf` (usually a ref to the `WebSite`)
 - `schema.graph(nodes)`: combines nodes into one `@graph` document with a single `@context`; nested nodes lose their own `@context`. `null`, `undefined` and `false` entries are skipped, so `cond && node` works.
-- `schema.ref(id)`: `{ "@id": id }`, a pointer to a node defined elsewhere.
+- `schema.ref(id)`: `{ "@id": id }`, a pointer to a node defined elsewhere. A missing or empty `id` throws a `TypeError`.
 
 Fields left `undefined` or `null` are omitted from every builder, including nested ones: `schema.profilePage({ mainEntity: undefined })` gives a `ProfilePage` without `mainEntity` rather than throwing. `author`, `brand`, `worksFor`, `mainEntity`, `breadcrumb`, `isPartOf`, `publisher` and `logo` also take a node or a ref. Wherever a node is nested, its own `@context` is dropped.
 
 Every builder takes two more options (in its input object; `faqPage` and `breadcrumbList` take them as a second argument):
 
-- `id`: written as `"@id"`, so other nodes can point at this one with `schema.ref(id)`.
-- `extra`: any other schema.org properties, merged in last, so they override the typed fields. `@type` and `@context` cannot be overridden, and a `__proto__` key is ignored. Values can be nodes, refs, arrays or plain objects; a node nested anywhere in them loses its own `@context`.
+- `id`: written as `"@id"`, so other nodes can point at this one with `schema.ref(id)`. When `id` is given, `extra["@id"]` is ignored.
+- `extra`: any other schema.org properties, merged in last, so they override the typed fields. `@type` and `@context` cannot be overridden (the `JsonLdExtra` type rejects them; untyped data is filtered at runtime), and a `__proto__` key is ignored. Values can be nodes, refs, arrays or plain objects; a node nested anywhere in them loses its own `@context`.
 
 ```ts
 const site = "https://example.com";

@@ -32,11 +32,15 @@ export interface JsonLdNodeOptions {
   id?: string;
   /**
    * Extra schema.org properties merged in last (they override the typed fields). `@type` and
-   * `@context` cannot be overridden, and a `__proto__` key is ignored. Nodes and refs are allowed
+   * `@context` cannot be overridden (the type rejects them too), `extra["@id"]` is ignored when `id`
+   * is given, and a `__proto__` key is ignored. Nodes and refs are allowed
    * as values; a nested node's own `@context` is dropped, at any depth.
    */
-  extra?: Record<string, unknown>;
+  extra?: JsonLdExtra;
 }
+
+/** `extra` fields: any keys except `@type` and `@context`, which the builder owns. */
+export type JsonLdExtra = Record<string, unknown> & { "@type"?: never; "@context"?: never };
 
 /** A node or a ref to one. */
 type Embeddable = JsonLdNode | JsonLdRef;
@@ -88,7 +92,8 @@ function node(type: string, fields: Record<string, unknown>, options: JsonLdNode
   }
   for (const [k, v] of Object.entries(options.extra ?? {})) {
     // "__proto__" would replace the node's prototype instead of adding a property.
-    if (k === "@type" || k === "@context" || k === "__proto__") continue;
+    // An explicit `id` option wins over extra["@id"].
+    if (k === "@type" || k === "@context" || k === "__proto__" || (k === "@id" && options.id !== undefined)) continue;
     const e = embed(v);
     if (e === undefined) delete out[k];
     else out[k] = e;
@@ -135,6 +140,7 @@ function split<T extends JsonLdNodeOptions>(i: T): [Omit<T, "id" | "extra">, Jso
 export const schema = {
   /** `{ "@id": id }`: points at a node defined elsewhere, for example in the same `schema.graph`. */
   ref(id: string): JsonLdRef {
+    if (typeof id !== "string" || id.trim() === "") throw new TypeError("schema.ref: id must be a non-empty string");
     return { "@id": id };
   },
   article(
