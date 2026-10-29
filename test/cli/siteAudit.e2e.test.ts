@@ -259,6 +259,74 @@ describe("audit --sitemap", () => {
     expect(text.err).toContain("1 of 2 pages failed to load");
   });
 
+  it("an entry URL that redirects to another origin (apex to www) adopts that origin for the run", async () => {
+    // `apex` redirects every request to `www`; the site was built for apex, so its files list apex URLs.
+    let apexUrl = "";
+    const www = await site(() => ({
+      ...siteFiles(`${apexUrl}/sitemap.xml`),
+      "/sitemap.xml": { headers: xmlH, body: urlset([`${apexUrl}/`, `${apexUrl}/docs`, "https://elsewhere.example/x"]) },
+    }), { headers: htmlH, body: spaShell });
+    const apex = await site(() => ({}), (req, res) => {
+      res.writeHead(301, { location: `${www.url}${req.url}` });
+      res.end();
+    });
+    apexUrl = apex.url;
+    const { code, out } = await run(["audit", apex.url + "/", "--sitemap", "--json"]);
+    expect(code).toBe(0);
+    const report = JSON.parse(out) as SiteJson & { summary: { resolvedOrigin?: string } };
+    expect(report.summary.resolvedOrigin).toBe(www.url);
+    expect(report.site.origin).toBe(www.url);
+    expect(report.site.notes).toEqual([`${apex.url}/ redirects to ${www.url}/; auditing ${www.url}`]);
+    expect(report.pages.map((p) => p.url)).toEqual([`${www.url}/`, `${www.url}/docs`]);
+    expect(report.site.skipped.map((k) => k.url)).toEqual(["https://elsewhere.example/x"]);
+    // Only the entry request goes to the given origin; everything else goes to the resolved one.
+    expect([...apex.hits.values()].reduce((a, b) => a + b, 0)).toBe(1);
+    for (const p of report.pages) expect(p.score).toBe((await audit(p.url, { timeoutMs: 5000 })).score);
+
+    const text = await run(["audit", apex.url, "--sitemap"]);
+    expect(text.out).toContain(`Note: ${apex.url}/ redirects to ${www.url}/; auditing ${www.url}`);
+  });
+
+  it("with --site-url and a redirecting entry, both the given and the --site-url origin map to the resolved origin", async () => {
+    const PROD = "https://prod.example";
+    let apexUrl = "";
+    const www = await site(() => ({
+      ...siteFiles(),
+      "/sitemap.xml": { headers: xmlH, body: urlset([`${PROD}/a`, `${apexUrl}/b`]) },
+    }), { headers: htmlH, body: spaShell });
+    const apex = await site(() => ({}), (req, res) => {
+      res.writeHead(308, { location: `${www.url}${req.url}` });
+      res.end();
+    });
+    apexUrl = apex.url;
+    const { out } = await run(["audit", apex.url, "--sitemap", "--site-url", PROD, "--json"]);
+    const report = JSON.parse(out) as SiteJson;
+    expect(report.pages.map((p) => p.url)).toEqual([`${www.url}/a`, `${www.url}/b`]);
+    expect(report.site.notes).toEqual([`${apex.url}/ redirects to ${www.url}/; auditing ${www.url}`, `mapped ${PROD} → ${www.url}`]);
+  });
+
+  it("an entry that redirects to an unrelated host is followed, as a single-page audit does", async () => {
+    const unrelated = await site((base) => ({
+      ...siteFiles(),
+      "/sitemap.xml": { headers: xmlH, body: urlset([`${base}/landing`]) },
+    }), { headers: htmlH, body: spaShell });
+    const given = await site(() => ({ "/": { status: 302, headers: { location: `${unrelated.url}/landing` } } }));
+    const single = await run(["audit", given.url, "--json"]);
+    expect(JSON.parse(single.out).finalUrl).toBe(`${unrelated.url}/landing`);
+    const { out } = await run(["audit", given.url, "--sitemap", "--json"]);
+    const report = JSON.parse(out) as SiteJson & { summary: { resolvedOrigin?: string } };
+    expect(report.summary.resolvedOrigin).toBe(unrelated.url);
+    expect(report.pages.map((p) => p.url)).toEqual([`${unrelated.url}/landing`]);
+  });
+
+  it("an unreachable entry URL is a fatal error", async () => {
+    const s = await site(() => ({}));
+    const url = s.url;
+    const gone = await run(["audit", url.replace(/:\d+$/, ":1"), "--sitemap", "--json", "--timeout", "2000"]);
+    expect(gone.code).toBe(2);
+    expect((JSON.parse(gone.out) as SiteJson).site.error).toMatch(/^no pages to audit: .* could not be loaded \(network error/);
+  });
+
   it("reads Content-Encoding: gzip sitemaps and skips raw .gz files with a clear message", async () => {
     const { gzipSync } = await import("node:zlib");
     const s = await site((base) => ({

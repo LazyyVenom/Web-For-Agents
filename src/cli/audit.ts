@@ -80,6 +80,9 @@ export function createAuditContext(hooks: AuditHooks = {}, sameOriginRedirects =
   };
 }
 
+/** Accept header for page requests. @internal */
+export const HTML_ACCEPT = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5";
+
 /** A fetch with the audit's options; `cached` reuses the context's site file fetches. @internal */
 export type AuditGet = (u: string, accept?: string, cached?: boolean) => Promise<FetchResult>;
 
@@ -245,7 +248,7 @@ export async function auditWithHooks(
   /** Site files: fetched once per context, so a site audit fetches each one once. */
   const getSite = (u: string): Promise<FetchResult> => get(u, undefined, true);
   try {
-    const page = await get(url, "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5");
+    const page = await get(url, HTML_ACCEPT);
     report.finalUrl = page.finalUrl;
     report.redirected = page.redirected;
     const fatal =

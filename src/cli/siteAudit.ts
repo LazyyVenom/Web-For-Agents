@@ -2,6 +2,7 @@ import { ROBOTS_PATH, SITEMAP_PATH } from "../shared/conventions";
 import { errorMessage } from "../shared/errors";
 import { tryResolveUrl } from "../shared/url";
 import {
+  HTML_ACCEPT,
   auditFetcher,
   auditWithHooks,
   createAuditContext,
@@ -75,6 +76,8 @@ export interface SiteAuditReport {
     maxPages: number;
     /** --max-pages left listed pages unaudited, or sitemap files unread. */
     limited: boolean;
+    /** The origin audited, when the entry URL redirected to another one. */
+    resolvedOrigin?: string;
     min: number | null;
     average: number | null;
     /** Pages that failed to load (scored 0). */
@@ -132,10 +135,9 @@ export function auditSite(url: string, opts: SiteAuditOptions = {}): Promise<Sit
 export async function auditSiteWithHooks(url: string, opts: SiteAuditOptions = {}, hooks: AuditHooks = {}): Promise<SiteAuditReport> {
   const maxPages = opts.maxPages ?? DEFAULT_SITE_MAX_PAGES;
   const concurrency = opts.concurrency ?? DEFAULT_SITE_CONCURRENCY;
-  const origin = new URL(url).origin;
-  const robotsUrl = origin + ROBOTS_PATH;
+  const givenOrigin = new URL(url).origin;
   const report: SiteAuditReport = {
-    site: { url, origin, robots: robotsUrl, sitemaps: [], skipped: [], skippedTotal: 0 },
+    site: { url, origin: givenOrigin, robots: givenOrigin + ROBOTS_PATH, sitemaps: [], skipped: [], skippedTotal: 0 },
     pages: [],
     summary: { audited: 0, listed: 0, maxPages, limited: false, min: null, average: null, errors: 0, belowMinScore: 0 },
   };
@@ -154,8 +156,6 @@ export async function auditSiteWithHooks(url: string, opts: SiteAuditOptions = {
       return fail(errorMessage(e));
     }
   }
-  const note = mappingNote(siteOrigin, origin);
-  if (note !== undefined) site.notes = [note];
   const warnings = new Set<string>();
   const warn = (w: string): void => {
     warnings.add(w);
@@ -163,7 +163,30 @@ export async function auditSiteWithHooks(url: string, opts: SiteAuditOptions = {
   };
   const ctx = createAuditContext(hooks, true);
   const get = auditFetcher(opts, ctx, warn);
-  const mapUrl = siteUrlMapper(siteOrigin, origin);
+
+  // The entry URL is followed like a single-page audit follows it (any host, the usual redirect and
+  // private-address rules), and its final origin is the audit origin for the whole run: apex -> www
+  // and http -> https redirects are common. After this, no request leaves that origin.
+  const entry = await auditFetcher(opts, { ...ctx, sameOriginRedirects: false }, warn)(url, HTML_ACCEPT);
+  if (entry.status === 0 && entry.error !== undefined) {
+    return fail(`no pages to audit: ${url} could not be loaded (${entry.error})`);
+  }
+  const origin = new URL(entry.finalUrl).origin;
+  const notes: string[] = [];
+  if (origin !== givenOrigin) {
+    notes.push(`${url} redirects to ${entry.finalUrl}; auditing ${origin}`);
+    report.summary.resolvedOrigin = origin;
+    site.origin = origin;
+    site.robots = origin + ROBOTS_PATH;
+  }
+  const note = mappingNote(siteOrigin, origin);
+  if (note !== undefined) notes.push(note);
+  if (notes.length > 0) site.notes = notes;
+  const robotsUrl = site.robots;
+  // URLs on the given origin and on the --site-url origin both mean the same path on the audit origin.
+  const mapGiven = siteUrlMapper(givenOrigin, origin);
+  const mapSite = siteUrlMapper(siteOrigin, origin);
+  const mapUrl = (u: string): string => mapSite(mapGiven(u));
 
   const skip = (u: string, reason: string): void => {
     site.skippedTotal++;

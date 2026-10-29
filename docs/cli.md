@@ -92,7 +92,8 @@ How pages are found:
 - The sitemap comes from the `Sitemap:` lines in `robots.txt`, or `/sitemap.xml` if there are none. One level of sitemap index is followed. An index inside an index is reported and not followed. At most 50 sitemap files are read.
 - Only `<loc>` URLs are audited, in sitemap order, with duplicates removed. `hreflang` alternates (`<xhtml:link>`) are not audited, so list each language's pages as their own `<loc>` entries. `/docs` and `/docs/` are different URLs, so both are audited if both are listed.
 - Only URLs on the audited origin are audited. With `--site-url`, URLs on that origin are mapped to the audited origin first, as in a single-page audit. Every other URL, and every sitemap on another origin, is skipped, listed in a `Skipped` line (`site.skipped` in JSON) and never fetched.
-- Page redirects on the same origin are followed. A redirect to another origin is not followed: the page fails to load with an error that names the target. Pass the origin the site really serves (for example `https://www.example.com` if `example.com` redirects there).
+- The URL you pass is loaded first and its redirects are followed, as in a single-page audit (any host, the usual redirect limits and `--no-private-redirects`). If it ends on another origin, such as `example.com` → `www.example.com` or `http` → `https`, that origin is audited for the whole run, and the report starts with `Note: https://example.com/ redirects to https://www.example.com/; auditing https://www.example.com` (`summary.resolvedOrigin` in JSON). Sitemap URLs on the origin you passed are then mapped to the audited origin, like `--site-url` URLs. An unreachable URL is a fatal error.
+- After that, page redirects on the audited origin are followed. A redirect to any other origin is not followed: the page fails to load with an error that names the target.
 - A sitemap sent with `Content-Encoding: gzip` is read like any other. A raw `.xml.gz` file is skipped with a warning; serve it uncompressed or with `Content-Encoding: gzip`.
 - Each file is read up to the usual 5 MiB limit, with the usual `--timeout`. A sitemap cut at the limit gives a warning, and only the entries read are used.
 - With more pages than `--max-pages`, the first ones are audited and the report says `Only the first 50 of 3000 listed pages were audited (--max-pages 50).`
@@ -105,7 +106,7 @@ Exit codes with `--sitemap`: `0` ok, `1` when any page is below `--min-score` or
 
 - `site`: `url`, `origin`, `robots`, `sitemaps` (each with `url`, `kind`, `locs`, and `error` or `truncated` when set), `skipped` (up to 20 `{ url, reason }`), `skippedTotal`, and `notes`, `warnings`, `error` and `fix` when set.
 - `pages`: `{ url, score, checks }` per page, with `redirectedTo` and `error` when set.
-- `summary`: `audited`, `listed`, `maxPages`, `limited`, `min`, `average`, `errors`, `belowMinScore`, and `minScore` when given.
+- `summary`: `audited`, `listed`, `maxPages`, `limited`, `min`, `average`, `errors`, `belowMinScore`, `minScore` when given, and `resolvedOrigin` when the URL you passed redirected to another origin.
 
 ### In CI
 
